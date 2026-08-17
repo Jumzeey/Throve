@@ -1,98 +1,201 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { DepartmentChips } from '@/components/ui/department-chips';
+import { ListingCard } from '@/components/ui/listing-card';
+import { ListingGrid } from '@/components/ui/listing-grid';
+import { PlaceholderImage } from '@/components/ui/placeholder-image';
+import { Palette } from '@/constants/theme';
+import { DEPARTMENTS, getAvailableListings, LIVE_SESSIONS } from '@/data/seed';
+import { useRouter } from 'expo-router';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+const DEPARTMENT_CHIPS = [{ label: 'All', value: '' }, ...DEPARTMENTS.map((department) => ({ label: department, value: department }))];
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const listings = getAvailableListings().slice(0, 8);
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  return (
+    <View style={[styles.screen, { paddingTop: insets.top }]}>
+      <View style={styles.header}>
+        <Text style={styles.brand}>Throve</Text>
+        <Pressable onPress={() => router.push('/search')} hitSlop={12}>
+          <Text style={styles.search}>🔍</Text>
+        </Pressable>
+      </View>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {LIVE_SESSIONS.length > 0 ? (
+          <View style={styles.liveBlock}>
+            <View style={styles.liveHeader}>
+              <Text style={styles.section}>Live Now & Upcoming</Text>
+              <Pressable onPress={() => router.push('/(tabs)/live')}>
+                <Text style={styles.seeAll}>See all ›</Text>
+              </Pressable>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.liveRow}>
+              {LIVE_SESSIONS.map((session) => (
+                <Pressable key={session.id} onPress={() => router.push('/(tabs)/live')} style={styles.liveCard}>
+                  <View style={styles.liveImageWrap}>
+                    <PlaceholderImage style={styles.liveImage} />
+                    <View style={[styles.badge, session.status === 'live' ? styles.liveBadge : styles.upcomingBadge]}>
+                      <Text style={[styles.badgeText, session.status === 'live' ? styles.liveBadgeText : styles.upcomingBadgeText]}>
+                        {session.status === 'live' ? 'LIVE' : 'UPCOMING'}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.liveTitle}>{session.title}</Text>
+                  <Text style={styles.liveHost}>@{session.host}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
+
+        <Text style={[styles.section, styles.browseLabel]}>Browse</Text>
+        <View style={styles.chips}>
+          <DepartmentChips
+            chips={DEPARTMENT_CHIPS}
+            selected="__none__"
+            onSelect={(value) =>
+              router.push({ pathname: '/category-browse', params: { department: value } })
+            }
+          />
+        </View>
+
+        {listings.length === 0 ? (
+          <Text style={styles.empty}>No new listings.</Text>
+        ) : (
+          <View style={styles.grid}>
+            <ListingGrid
+              listings={listings.map((listing) => (
+                <ListingCard
+                  key={listing.id}
+                  listing={listing}
+                  onPress={() => router.push(`/product/${listing.id}`)}
+                />
+              ))}
+            />
+          </View>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  screen: {
+    flex: 1,
+    backgroundColor: Palette.background,
+  },
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 10,
   },
-  stepContainer: {
-    gap: 8,
+  brand: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: Palette.text,
+  },
+  search: {
+    fontSize: 18,
+    color: Palette.text,
+  },
+  content: {
+    paddingBottom: 24,
+  },
+  liveBlock: {
+    paddingHorizontal: 20,
+    paddingBottom: 8,
+  },
+  liveHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 8,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
+  section: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Palette.text,
+  },
+  seeAll: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Palette.muted2,
+  },
+  liveRow: {
+    gap: 12,
+    paddingBottom: 4,
+  },
+  liveCard: {
+    width: 140,
+  },
+  liveImageWrap: {
+    width: 140,
+    height: 180,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  liveImage: {
+    width: '100%',
+    height: '100%',
+  },
+  badge: {
     position: 'absolute',
+    top: 6,
+    left: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 5,
+  },
+  liveBadge: {
+    backgroundColor: Palette.live,
+  },
+  upcomingBadge: {
+    backgroundColor: Palette.chipBg,
+  },
+  badgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  liveBadgeText: {
+    color: Palette.background,
+  },
+  upcomingBadgeText: {
+    color: Palette.muted,
+  },
+  liveTitle: {
+    marginTop: 6,
+    fontSize: 12,
+    fontWeight: '600',
+    color: Palette.text,
+  },
+  liveHost: {
+    fontSize: 11,
+    color: Palette.muted2,
+  },
+  browseLabel: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    marginBottom: 8,
+  },
+  chips: {
+    paddingLeft: 20,
+    paddingBottom: 12,
+  },
+  grid: {
+    paddingHorizontal: 20,
+    paddingTop: 4,
+  },
+  empty: {
+    paddingHorizontal: 20,
+    paddingTop: 40,
+    textAlign: 'center',
+    fontSize: 13,
+    color: Palette.muted3,
   },
 });
