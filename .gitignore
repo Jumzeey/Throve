@@ -19,6 +19,10 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
+# Google Play / Cloud service account keys
+support-files/*.json
+throve-*-*.json
+
 # Metro
 .metro-health-check*
 

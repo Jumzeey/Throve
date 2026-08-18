@@ -8,9 +8,9 @@
 # 3. iOS signing — add an App Store Connect API key under Team integrations > Developer Portal
 #    with the name `throve`, then add a distribution certificate and App Store profile
 #    for bundle id `com.throve.app`.
-# 4. Optional store publishing: create a `google_play` env group with
-#    GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS, set APP_STORE_APPLE_ID, then uncomment
-#    the publishing blocks below.
+# 4. Android Play publishing: create a `google_play` env group with secret
+#    GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS (the Play service-account JSON).
+#    iOS: set APP_STORE_APPLE_ID, then uncomment the iOS publishing block.
 #
 # Docs: https://docs.codemagic.io/yaml-quick-start/building-a-react-native-app/
 
@@ -23,8 +23,8 @@ workflows:
       node: 22.13.1
       android_signing:
         - throve_keystore
-      # groups:
-      #   - google_play
+      groups:
+        - google_play
       vars:
         PACKAGE_NAME: "com.throve.app"
     scripts:
@@ -57,17 +57,11 @@ workflows:
             -PversionName=1.0.$UPDATED_BUILD_NUMBER
     artifacts:
       - android/app/build/outputs/**/*.aab
-    # publishing:
-    #   email:
-    #     recipients:
-    #       - you@example.com
-    #     notify:
-    #       success: true
-    #       failure: true
-    #   google_play:
-    #     credentials: $GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS
-    #     track: internal
-    #     submit_as_draft: true
+    publishing:
+      google_play:
+        credentials: $GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS
+        track: alpha
+        submit_as_draft: true
 
   react-native-ios:
     name: React Native iOS
