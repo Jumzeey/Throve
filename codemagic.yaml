@@ -4,7 +4,7 @@
 # In the Codemagic UI:
 # 1. Add this repository as a React Native app, then scan for this file.
 # 2. Android signing — Team settings > codemagic.yaml settings > Code signing identities:
-#    upload a keystore and set its Reference name to `throve_keystore`.
+#    upload a keystore and set its Reference name to `throve`.
 # 3. Android Play publishing: create a `google_play` env group with secret
 #    GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS (the Play service-account JSON).
 #
@@ -18,7 +18,7 @@ workflows:
     environment:
       node: 22.13.1
       android_signing:
-        - throve_keystore
+        - throve
       groups:
         - google_play
       vars:
