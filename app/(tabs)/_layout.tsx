@@ -1,12 +1,16 @@
 import { HapticTab } from '@/components/haptic-tab';
+import { SplashScreen } from '@/components/ui/splash-screen';
 import { Palette } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import { SplashScreen } from '@/components/ui/splash-screen';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, Tabs } from 'expo-router';
-import { StyleSheet, View } from 'react-native';
+import { type ComponentProps } from 'react';
+import { StyleSheet } from 'react-native';
 
-function TabDot({ focused }: { focused: boolean }) {
-  return <View style={[styles.dot, focused ? styles.dotOn : styles.dotOff]} />;
+type IconName = ComponentProps<typeof Ionicons>['name'];
+
+function TabIcon({ focused, color, outline, filled }: { focused: boolean; color: string; outline: IconName; filled: IconName }) {
+  return <Ionicons name={focused ? filled : outline} size={22} color={color} />;
 }
 
 export default function TabLayout() {
@@ -36,35 +40,43 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ focused }) => <TabDot focused={focused} />,
+          tabBarIcon: ({ color, focused }) => <TabIcon focused={focused} color={color} outline="home-outline" filled="home" />,
         }}
       />
       <Tabs.Screen
         name="live"
         options={{
           title: 'Live',
-          tabBarIcon: ({ focused }) => <TabDot focused={focused} />,
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon focused={focused} color={color} outline="videocam-outline" filled="videocam" />
+          ),
         }}
       />
       <Tabs.Screen
         name="sell"
         options={{
           title: 'Sell',
-          tabBarIcon: ({ focused }) => <TabDot focused={focused} />,
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon focused={focused} color={color} outline="add-circle-outline" filled="add-circle" />
+          ),
         }}
       />
       <Tabs.Screen
         name="inbox"
         options={{
           title: 'Inbox',
-          tabBarIcon: ({ focused }) => <TabDot focused={focused} />,
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon focused={focused} color={color} outline="chatbubble-ellipses-outline" filled="chatbubble-ellipses" />
+          ),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ focused }) => <TabDot focused={focused} />,
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon focused={focused} color={color} outline="person-outline" filled="person" />
+          ),
         }}
       />
     </Tabs>
@@ -80,17 +92,5 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 11,
     fontWeight: '600',
-  },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginBottom: 4,
-  },
-  dotOn: {
-    backgroundColor: Palette.text,
-  },
-  dotOff: {
-    backgroundColor: 'transparent',
   },
 });

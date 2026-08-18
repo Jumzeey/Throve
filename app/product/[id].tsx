@@ -1,14 +1,16 @@
 import { Button } from '@/components/ui/button';
-import { PlaceholderImage } from '@/components/ui/placeholder-image';
+import { PhotoPager } from '@/components/ui/photo-pager';
 import { Palette } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { getListing } from '@/data/seed';
 import { formatNaira } from '@/lib/format';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ProductScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { id } = useLocalSearchParams<{ id: string }>();
   const listing = id ? getListing(id) : undefined;
@@ -20,7 +22,7 @@ export default function ProductScreen() {
   if (!listing) {
     return (
       <View style={styles.screen}>
-        <Pressable onPress={() => router.back()} style={styles.missingBack}>
+        <Pressable onPress={() => router.back()} style={[styles.missingBack, { marginTop: insets.top + 12 }]}>
           <Text style={styles.backText}>←</Text>
         </Pressable>
         <Text style={styles.missing}>This listing is unavailable.</Text>
@@ -34,8 +36,8 @@ export default function ProductScreen() {
     <View style={styles.screen}>
       <ScrollView>
         <View>
-          <PlaceholderImage style={styles.hero} />
-          <Pressable onPress={() => router.back()} style={styles.backBtn}>
+          <PhotoPager count={listing.photoCount} />
+          <Pressable onPress={() => router.back()} style={[styles.backBtn, { top: insets.top + 8 }]}>
             <Text style={styles.backText}>←</Text>
           </Pressable>
           {statusLabel ? (
@@ -54,13 +56,14 @@ export default function ProductScreen() {
             <Chip label={listing.condition} />
             {listing.size && listing.size !== '—' ? <Chip label={`Size ${listing.size}`} /> : null}
             {listing.brand ? <Chip label={listing.brand} /> : null}
+            {listing.colour ? <Chip label={listing.colour} /> : null}
           </View>
           <Text style={styles.description}>{listing.description}</Text>
+          <Text style={styles.shipping}>{listing.shipping}</Text>
           <Text style={styles.seller}>Sold by @{listing.seller}</Text>
-          <Text style={styles.note}>Save, offers and checkout are coming next.</Text>
         </View>
       </ScrollView>
-      <View style={styles.actions}>
+      <View style={[styles.actions, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <Button label="Make offer" variant="secondary" disabled style={styles.action} />
         <Button label="Buy now" disabled style={styles.action} />
       </View>
@@ -80,10 +83,6 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: Palette.background,
-  },
-  hero: {
-    width: '100%',
-    aspectRatio: 1,
   },
   backBtn: {
     position: 'absolute',
@@ -163,16 +162,17 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: Palette.muted,
   },
+  shipping: {
+    marginTop: 12,
+    fontSize: 13,
+    lineHeight: 20,
+    color: Palette.muted2,
+  },
   seller: {
     marginTop: 16,
     fontSize: 13,
     fontWeight: '600',
     color: Palette.text,
-  },
-  note: {
-    marginTop: 8,
-    fontSize: 12,
-    color: Palette.muted3,
   },
   actions: {
     flexDirection: 'row',
@@ -192,7 +192,6 @@ const styles = StyleSheet.create({
     color: Palette.muted2,
   },
   missingBack: {
-    marginTop: 54,
     marginLeft: 20,
   },
 });

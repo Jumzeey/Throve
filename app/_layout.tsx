@@ -1,4 +1,6 @@
 import { AuthProvider, useAuth } from '@/context/auth-context';
+import { CheckoutProvider } from '@/context/checkout-context';
+import { LiveProvider } from '@/context/live-context';
 import { SplashScreen } from '@/components/ui/splash-screen';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -32,6 +34,8 @@ function RootNavigator() {
       <Stack.Screen name="search" />
       <Stack.Screen name="category-browse" />
       <Stack.Screen name="product/[id]" />
+      <Stack.Screen name="live" />
+      <Stack.Screen name="checkout" />
     </Stack>
   );
 }
@@ -39,10 +43,14 @@ function RootNavigator() {
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <ThemeProvider value={ThroveTheme}>
-        <RootNavigator />
-        <StatusBar style="dark" />
-      </ThemeProvider>
+      <LiveProvider>
+        <CheckoutProvider>
+          <ThemeProvider value={ThroveTheme}>
+            <RootNavigator />
+            <StatusBar style="dark" />
+          </ThemeProvider>
+        </CheckoutProvider>
+      </LiveProvider>
     </AuthProvider>
   );
 }

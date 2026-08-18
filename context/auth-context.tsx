@@ -23,17 +23,25 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 async function loadUsers(): Promise<UserProfile[]> {
   const raw = await AsyncStorage.getItem(USERS_KEY);
+  let parsed: UserProfile[];
   if (!raw) {
-    await AsyncStorage.setItem(USERS_KEY, JSON.stringify([DEMO_USER]));
-    return [DEMO_USER];
+    parsed = [DEMO_USER];
+    await AsyncStorage.setItem(USERS_KEY, JSON.stringify(parsed));
+  } else {
+    parsed = JSON.parse(raw) as UserProfile[];
+    if (!parsed.some((user) => user.email.toLowerCase() === DEMO_USER.email)) {
+      parsed = [DEMO_USER, ...parsed];
+      await AsyncStorage.setItem(USERS_KEY, JSON.stringify(parsed));
+    }
   }
-  const parsed = JSON.parse(raw) as UserProfile[];
-  if (!parsed.some((user) => user.email.toLowerCase() === DEMO_USER.email)) {
-    const next = [DEMO_USER, ...parsed];
-    await AsyncStorage.setItem(USERS_KEY, JSON.stringify(next));
-    return next;
+  return parsed.map(normalizeUser);
+}
+
+function normalizeUser(user: UserProfile): UserProfile {
+  if (user.email.toLowerCase() === DEMO_USER.email) {
+    return { ...user, canHostLive: true };
   }
-  return parsed;
+  return { ...user, canHostLive: false };
 }
 
 async function saveUsers(users: UserProfile[]) {

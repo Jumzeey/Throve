@@ -1,6 +1,8 @@
 export type Department = 'Women' | 'Men' | 'Kids';
 export type ListingStatus = 'available' | 'reserved' | 'sold' | 'draft' | 'hidden';
 export type LiveStatus = 'live' | 'upcoming' | 'ended';
+export type PriceBand = 'Under 15k' | '15k-30k' | 'Over 30k';
+export type SortOption = 'Newest' | 'Lowest price' | 'Highest price';
 
 export type Listing = {
   id: string;
@@ -14,7 +16,35 @@ export type Listing = {
   seller: string;
   status: ListingStatus;
   description: string;
+  shipping: string;
+  photoCount: number;
+  createdAt: string;
+  colour?: string;
   savedBy: string[];
+};
+
+export type ListingFilters = {
+  department: string;
+  category: string;
+  brand: string;
+  condition: string;
+  price: string;
+  sort: SortOption;
+};
+
+export type LiveConnection = 'live' | 'lost' | 'ended';
+
+export type LiveComment = {
+  id: string;
+  user: string;
+  text: string;
+};
+
+export type LiveClaim = {
+  sessionId: string;
+  listingId: string;
+  username: string;
+  expiresAt: number;
 };
 
 export type LiveSession = {
@@ -25,6 +55,9 @@ export type LiveSession = {
   viewers?: number;
   scheduledAt?: string;
   pinnedListingId?: string;
+  department?: Department;
+  description?: string;
+  featuredListingIds?: string[];
 };
 
 export type Review = {
@@ -32,6 +65,38 @@ export type Review = {
   rating: number;
   comment: string;
   date: string;
+};
+
+export type DeliveryMethod = 'Standard' | 'Express';
+
+export type Order = {
+  id: string;
+  listingId: string;
+  listingTitle: string;
+  buyer: string;
+  seller: string;
+  name: string;
+  address: string;
+  city: string;
+  phone: string;
+  deliveryMethod: DeliveryMethod;
+  deliveryFee: number;
+  itemPrice: number;
+  total: number;
+  fromLiveId: string | null;
+  createdAt: string;
+};
+
+export type CheckoutDraft = {
+  listingId: string;
+  liveSessionId: string | null;
+  buyer: string;
+  name: string;
+  address: string;
+  city: string;
+  phone: string;
+  deliveryMethod: DeliveryMethod;
+  expiresAt: number;
 };
 
 export type UserProfile = {
@@ -44,4 +109,5 @@ export type UserProfile = {
   location: string;
   photoUri?: string;
   setupComplete: boolean;
+  canHostLive?: boolean;
 };

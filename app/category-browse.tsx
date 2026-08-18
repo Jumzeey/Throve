@@ -1,10 +1,14 @@
 import { DepartmentChips } from '@/components/ui/department-chips';
+import { FiltersButton } from '@/components/ui/filters-button';
+import { FiltersSheet } from '@/components/ui/filters-sheet';
 import { ListingCard } from '@/components/ui/listing-card';
 import { ListingGrid } from '@/components/ui/listing-grid';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { Palette } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import { DEPARTMENTS, getAvailableListings, getCategoriesForDepartment } from '@/data/seed';
+import { DEFAULT_FILTERS, filterListings } from '@/data/filter-listings';
+import { DEPARTMENTS, getCategoriesForDepartment } from '@/data/seed';
+import type { ListingFilters } from '@/data/types';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -17,6 +21,8 @@ export default function CategoryBrowseScreen() {
   const params = useLocalSearchParams<{ department?: string }>();
   const [department, setDepartment] = useState(params.department ?? '');
   const [category, setCategory] = useState('');
+  const [filters, setFilters] = useState<ListingFilters>(DEFAULT_FILTERS);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   const categoryChips = useMemo(() => {
     const cats = getCategoriesForDepartment(department);
@@ -25,12 +31,15 @@ export default function CategoryBrowseScreen() {
   }, [department]);
 
   const listings = useMemo(() => {
-    return getAvailableListings().filter((listing) => {
-      if (department && listing.department !== department) return false;
-      if (category && listing.category !== category) return false;
-      return true;
+    return filterListings(undefined, {
+      department,
+      category,
+      brand: filters.brand,
+      condition: filters.condition,
+      price: filters.price,
+      sort: filters.sort,
     });
-  }, [category, department]);
+  }, [category, department, filters]);
 
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
@@ -56,23 +65,33 @@ export default function CategoryBrowseScreen() {
       ) : null}
       <View style={styles.countRow}>
         <Text style={styles.count}>{listings.length} items</Text>
+        <FiltersButton onPress={() => setSheetOpen(true)} />
       </View>
       <ScrollView contentContainerStyle={styles.body}>
         {listings.length === 0 ? (
           <Text style={styles.empty}>No items in this category yet.</Text>
         ) : (
           <ListingGrid
-            listings={listings.map((listing) => (
+            listings={listings.map((item) => (
               <ListingCard
-                key={listing.id}
-                listing={listing}
+                key={item.id}
+                listing={item}
                 meta="condition"
-                onPress={() => router.push(`/product/${listing.id}`)}
+                onPress={() => router.push(`/product/${item.id}`)}
               />
             ))}
           />
         )}
       </ScrollView>
+      <FiltersSheet
+        visible={sheetOpen}
+        value={{ ...filters, department, category }}
+        onClose={() => setSheetOpen(false)}
+        onApply={(next) => {
+          setFilters({ ...next, department: '', category: '' });
+          setSheetOpen(false);
+        }}
+      />
     </View>
   );
 }
@@ -87,6 +106,9 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   countRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingBottom: 10,
   },

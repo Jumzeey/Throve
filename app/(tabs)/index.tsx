@@ -3,7 +3,9 @@ import { ListingCard } from '@/components/ui/listing-card';
 import { ListingGrid } from '@/components/ui/listing-grid';
 import { PlaceholderImage } from '@/components/ui/placeholder-image';
 import { Palette } from '@/constants/theme';
-import { DEPARTMENTS, getAvailableListings, LIVE_SESSIONS } from '@/data/seed';
+import { filterListings } from '@/data/filter-listings';
+import { DEPARTMENTS } from '@/data/seed';
+import { useLive } from '@/context/live-context';
 import { useRouter } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,7 +15,9 @@ const DEPARTMENT_CHIPS = [{ label: 'All', value: '' }, ...DEPARTMENTS.map((depar
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const listings = getAvailableListings().slice(0, 8);
+  const listings = filterListings().slice(0, 8);
+  const { liveNow, upcoming } = useLive();
+  const homeSessions = [...liveNow, ...upcoming];
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -24,7 +28,7 @@ export default function HomeScreen() {
         </Pressable>
       </View>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {LIVE_SESSIONS.length > 0 ? (
+        {homeSessions.length > 0 ? (
           <View style={styles.liveBlock}>
             <View style={styles.liveHeader}>
               <Text style={styles.section}>Live Now & Upcoming</Text>
@@ -33,8 +37,13 @@ export default function HomeScreen() {
               </Pressable>
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.liveRow}>
-              {LIVE_SESSIONS.map((session) => (
-                <Pressable key={session.id} onPress={() => router.push('/(tabs)/live')} style={styles.liveCard}>
+              {homeSessions.map((session) => (
+                <Pressable
+                  key={session.id}
+                  onPress={() =>
+                    session.status === 'live' ? router.push(`/live/${session.id}`) : router.push('/(tabs)/live')
+                  }
+                  style={styles.liveCard}>
                   <View style={styles.liveImageWrap}>
                     <PlaceholderImage style={styles.liveImage} />
                     <View style={[styles.badge, session.status === 'live' ? styles.liveBadge : styles.upcomingBadge]}>
