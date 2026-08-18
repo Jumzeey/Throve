@@ -1,8 +1,8 @@
 import { SimulatedStage, listingStatusStyle } from '@/components/ui/simulated-stage';
 import { Palette } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
+import { useListings } from '@/context/listings-context';
 import { useLive } from '@/context/live-context';
-import { getListing } from '@/data/seed';
 import { Redirect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -12,6 +12,7 @@ export default function LiveBroadcastScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
+  const { getListing } = useListings();
   const live = useLive();
 
   if (!session) {

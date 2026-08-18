@@ -1,4 +1,4 @@
-import type { Department, Listing, LiveComment, LiveSession, Review, UserProfile } from '@/data/types';
+import type { Department, Listing, LiveComment, LiveSession, Order, Review, UserProfile } from '@/data/types';
 
 export const DEPARTMENTS: Department[] = ['Women', 'Men', 'Kids'];
 
@@ -16,13 +16,13 @@ export const CONDITIONS = [
   'Satisfactory',
 ];
 
-const SHIPPING = 'Buyer pays shipping · 3–5 days within Nigeria';
+export const DEFAULT_SHIPPING = 'Buyer pays shipping · 3–5 days within Nigeria';
 
 function listing(
   item: Omit<Listing, 'shipping' | 'photoCount' | 'savedBy'> & Partial<Pick<Listing, 'shipping' | 'photoCount' | 'savedBy' | 'colour'>>,
 ): Listing {
   return {
-    shipping: SHIPPING,
+    shipping: DEFAULT_SHIPPING,
     photoCount: 3,
     savedBy: [],
     ...item,
@@ -62,6 +62,7 @@ export const LISTINGS: Listing[] = [
     colour: 'White / grey',
     photoCount: 5,
     createdAt: '2026-08-08',
+    savedBy: ['ada.thrifts'],
   }),
   listing({
     id: 'l3',
@@ -110,6 +111,7 @@ export const LISTINGS: Listing[] = [
     colour: 'Tan',
     photoCount: 4,
     createdAt: '2026-08-05',
+    savedBy: ['ada.thrifts'],
   }),
   listing({
     id: 'l6',
@@ -393,9 +395,50 @@ export const DEMO_USER: UserProfile = {
   dob: '12/03/1994',
   bio: 'Curating pre-loved fashion finds. Fast shipping, honest condition notes.',
   location: 'Lagos, NG',
+  phone: '+234 803 123 4567',
   setupComplete: true,
   canHostLive: true,
+  notifOffers: true,
+  notifMessages: true,
 };
+
+export function sellerRatingInfo(username: string, reviews: Record<string, Review[]> = REVIEWS) {
+  const list = reviews[username] ?? [];
+  if (!list.length) return { avg: 0, count: 0 };
+  const sum = list.reduce((total, review) => total + review.rating, 0);
+  return { avg: sum / list.length, count: list.length };
+}
+
+export function getPublicSeller(username: string) {
+  if (username === DEMO_USER.username) {
+    return { username, bio: DEMO_USER.bio, location: DEMO_USER.location };
+  }
+  return { username, bio: 'Trusted Throve seller.', location: 'Lagos, NG' };
+}
+
+export const SEED_ORDERS: Order[] = [
+  {
+    id: 'ORD1000',
+    listingId: 'l11',
+    listingTitle: 'Leather Ankle Boots',
+    buyer: 'ijeoma.a',
+    seller: 'ada.thrifts',
+    name: 'Ijeoma Adeyemi',
+    address: '14 Admiralty Way, Lekki',
+    city: 'Lagos',
+    phone: '+234 802 555 0101',
+    deliveryMethod: 'Standard',
+    deliveryFee: 2500,
+    itemPrice: 21000,
+    total: 23500,
+    fromLiveId: null,
+    createdAt: '2026-07-20T10:00:00.000Z',
+    status: 'paid',
+    reviewed: false,
+  },
+];
+
+export const CANCEL_REASONS = ['Changed my mind', 'Unable to fulfil order', 'Item unavailable', 'Other'];
 
 export function getListing(id: string) {
   return LISTINGS.find((item) => item.id === id);

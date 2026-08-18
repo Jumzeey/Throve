@@ -18,12 +18,11 @@ export default function SimulatedPaymentScreen() {
   const draft = checkout.draft;
 
   if (!draft) {
-    return <Redirect href="/(tabs)/live" />;
+    return <Redirect href="/(tabs)" />;
   }
 
   const listing = live.resolveListing(draft.listingId);
-  const claim = live.getClaim(draft.liveSessionId ?? '');
-  const remaining = claim ? claim.expiresAt - live.now : 0;
+  const remaining = checkout.remaining;
   if (!listing || listing.status === 'available' || remaining <= 0) {
     return <ExpiredCheckout />;
   }

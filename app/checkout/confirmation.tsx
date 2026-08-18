@@ -14,7 +14,7 @@ export default function OrderConfirmationScreen() {
   const live = useLive();
 
   if (!lastOrder) {
-    return <Redirect href="/(tabs)/live" />;
+    return <Redirect href="/(tabs)" />;
   }
 
   const liveSession = lastOrder.fromLiveId ? live.getSession(lastOrder.fromLiveId) : undefined;
@@ -33,7 +33,10 @@ export default function OrderConfirmationScreen() {
         Order #{lastOrder.id} for {lastOrder.listingTitle} — {formatNaira(lastOrder.total)}.
       </Text>
       <View style={styles.actions}>
-        <Button label="View order" onPress={() => router.push('/checkout/order')} />
+        <Button
+          label="View order"
+          onPress={() => router.push({ pathname: '/checkout/order', params: { id: lastOrder.id } })}
+        />
         {canReturn ? (
           <Button
             label="Return to live"

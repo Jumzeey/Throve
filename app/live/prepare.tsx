@@ -6,8 +6,9 @@ import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
 import { Palette } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
+import { useListings } from '@/context/listings-context';
 import { useLive } from '@/context/live-context';
-import { DEPARTMENTS, getListingsForSeller } from '@/data/seed';
+import { DEPARTMENTS } from '@/data/seed';
 import { Redirect, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -17,7 +18,8 @@ const DEPARTMENT_CHIPS = DEPARTMENTS.map((department) => ({ label: department, v
 export default function PrepareLiveScreen() {
   const router = useRouter();
   const { session } = useAuth();
-  const { startLive, listingStatus } = useLive();
+  const { listingsForSeller } = useListings();
+  const { startLive } = useLive();
   const [title, setTitle] = useState('');
   const [coverSet, setCoverSet] = useState(false);
   const [department, setDepartment] = useState('');
@@ -30,8 +32,8 @@ export default function PrepareLiveScreen() {
 
   const products = useMemo(() => {
     if (!session) return [];
-    return getListingsForSeller(session.username).filter((listing) => (listingStatus(listing.id) ?? listing.status) === 'available');
-  }, [listingStatus, session]);
+    return listingsForSeller(session.username).filter((listing) => listing.status === 'available');
+  }, [listingsForSeller, session]);
 
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;

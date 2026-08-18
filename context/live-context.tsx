@@ -1,4 +1,5 @@
-import { LIVE_COMMENTS, LIVE_SESSIONS, getListing } from '@/data/seed';
+import { useListings } from '@/context/listings-context';
+import { LIVE_COMMENTS, LIVE_SESSIONS } from '@/data/seed';
 import type { Listing, ListingStatus, LiveClaim, LiveComment, LiveConnection, LiveSession } from '@/data/types';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
@@ -45,10 +46,10 @@ function cloneComments() {
 }
 
 export function LiveProvider({ children }: { children: ReactNode }) {
+  const { getListing, setStatus, clearReservation } = useListings();
   const [sessions, setSessions] = useState<LiveSession[]>(() => LIVE_SESSIONS.map((session) => ({ ...session })));
   const [commentsBySession, setCommentsBySession] = useState<Record<string, LiveComment[]>>(cloneComments);
   const [connections, setConnections] = useState<Record<string, LiveConnection>>({});
-  const [overrides, setOverrides] = useState<Record<string, ListingStatus>>({});
   const [claim, setClaim] = useState<LiveClaim | null>(null);
   const [activeBroadcastId, setActiveBroadcastId] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -62,14 +63,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!claim) return;
     if (now < claim.expiresAt) return;
-    setOverrides((current) => {
-      if (current[claim.listingId] === 'sold') return current;
-      const next = { ...current };
-      delete next[claim.listingId];
-      return next;
-    });
+    clearReservation(claim.listingId);
     setClaim(null);
-  }, [claim, now]);
+  }, [claim, clearReservation, now]);
 
   const liveNow = useMemo(() => sessions.filter((session) => session.status === 'live'), [sessions]);
   const upcoming = useMemo(() => sessions.filter((session) => session.status === 'upcoming'), [sessions]);
@@ -93,21 +89,13 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   );
 
   const listingStatus = useCallback(
-    (id?: string) => {
-      if (!id) return undefined;
-      return overrides[id] ?? getListing(id)?.status;
-    },
-    [overrides],
+    (id?: string) => (id ? getListing(id)?.status : undefined),
+    [getListing],
   );
 
   const resolveListing = useCallback(
-    (id?: string) => {
-      if (!id) return undefined;
-      const listing = getListing(id);
-      if (!listing) return undefined;
-      return { ...listing, status: overrides[id] ?? listing.status };
-    },
-    [overrides],
+    (id?: string) => (id ? getListing(id) : undefined),
+    [getListing],
   );
 
   const sendComment = useCallback((sessionId: string, user: string, text: string) => {
@@ -144,11 +132,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     (sessionId: string, listingId: string, username: string) => {
       const listing = resolveListing(listingId);
       if (!listing || listing.status !== 'available') return;
-      setOverrides((current) => ({ ...current, [listingId]: 'reserved' }));
+      setStatus(listingId, 'reserved');
       setClaim({ sessionId, listingId, username, expiresAt: Date.now() + CLAIM_MS });
       setNow(Date.now());
     },
-    [resolveListing],
+    [resolveListing, setStatus],
   );
 
   const beginCheckoutReservation = useCallback(
@@ -158,28 +146,29 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       const mine = claim?.username === username && claim.listingId === listingId;
       if (listing.status === 'sold') return false;
       if (listing.status === 'reserved' && !mine) return false;
-      setOverrides((current) => ({ ...current, [listingId]: 'reserved' }));
+      setStatus(listingId, 'reserved');
       setClaim({ sessionId, listingId, username, expiresAt: Date.now() + CHECKOUT_RESERVE_MS });
       setNow(Date.now());
       return true;
     },
-    [claim, resolveListing],
+    [claim, resolveListing, setStatus],
   );
 
-  const completeSale = useCallback((listingId: string) => {
-    setOverrides((current) => ({ ...current, [listingId]: 'sold' }));
-    setClaim((current) => (current?.listingId === listingId ? null : current));
-  }, []);
+  const completeSale = useCallback(
+    (listingId: string) => {
+      setStatus(listingId, 'sold');
+      setClaim((current) => (current?.listingId === listingId ? null : current));
+    },
+    [setStatus],
+  );
 
-  const releaseListing = useCallback((listingId: string) => {
-    setOverrides((current) => {
-      if (current[listingId] === 'sold') return current;
-      const next = { ...current };
-      delete next[listingId];
-      return next;
-    });
-    setClaim((current) => (current?.listingId === listingId ? null : current));
-  }, []);
+  const releaseListing = useCallback(
+    (listingId: string) => {
+      clearReservation(listingId);
+      setClaim((current) => (current?.listingId === listingId ? null : current));
+    },
+    [clearReservation],
+  );
 
   const startLive = useCallback((input: StartLiveInput) => {
     const scheduled = Boolean(input.scheduledAt?.trim());

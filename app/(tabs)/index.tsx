@@ -3,6 +3,7 @@ import { ListingCard } from '@/components/ui/listing-card';
 import { ListingGrid } from '@/components/ui/listing-grid';
 import { PlaceholderImage } from '@/components/ui/placeholder-image';
 import { Palette } from '@/constants/theme';
+import { useListings } from '@/context/listings-context';
 import { filterListings } from '@/data/filter-listings';
 import { DEPARTMENTS } from '@/data/seed';
 import { useLive } from '@/context/live-context';
@@ -15,7 +16,8 @@ const DEPARTMENT_CHIPS = [{ label: 'All', value: '' }, ...DEPARTMENTS.map((depar
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const listings = filterListings().slice(0, 8);
+  const { listings: catalog } = useListings();
+  const listings = filterListings(catalog).slice(0, 8);
   const { liveNow, upcoming } = useLive();
   const homeSessions = [...liveNow, ...upcoming];
 

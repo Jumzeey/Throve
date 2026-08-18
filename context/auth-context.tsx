@@ -7,6 +7,21 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 const USERS_KEY = '@throve/users';
 const SESSION_KEY = '@throve/session';
 
+const DEACTIVATED_ERROR = 'This account has been deactivated.';
+
+type ProfilePatch = {
+  name: string;
+  username: string;
+  bio: string;
+  location: string;
+  photoUri?: string;
+};
+
+type SettingsPatch = {
+  notifOffers?: boolean;
+  notifMessages?: boolean;
+};
+
 type AuthContextValue = {
   isReady: boolean;
   session: UserProfile | null;
@@ -16,6 +31,9 @@ type AuthContextValue = {
   completeMagicLink: () => Promise<void>;
   requestRecovery: (email: string) => Promise<void>;
   completeSetup: (input: { username: string; bio: string; location: string; photoUri?: string }) => Promise<void>;
+  updateProfile: (input: ProfilePatch) => Promise<void>;
+  updateSettings: (input: SettingsPatch) => Promise<void>;
+  deactivateAccount: () => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -38,18 +56,27 @@ async function loadUsers(): Promise<UserProfile[]> {
 }
 
 function normalizeUser(user: UserProfile): UserProfile {
-  if (user.email.toLowerCase() === DEMO_USER.email) {
-    return { ...user, canHostLive: true };
-  }
-  return { ...user, canHostLive: false };
+  const isDemo = user.email.toLowerCase() === DEMO_USER.email;
+  return {
+    ...user,
+    phone: user.phone ?? (isDemo ? DEMO_USER.phone : undefined),
+    notifOffers: user.notifOffers !== false,
+    notifMessages: user.notifMessages !== false,
+    canHostLive: isDemo,
+  };
 }
 
 async function saveUsers(users: UserProfile[]) {
   await AsyncStorage.setItem(USERS_KEY, JSON.stringify(users));
 }
 
-function takenUsernames(users: UserProfile[]) {
-  return new Set([...SEED_SELLERS, ...users.map((user) => user.username.toLowerCase())]);
+function isUsernameTaken(users: UserProfile[], username: string, exceptUserId?: string) {
+  const name = username.toLowerCase();
+  const except = users.find((user) => user.userId === exceptUserId);
+  const exceptName = except?.username.toLowerCase();
+  if (exceptName === name) return false;
+  if (users.some((user) => user.userId !== exceptUserId && user.username.toLowerCase() === name)) return true;
+  return SEED_SELLERS.some((seller) => seller.toLowerCase() === name);
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -64,7 +91,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const sessionId = await AsyncStorage.getItem(SESSION_KEY);
       const current = sessionId ? storedUsers.find((user) => user.userId === sessionId) ?? null : null;
       if (!cancelled) {
-        setSession(current);
+        if (current?.deactivated) {
+          setSession(null);
+          await AsyncStorage.removeItem(SESSION_KEY);
+        } else {
+          setSession(current);
+        }
         setIsReady(true);
       }
     })();
@@ -81,6 +113,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await AsyncStorage.removeItem(SESSION_KEY);
     }
   }, []);
+
+  const persistUser = useCallback(
+    async (updated: UserProfile) => {
+      const latest = await loadUsers();
+      const next = latest.map((user) => (user.userId === updated.userId ? updated : user));
+      await saveUsers(next);
+      await persistSession(updated);
+    },
+    [persistSession],
+  );
 
   const signup = useCallback(async (input: { email: string; name: string; username: string; dob: string }) => {
     const email = input.email.trim().toLowerCase();
@@ -102,7 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (latest.some((user) => user.email.toLowerCase() === email)) {
       throw new Error('An account with this email already exists.');
     }
-    if (takenUsernames(latest).has(username.toLowerCase())) {
+    if (isUsernameTaken(latest, username)) {
       throw new Error('That username is unavailable.');
     }
 
@@ -116,6 +158,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       bio: '',
       location: '',
       setupComplete: false,
+      notifOffers: true,
+      notifMessages: true,
     };
     const next = [...latest, user];
     await saveUsers(next);
@@ -127,6 +171,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const user = latest.find((item) => item.userId === pendingUserId);
     if (!user) {
       throw new Error('Verification expired. Please sign up again.');
+    }
+    if (user.deactivated) {
+      throw new Error(DEACTIVATED_ERROR);
     }
     await delay(250);
     await persistSession(user);
@@ -146,6 +193,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) {
       throw new Error('No Throve account was found for this email.');
     }
+    if (user.deactivated) {
+      throw new Error(DEACTIVATED_ERROR);
+    }
     await delay(400);
     setPendingUserId(user.userId);
   }, []);
@@ -155,6 +205,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const user = latest.find((item) => item.userId === pendingUserId);
     if (!user) {
       throw new Error('This magic link is invalid or has expired.');
+    }
+    if (user.deactivated) {
+      throw new Error(DEACTIVATED_ERROR);
     }
     await delay(250);
     await persistSession(user);
@@ -182,8 +235,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error('Username is required.');
       }
       const latest = await loadUsers();
-      const taken = takenUsernames(latest.filter((user) => user.userId !== session.userId));
-      if (taken.has(username.toLowerCase())) {
+      if (isUsernameTaken(latest, username, session.userId)) {
         throw new Error('That username is unavailable.');
       }
       await delay(400);
@@ -195,12 +247,65 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         photoUri: input.photoUri,
         setupComplete: true,
       };
-      const next = latest.map((user) => (user.userId === session.userId ? updated : user));
-      await saveUsers(next);
-      await persistSession(updated);
+      await persistUser(updated);
     },
-    [persistSession, session],
+    [persistUser, session],
   );
+
+  const updateProfile = useCallback(
+    async (input: ProfilePatch) => {
+      if (!session) {
+        throw new Error('You need to be signed in to update your profile.');
+      }
+      const name = input.name.trim();
+      const username = input.username.trim();
+      if (!name || !username) {
+        throw new Error('Name and username are required.');
+      }
+      const latest = await loadUsers();
+      if (isUsernameTaken(latest, username, session.userId)) {
+        throw new Error('That username is unavailable.');
+      }
+      await delay(400);
+      const updated: UserProfile = {
+        ...session,
+        name,
+        username,
+        bio: input.bio.trim(),
+        location: input.location.trim(),
+        photoUri: input.photoUri,
+      };
+      await persistUser(updated);
+    },
+    [persistUser, session],
+  );
+
+  const updateSettings = useCallback(
+    async (input: SettingsPatch) => {
+      if (!session) {
+        throw new Error('You need to be signed in to update settings.');
+      }
+      const updated: UserProfile = {
+        ...session,
+        notifOffers: input.notifOffers ?? session.notifOffers !== false,
+        notifMessages: input.notifMessages ?? session.notifMessages !== false,
+      };
+      await persistUser(updated);
+    },
+    [persistUser, session],
+  );
+
+  const deactivateAccount = useCallback(async () => {
+    if (!session) {
+      throw new Error('You need to be signed in to deactivate your account.');
+    }
+    const latest = await loadUsers();
+    const updated: UserProfile = { ...session, deactivated: true };
+    const next = latest.map((user) => (user.userId === session.userId ? updated : user));
+    await saveUsers(next);
+    setPendingUserId(null);
+    await persistSession(null);
+  }, [persistSession, session]);
 
   const logout = useCallback(async () => {
     setPendingUserId(null);
@@ -217,18 +322,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       completeMagicLink,
       requestRecovery,
       completeSetup,
+      updateProfile,
+      updateSettings,
+      deactivateAccount,
       logout,
     }),
     [
       completeMagicLink,
       completeSetup,
       completeVerification,
+      deactivateAccount,
       isReady,
       logout,
       requestMagicLink,
       requestRecovery,
       session,
       signup,
+      updateProfile,
+      updateSettings,
     ],
   );
 

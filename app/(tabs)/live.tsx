@@ -25,6 +25,7 @@ export default function LiveDiscoveryScreen() {
               session={session}
               live
               onPress={() => router.push(`/live/${session.id}`)}
+              onOpenHost={() => router.push({ pathname: '/seller/[username]', params: { username: session.host } })}
             />
           ))
         )}
@@ -32,7 +33,13 @@ export default function LiveDiscoveryScreen() {
         {upcoming.length === 0 ? (
           <Text style={styles.empty}>Nothing scheduled yet.</Text>
         ) : (
-          upcoming.map((session) => <SessionRow key={session.id} session={session} />)
+          upcoming.map((session) => (
+            <SessionRow
+              key={session.id}
+              session={session}
+              onPress={() => router.push({ pathname: '/seller/[username]', params: { username: session.host } })}
+            />
+          ))
         )}
       </ScrollView>
     </View>
@@ -43,10 +50,12 @@ function SessionRow({
   session,
   live,
   onPress,
+  onOpenHost,
 }: {
   session: LiveSession;
   live?: boolean;
   onPress?: () => void;
+  onOpenHost?: () => void;
 }) {
   return (
     <Pressable onPress={onPress} disabled={!onPress} style={styles.row}>
@@ -60,7 +69,16 @@ function SessionRow({
       </View>
       <View style={styles.meta}>
         <Text style={styles.rowTitle}>{session.title}</Text>
-        <Text style={styles.rowSub}>
+        <Text
+          onPress={
+            onOpenHost
+              ? (event) => {
+                  event.stopPropagation();
+                  onOpenHost();
+                }
+              : undefined
+          }
+          style={styles.rowSub}>
           @{session.host}
           {live ? ` · ${session.viewers ?? 0} watching` : session.scheduledAt ? ` · ${session.scheduledAt}` : ''}
         </Text>

@@ -23,6 +23,19 @@ export type Listing = {
   savedBy: string[];
 };
 
+export type ListingForm = {
+  id?: string;
+  photoCount: number;
+  title: string;
+  department: string;
+  category: string;
+  brand: string;
+  condition: string;
+  size: string;
+  price: string;
+  description: string;
+};
+
 export type ListingFilters = {
   department: string;
   category: string;
@@ -68,6 +81,7 @@ export type Review = {
 };
 
 export type DeliveryMethod = 'Standard' | 'Express';
+export type OrderStatus = 'paid' | 'dispatched' | 'in_transit' | 'completed' | 'cancelled';
 
 export type Order = {
   id: string;
@@ -85,6 +99,9 @@ export type Order = {
   total: number;
   fromLiveId: string | null;
   createdAt: string;
+  status: OrderStatus;
+  reviewed: boolean;
+  cancelReason?: string;
 };
 
 export type CheckoutDraft = {
@@ -99,6 +116,37 @@ export type CheckoutDraft = {
   expiresAt: number;
 };
 
+export type OfferStatus = 'pending' | 'accepted' | 'rejected' | 'withdrawn' | 'expired';
+export type OfferInitiator = 'buyer' | 'seller';
+
+export type Offer = {
+  id: string;
+  listingId: string;
+  buyer: string;
+  seller: string;
+  amount: number;
+  status: OfferStatus;
+  createdAt: number;
+  expiresAt: number;
+  initiator: OfferInitiator;
+};
+
+export type Conversation = {
+  id: string;
+  listingId: string;
+  participants: [string, string];
+  lastMessage: string;
+  updatedAt: number;
+  unreadBy: string[];
+};
+
+export type ChatMessage = {
+  id: string;
+  from: string;
+  text: string;
+  createdAt: number;
+};
+
 export type UserProfile = {
   userId: string;
   email: string;
@@ -108,6 +156,10 @@ export type UserProfile = {
   bio: string;
   location: string;
   photoUri?: string;
+  phone?: string;
   setupComplete: boolean;
   canHostLive?: boolean;
+  deactivated?: boolean;
+  notifOffers?: boolean;
+  notifMessages?: boolean;
 };

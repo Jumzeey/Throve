@@ -1,5 +1,7 @@
 import { AuthProvider, useAuth } from '@/context/auth-context';
 import { CheckoutProvider } from '@/context/checkout-context';
+import { InboxProvider } from '@/context/inbox-context';
+import { ListingsProvider } from '@/context/listings-context';
 import { LiveProvider } from '@/context/live-context';
 import { SplashScreen } from '@/components/ui/splash-screen';
 import { Stack } from 'expo-router';
@@ -36,6 +38,10 @@ function RootNavigator() {
       <Stack.Screen name="product/[id]" />
       <Stack.Screen name="live" />
       <Stack.Screen name="checkout" />
+      <Stack.Screen name="sell" />
+      <Stack.Screen name="inbox" />
+      <Stack.Screen name="profile" />
+      <Stack.Screen name="seller/[username]" />
     </Stack>
   );
 }
@@ -43,14 +49,18 @@ function RootNavigator() {
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <LiveProvider>
-        <CheckoutProvider>
-          <ThemeProvider value={ThroveTheme}>
-            <RootNavigator />
-            <StatusBar style="dark" />
-          </ThemeProvider>
-        </CheckoutProvider>
-      </LiveProvider>
+      <ListingsProvider>
+        <InboxProvider>
+          <LiveProvider>
+            <CheckoutProvider>
+              <ThemeProvider value={ThroveTheme}>
+                <RootNavigator />
+                <StatusBar style="dark" />
+              </ThemeProvider>
+            </CheckoutProvider>
+          </LiveProvider>
+        </InboxProvider>
+      </ListingsProvider>
     </AuthProvider>
   );
 }

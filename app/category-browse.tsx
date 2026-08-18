@@ -6,6 +6,7 @@ import { ListingGrid } from '@/components/ui/listing-grid';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { Palette } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
+import { useListings } from '@/context/listings-context';
 import { DEFAULT_FILTERS, filterListings } from '@/data/filter-listings';
 import { DEPARTMENTS, getCategoriesForDepartment } from '@/data/seed';
 import type { ListingFilters } from '@/data/types';
@@ -18,6 +19,7 @@ const DEPARTMENT_CHIPS = [{ label: 'All', value: '' }, ...DEPARTMENTS.map((depar
 export default function CategoryBrowseScreen() {
   const router = useRouter();
   const { session } = useAuth();
+  const { listings: catalog } = useListings();
   const params = useLocalSearchParams<{ department?: string }>();
   const [department, setDepartment] = useState(params.department ?? '');
   const [category, setCategory] = useState('');
@@ -31,7 +33,7 @@ export default function CategoryBrowseScreen() {
   }, [department]);
 
   const listings = useMemo(() => {
-    return filterListings(undefined, {
+    return filterListings(catalog, {
       department,
       category,
       brand: filters.brand,
@@ -39,7 +41,7 @@ export default function CategoryBrowseScreen() {
       price: filters.price,
       sort: filters.sort,
     });
-  }, [category, department, filters]);
+  }, [catalog, category, department, filters]);
 
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;

@@ -5,7 +5,7 @@ import { ReserveNotice } from '@/components/ui/reserve-notice';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
 import { Palette } from '@/constants/theme';
-import { useCheckout } from '@/context/checkout-context';
+import { leaveCheckout, useCheckout } from '@/context/checkout-context';
 import { useLive } from '@/context/live-context';
 import { formatNaira } from '@/lib/format';
 import { Redirect, useRouter } from 'expo-router';
@@ -20,26 +20,25 @@ export default function ShippingDetailsScreen() {
   const draft = checkout.draft;
 
   if (!draft) {
-    return <Redirect href="/(tabs)/live" />;
+    return <Redirect href="/(tabs)" />;
   }
 
-  const listing = live.resolveListing(draft.listingId);
-  const claim = live.getClaim(draft.liveSessionId ?? '');
-  const remaining = claim ? claim.expiresAt - live.now : 0;
+  const currentDraft = draft;
+  const listing = live.resolveListing(currentDraft.listingId);
+  const remaining = checkout.remaining;
 
   if (!listing || listing.status === 'available' || remaining <= 0) {
     return <ExpiredCheckout />;
   }
 
-  const name = draft.name;
-  const address = draft.address;
-  const city = draft.city;
-  const phone = draft.phone;
+  const name = currentDraft.name;
+  const address = currentDraft.address;
+  const city = currentDraft.city;
+  const phone = currentDraft.phone;
 
   function cancel() {
     const liveId = checkout.cancelCheckout();
-    if (liveId) router.replace(`/live/${liveId}`);
-    else router.replace('/(tabs)/live');
+    leaveCheckout(router, liveId, currentDraft.listingId);
   }
 
   function continueNext() {
@@ -83,17 +82,23 @@ export default function ShippingDetailsScreen() {
 export function ExpiredCheckout() {
   const router = useRouter();
   const checkout = useCheckout();
+  const listingId = checkout.draft?.listingId;
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="Checkout" onBack={() => router.replace('/(tabs)/live')} />
+      <ScreenHeader
+        title="Checkout"
+        onBack={() => {
+          const liveId = checkout.cancelCheckout();
+          leaveCheckout(router, liveId, listingId);
+        }}
+      />
       <View style={styles.expiredBody}>
         <Text style={styles.expired}>Reservation expired. The listing is available again.</Text>
         <Button
-          label="Back to Live"
+          label={checkout.draft?.liveSessionId ? 'Back to Live' : 'Back'}
           onPress={() => {
             const liveId = checkout.cancelCheckout();
-            if (liveId) router.replace(`/live/${liveId}`);
-            else router.replace('/(tabs)/live');
+            leaveCheckout(router, liveId, listingId);
           }}
         />
       </View>

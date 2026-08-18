@@ -3,7 +3,7 @@ import { PlaceholderImage } from '@/components/ui/placeholder-image';
 import { ReserveNotice } from '@/components/ui/reserve-notice';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { Palette } from '@/constants/theme';
-import { deliveryLabel, useCheckout } from '@/context/checkout-context';
+import { deliveryLabel, leaveCheckout, useCheckout } from '@/context/checkout-context';
 import { useLive } from '@/context/live-context';
 import { getDeliveryOption } from '@/data/checkout';
 import { formatNaira } from '@/lib/format';
@@ -18,23 +18,22 @@ export default function CheckoutSummaryScreen() {
   const draft = checkout.draft;
 
   if (!draft) {
-    return <Redirect href="/(tabs)/live" />;
+    return <Redirect href="/(tabs)" />;
   }
 
   const listing = live.resolveListing(draft.listingId);
-  const claim = live.getClaim(draft.liveSessionId ?? '');
-  const remaining = claim ? claim.expiresAt - live.now : 0;
+  const remaining = checkout.remaining;
   if (!listing || listing.status === 'available' || remaining <= 0) {
     return <ExpiredCheckout />;
   }
 
+  const listingId = draft.listingId;
   const delivery = getDeliveryOption(draft.deliveryMethod);
   const total = listing.price + delivery.fee;
 
   function cancel() {
     const liveId = checkout.cancelCheckout();
-    if (liveId) router.replace(`/live/${liveId}`);
-    else router.replace('/(tabs)/live');
+    leaveCheckout(router, liveId, listingId);
   }
 
   return (

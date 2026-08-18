@@ -21,7 +21,13 @@ export function listingStatusStyle(status: ListingStatus) {
   if (status === 'sold') {
     return { backgroundColor: Palette.chipBg, color: Palette.muted, label: 'Sold' };
   }
-  return { backgroundColor: Palette.chipBg, color: Palette.muted, label: 'Available' };
+  if (status === 'draft') {
+    return { backgroundColor: Palette.chipBg, color: Palette.muted2, label: 'Draft' };
+  }
+  if (status === 'hidden') {
+    return { backgroundColor: Palette.chipBg, color: Palette.muted3, label: 'Hidden' };
+  }
+  return { backgroundColor: '#eaf5ea', color: '#2e6b2e', label: 'Available' };
 }
 
 const styles = StyleSheet.create({

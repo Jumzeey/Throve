@@ -74,10 +74,12 @@ export default function LiveViewerScreen() {
           <Pressable onPress={leave} style={styles.ghostBtn}>
             <Text style={styles.ghostLabel}>Leave</Text>
           </Pressable>
-          <View style={styles.host}>
+          <Pressable
+            onPress={() => router.push({ pathname: '/seller/[username]', params: { username: liveSession.host } })}
+            style={styles.host}>
             <View style={styles.avatar} />
             <Text style={styles.hostName}>@{liveSession.host}</Text>
-          </View>
+          </Pressable>
           <Pressable onPress={report} style={styles.ghostBtn}>
             <Text style={styles.ghostLabel}>Report</Text>
           </Pressable>

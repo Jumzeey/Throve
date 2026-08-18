@@ -1,0 +1,140 @@
+# Codemagic CI/CD for this Expo React Native app.
+# Native ios/ and android/ folders are generated on the build machine with `npx expo prebuild`.
+#
+# In the Codemagic UI:
+# 1. Add this repository as a React Native app, then scan for this file.
+# 2. Android signing — Team settings > codemagic.yaml settings > Code signing identities:
+#    upload a keystore and set its Reference name to `throve_keystore`.
+# 3. iOS signing — add an App Store Connect API key under Team integrations > Developer Portal
+#    with the name `throve`, then add a distribution certificate and App Store profile
+#    for bundle id `com.throve.app`.
+# 4. Optional store publishing: create a `google_play` env group with
+#    GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS, set APP_STORE_APPLE_ID, then uncomment
+#    the publishing blocks below.
+#
+# Docs: https://docs.codemagic.io/yaml-quick-start/building-a-react-native-app/
+
+workflows:
+  react-native-android:
+    name: React Native Android
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      node: 22.13.1
+      android_signing:
+        - throve_keystore
+      # groups:
+      #   - google_play
+      vars:
+        PACKAGE_NAME: "com.throve.app"
+    scripts:
+      - name: Install npm dependencies
+        script: |
+          npm install
+      - name: Run Expo Prebuild
+        script: |
+          npx expo prebuild --platform android --non-interactive
+      - name: Set up app/build.gradle
+        script: |
+          cp ./support-files/build.gradle android/app/build.gradle
+      - name: Set Android SDK location
+        script: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/android/local.properties"
+      - name: Build Android release
+        script: |
+          LATEST_GOOGLE_PLAY_BUILD_NUMBER=""
+          if [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS:-}" ]; then
+            LATEST_GOOGLE_PLAY_BUILD_NUMBER=$(google-play get-latest-build-number --package-name "$PACKAGE_NAME" || true)
+          fi
+          if [ -z "$LATEST_GOOGLE_PLAY_BUILD_NUMBER" ]; then
+            UPDATED_BUILD_NUMBER=$BUILD_NUMBER
+          else
+            UPDATED_BUILD_NUMBER=$((LATEST_GOOGLE_PLAY_BUILD_NUMBER + 1))
+          fi
+          cd android
+          ./gradlew bundleRelease \
+            -PversionCode=$UPDATED_BUILD_NUMBER \
+            -PversionName=1.0.$UPDATED_BUILD_NUMBER
+    artifacts:
+      - android/app/build/outputs/**/*.aab
+    # publishing:
+    #   email:
+    #     recipients:
+    #       - you@example.com
+    #     notify:
+    #       success: true
+    #       failure: true
+    #   google_play:
+    #     credentials: $GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS
+    #     track: internal
+    #     submit_as_draft: true
+
+  react-native-ios:
+    name: React Native iOS
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    # integrations:
+    #   app_store_connect: throve
+    environment:
+      node: 22.13.1
+      xcode: latest
+      cocoapods: default
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.throve.app
+      vars:
+        BUNDLE_ID: "com.throve.app"
+        XCODE_WORKSPACE: "ThroveApp.xcworkspace"
+        XCODE_SCHEME: "ThroveApp"
+        APP_STORE_APPLE_ID: 0000000000
+    scripts:
+      - name: Install npm dependencies
+        script: |
+          npm install
+      - name: Run Expo Prebuild
+        script: |
+          npx expo prebuild --platform ios --non-interactive
+      - name: Set Info.plist values
+        script: |
+          PLIST=$CM_BUILD_DIR/ios/$XCODE_SCHEME/Info.plist
+          PLIST_BUDDY=/usr/libexec/PlistBuddy
+          $PLIST_BUDDY -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST" || true
+      - name: Install CocoaPods dependencies
+        script: |
+          cd ios && pod install
+      - name: Set up code signing settings on Xcode project
+        script: xcode-project use-profiles
+      - name: Increment build number
+        script: |
+          cd $CM_BUILD_DIR/ios
+          LATEST_BUILD_NUMBER=""
+          if [ "$APP_STORE_APPLE_ID" != "0000000000" ]; then
+            LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID" || true)
+          fi
+          if [ -z "$LATEST_BUILD_NUMBER" ]; then
+            UPDATED_BUILD_NUMBER=$BUILD_NUMBER
+          else
+            UPDATED_BUILD_NUMBER=$((LATEST_BUILD_NUMBER + 1))
+          fi
+          agvtool new-version -all "$UPDATED_BUILD_NUMBER"
+      - name: Build ipa for distribution
+        script: |
+          xcode-project build-ipa \
+            --workspace "$CM_BUILD_DIR/ios/$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.app
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
+    # publishing:
+    #   email:
+    #     recipients:
+    #       - you@example.com
+    #     notify:
+    #       success: true
+    #       failure: true
+    #   app_store_connect:
+    #     auth: integration
+    #     submit_to_testflight: true
+    #     submit_to_app_store: false
