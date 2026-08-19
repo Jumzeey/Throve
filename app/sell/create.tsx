@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button';
 import { ErrorBanner } from '@/components/ui/error-banner';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
-import { Palette } from '@/constants/theme';
+import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { isListingFormPublishable, PREVIEW_ERROR, useListings } from '@/context/listings-context';
 import { CONDITIONS, DEPARTMENTS, getCategoriesForDepartment } from '@/data/seed';
@@ -204,8 +204,8 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     borderWidth: 2,
     borderStyle: 'dashed',
-    borderColor: '#b8b5b0',
-    borderRadius: 8,
+    borderColor: Palette.accent700,
+    borderRadius: Radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Palette.hatch,
@@ -223,7 +223,7 @@ const styles = StyleSheet.create({
     marginTop: 14,
     marginBottom: 6,
     fontSize: 11,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.muted2,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -240,7 +240,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   chipOn: {
-    backgroundColor: Palette.text,
+    backgroundColor: Palette.accent,
   },
   chipOff: {
     backgroundColor: Palette.background,
@@ -249,7 +249,7 @@ const styles = StyleSheet.create({
   },
   chipLabel: {
     fontSize: 12,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
   },
   chipLabelOn: {
     color: Palette.background,

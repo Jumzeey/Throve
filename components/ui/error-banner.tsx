@@ -1,4 +1,4 @@
-import { Palette } from '@/constants/theme';
+import { Palette, Radius, Typography } from '@/constants/theme';
 import { StyleSheet, Text, View } from 'react-native';
 
 export function ErrorBanner({ message }: { message?: string | null }) {
@@ -18,10 +18,11 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.errorBg,
     borderWidth: 1,
     borderColor: Palette.errorBorder,
-    borderRadius: 8,
+    borderRadius: Radius.sm,
   },
   text: {
     fontSize: 13,
+    fontFamily: Typography.body,
     color: Palette.errorText,
   },
 });

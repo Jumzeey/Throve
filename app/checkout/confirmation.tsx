@@ -1,5 +1,6 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Button } from '@/components/ui/button';
-import { Palette } from '@/constants/theme';
+import { Palette, Radius, Typography } from '@/constants/theme';
 import { useCheckout } from '@/context/checkout-context';
 import { useLive } from '@/context/live-context';
 import { formatNaira } from '@/lib/format';
@@ -23,7 +24,7 @@ export default function OrderConfirmationScreen() {
   return (
     <View style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <View style={styles.badge}>
-        <Text style={styles.check}>✓</Text>
+        <Ionicons name="checkmark" size={28} color={Palette.background} />
       </View>
       <Text style={styles.title}>Purchase successful</Text>
       <View style={styles.notice}>
@@ -63,36 +64,33 @@ const styles = StyleSheet.create({
   badge: {
     width: 56,
     height: 56,
-    borderRadius: 28,
-    backgroundColor: Palette.text,
+    borderRadius: Radius.full,
+    backgroundColor: Palette.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  check: {
-    color: Palette.background,
-    fontSize: 20,
-    fontWeight: '700',
-  },
   title: {
     fontSize: 20,
-    fontWeight: '700',
+    fontFamily: Typography.headingBold,
     color: Palette.text,
   },
   notice: {
     backgroundColor: '#fdf3e3',
     borderWidth: 1,
     borderColor: '#ecd39a',
-    borderRadius: 8,
+    borderRadius: Radius.sm,
     paddingVertical: 8,
     paddingHorizontal: 12,
   },
   noticeText: {
     fontSize: 12,
+    fontFamily: Typography.body,
     color: '#8a6112',
   },
   copy: {
     fontSize: 14,
     lineHeight: 21,
+    fontFamily: Typography.body,
     color: Palette.muted,
     textAlign: 'center',
     maxWidth: 270,

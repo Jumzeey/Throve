@@ -1,8 +1,10 @@
+import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
-import { PlaceholderImage } from '@/components/ui/placeholder-image';
+import { StarRating } from '@/components/ui/star-rating';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
-import { Palette } from '@/constants/theme';
+import { Palette, Typography, Radius } from '@/constants/theme';
+import { getListingImage } from '@/data/images';
 import { deliveryLabel, useCheckout } from '@/context/checkout-context';
 import { useAuth } from '@/context/auth-context';
 import { useInbox } from '@/context/inbox-context';
@@ -76,7 +78,7 @@ export default function CheckoutOrderScreen() {
           <Text style={styles.noticeText}>Prototype order — simulated, no real payment collected.</Text>
         </View>
         <View style={styles.item}>
-          <PlaceholderImage style={styles.thumb} />
+          <AppImage source={getListingImage(order.listingId)} style={styles.thumb} />
           <View style={styles.itemMeta}>
             <Text style={styles.itemTitle}>{order.listingTitle}</Text>
             <Text style={styles.itemSub}>
@@ -148,7 +150,7 @@ export default function CheckoutOrderScreen() {
             <View style={styles.stars}>
               {[1, 2, 3, 4, 5].map((value) => (
                 <Pressable key={value} onPress={() => setStars(value)} hitSlop={6}>
-                  <Text style={[styles.star, { color: value <= stars ? '#c9a227' : Palette.border }]}>★</Text>
+                  <StarRating rating={value <= stars ? 1 : 0} size={22} />
                 </Pressable>
               ))}
             </View>
@@ -193,7 +195,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     backgroundColor: Palette.chipBg,
-    borderRadius: 8,
+    borderRadius: Radius.sm,
     marginBottom: 16,
   },
   noticeText: {
@@ -207,20 +209,20 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 1,
     borderColor: Palette.borderSoft,
-    borderRadius: 10,
+    borderRadius: Radius.md,
     marginBottom: 16,
   },
   thumb: {
     width: 56,
     height: 56,
-    borderRadius: 8,
+    borderRadius: Radius.sm,
   },
   itemMeta: {
     flex: 1,
   },
   itemTitle: {
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
   },
   itemSub: {
@@ -248,7 +250,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   dotOn: {
-    backgroundColor: Palette.text,
+    backgroundColor: Palette.accent,
   },
   dotOff: {
     backgroundColor: Palette.background,
@@ -265,14 +267,14 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   lineOn: {
-    backgroundColor: Palette.text,
+    backgroundColor: Palette.accent,
   },
   lineOff: {
     backgroundColor: Palette.borderSoft,
   },
   stepLabel: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     paddingBottom: 16,
   },
   stepOn: {
@@ -283,7 +285,7 @@ const styles = StyleSheet.create({
   },
   cancelLabel: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.live,
   },
   primary: {
@@ -299,7 +301,7 @@ const styles = StyleSheet.create({
     height: 44,
     textAlign: 'center',
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.live,
     lineHeight: 44,
   },
@@ -313,7 +315,7 @@ const styles = StyleSheet.create({
   },
   cancelTitle: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.errorText,
     marginBottom: 10,
   },
@@ -329,7 +331,7 @@ const styles = StyleSheet.create({
   },
   reasonLabel: {
     fontSize: 12,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
   },
   cancelRow: {
@@ -349,7 +351,7 @@ const styles = StyleSheet.create({
   },
   reviewTitle: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
     marginBottom: 8,
   },

@@ -1,8 +1,9 @@
+import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
-import { PlaceholderImage } from '@/components/ui/placeholder-image';
 import { SimulatedStage, listingStatusStyle } from '@/components/ui/simulated-stage';
 import { TextField } from '@/components/ui/text-field';
-import { Palette } from '@/constants/theme';
+import { Palette, Typography, Radius } from '@/constants/theme';
+import { getListingImage } from '@/data/images';
 import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
 import { useLive } from '@/context/live-context';
@@ -108,7 +109,7 @@ export default function LiveViewerScreen() {
       {pinned ? (
         <View style={styles.productBlock}>
           <View style={styles.productRow}>
-            <PlaceholderImage style={styles.productThumb} />
+            <AppImage source={getListingImage(pinned.id)} style={styles.productThumb} />
             <View style={styles.productMeta}>
               <Text style={styles.productTitle} numberOfLines={1}>
                 {pinned.title}
@@ -184,7 +185,7 @@ function StatusChip({ status }: { status: 'available' | 'reserved' | 'sold' | 'd
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#111',
+    backgroundColor: Palette.neutral900,
   },
   toast: {
     position: 'absolute',
@@ -218,7 +219,7 @@ const styles = StyleSheet.create({
   ghostLabel: {
     color: Palette.background,
     fontSize: 12,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
   },
   host: {
     flexDirection: 'row',
@@ -234,7 +235,7 @@ const styles = StyleSheet.create({
   hostName: {
     color: Palette.background,
     fontSize: 12,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
   },
   overlay: {
     flex: 1,
@@ -265,7 +266,7 @@ const styles = StyleSheet.create({
   },
   endedBtnLabel: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
   },
   flex: {
@@ -300,7 +301,7 @@ const styles = StyleSheet.create({
   productThumb: {
     width: 48,
     height: 48,
-    borderRadius: 8,
+    borderRadius: Radius.sm,
   },
   productMeta: {
     flex: 1,
@@ -308,7 +309,7 @@ const styles = StyleSheet.create({
   },
   productTitle: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
   },
   productSub: {
@@ -317,17 +318,17 @@ const styles = StyleSheet.create({
   },
   productPrice: {
     fontSize: 13,
-    fontWeight: '700',
-    color: Palette.text,
+    fontFamily: Typography.headingBold,
+    color: Palette.accent700,
   },
   statusChip: {
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 6,
+    borderRadius: Radius.sm,
   },
   statusLabel: {
     fontSize: 10,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
   },
   productActions: {
     flexDirection: 'row',
@@ -378,7 +379,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   commentUser: {
-    fontWeight: '700',
+    fontFamily: Typography.bodySemiBold,
   },
   composer: {
     flexDirection: 'row',
@@ -398,12 +399,12 @@ const styles = StyleSheet.create({
     height: 38,
     paddingHorizontal: 14,
     borderRadius: 19,
-    backgroundColor: Palette.text,
+    backgroundColor: Palette.accent,
     justifyContent: 'center',
   },
   sendLabel: {
     color: Palette.background,
     fontSize: 12,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
   },
 });

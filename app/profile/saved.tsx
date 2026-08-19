@@ -1,7 +1,9 @@
-import { PlaceholderImage } from '@/components/ui/placeholder-image';
+import { AppImage } from '@/components/ui/app-image';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { listingStatusStyle } from '@/components/ui/simulated-stage';
-import { Palette } from '@/constants/theme';
+import { Palette, Radius, Typography } from '@/constants/theme';
+import { getListingImage } from '@/data/images';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAuth } from '@/context/auth-context';
 import { useListings } from '@/context/listings-context';
 import { formatNaira } from '@/lib/format';
@@ -33,12 +35,12 @@ export default function SavedItemsScreen() {
                 <View key={item.id} style={styles.card}>
                   <Pressable onPress={() => router.push(`/product/${item.id}`)}>
                     <View style={styles.photo}>
-                      <PlaceholderImage style={styles.photoFill} />
+                      <AppImage source={getListingImage(item.id)} style={styles.photoFill} />
                       <Pressable
                         onPress={() => toggleSave(item.id, session.username)}
                         style={styles.heart}
                         hitSlop={8}>
-                        <Text style={styles.heartOn}>♥</Text>
+                        <Ionicons name="heart" size={13} color={Palette.live} />
                       </Pressable>
                       <View style={[styles.chip, { backgroundColor: status.backgroundColor }]}>
                         <Text style={[styles.chipText, { color: status.color }]}>{status.label}</Text>
@@ -85,7 +87,7 @@ const styles = StyleSheet.create({
   },
   photo: {
     aspectRatio: 1,
-    borderRadius: 8,
+    borderRadius: Radius.sm,
     overflow: 'hidden',
   },
   photoFill: {
@@ -102,10 +104,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  heartOn: {
-    fontSize: 13,
-    color: Palette.live,
-  },
   chip: {
     position: 'absolute',
     bottom: 6,
@@ -116,24 +114,25 @@ const styles = StyleSheet.create({
   },
   chipText: {
     fontSize: 10,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
   },
   title: {
     marginTop: 8,
     fontSize: 13,
     lineHeight: 17,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
   },
   seller: {
     marginTop: 2,
     fontSize: 12,
+    fontFamily: Typography.body,
     color: Palette.muted2,
   },
   price: {
     marginTop: 3,
-    fontSize: 13,
-    fontWeight: '700',
-    color: Palette.text,
+    fontSize: 14,
+    fontFamily: Typography.heading,
+    color: Palette.accent700,
   },
 });

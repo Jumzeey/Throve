@@ -1,8 +1,10 @@
+import { AppImage } from '@/components/ui/app-image';
 import { OfferSheet } from '@/components/ui/offer-sheet';
 import { PhotoPager } from '@/components/ui/photo-pager';
-import { PlaceholderImage } from '@/components/ui/placeholder-image';
 import { listingStatusStyle } from '@/components/ui/simulated-stage';
-import { Palette } from '@/constants/theme';
+import { Palette, Radius, Typography } from '@/constants/theme';
+import { getSellerAvatar } from '@/data/images';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
 import { useInbox } from '@/context/inbox-context';
@@ -38,7 +40,7 @@ export default function SellerListingScreen() {
     return (
       <View style={styles.screen}>
         <Pressable onPress={() => router.replace('/(tabs)/sell')} style={[styles.missingBack, { marginTop: insets.top + 12 }]}>
-          <Text style={styles.backText}>←</Text>
+          <Ionicons name="chevron-back" size={18} color={Palette.text} />
         </Pressable>
         <Text style={styles.missing}>This listing is unavailable.</Text>
       </View>
@@ -95,9 +97,9 @@ export default function SellerListingScreen() {
     <View style={styles.screen}>
       <ScrollView>
         <View>
-          <PhotoPager count={item.photoCount} />
+          <PhotoPager count={item.photoCount} listingId={item.id} />
           <Pressable onPress={() => router.replace('/(tabs)/sell')} style={[styles.backBtn, { top: insets.top + 8 }]}>
-            <Text style={styles.backText}>←</Text>
+            <Ionicons name="chevron-back" size={18} color={Palette.text} />
           </Pressable>
           <View style={[styles.status, { backgroundColor: status.backgroundColor }]}>
             <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
@@ -124,7 +126,7 @@ export default function SellerListingScreen() {
               const messagedLocked = !inbox.canSellerMessage(item.id, username, session.username);
               return (
                 <View key={username} style={styles.buyer}>
-                  <PlaceholderImage style={styles.avatar} />
+                  <AppImage source={getSellerAvatar(username)} style={styles.avatar} />
                   <Text style={styles.buyerName}>@{username}</Text>
                   <Pressable
                     disabled={messagedLocked}
@@ -216,21 +218,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backText: {
-    fontSize: 16,
-    color: Palette.text,
-  },
   status: {
     position: 'absolute',
     bottom: 12,
     left: 14,
     paddingHorizontal: 9,
     paddingVertical: 4,
-    borderRadius: 6,
+    borderRadius: Radius.sm,
   },
   statusText: {
     fontSize: 11,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
   },
   body: {
     paddingHorizontal: 20,
@@ -240,14 +238,14 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     lineHeight: 26,
-    fontWeight: '700',
+    fontFamily: Typography.heading,
     color: Palette.text,
   },
   price: {
     marginTop: 4,
-    fontSize: 19,
-    fontWeight: '700',
-    color: Palette.text,
+    fontSize: 22,
+    fontFamily: Typography.headingBold,
+    color: Palette.accent700,
   },
   stats: {
     flexDirection: 'row',
@@ -264,19 +262,20 @@ const styles = StyleSheet.create({
   },
   statValue: {
     fontSize: 16,
-    fontWeight: '700',
+    fontFamily: Typography.headingBold,
     color: Palette.text,
   },
   statLabel: {
     marginTop: 2,
     fontSize: 11,
+    fontFamily: Typography.body,
     color: Palette.muted2,
   },
   section: {
     marginTop: 20,
     marginBottom: 8,
     fontSize: 11,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.muted2,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -301,7 +300,7 @@ const styles = StyleSheet.create({
   buyerName: {
     flex: 1,
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
   },
   messageBtn: {
@@ -309,7 +308,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: Palette.text,
+    borderColor: Palette.accent,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Palette.background,
@@ -319,20 +318,20 @@ const styles = StyleSheet.create({
   },
   messageLabel: {
     fontSize: 11,
-    fontWeight: '600',
-    color: Palette.text,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.accent700,
   },
   offerBtn: {
     height: 30,
     paddingHorizontal: 10,
     borderRadius: 14,
-    backgroundColor: Palette.text,
+    backgroundColor: Palette.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
   offerLabel: {
     fontSize: 11,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.background,
   },
   note: {
@@ -407,16 +406,16 @@ const styles = StyleSheet.create({
     flexBasis: '22%',
     height: 44,
     borderWidth: 1,
-    borderColor: Palette.text,
-    borderRadius: 10,
+    borderColor: Palette.accent,
+    borderRadius: Radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Palette.background,
   },
   footerLabel: {
     fontSize: 12,
-    fontWeight: '600',
-    color: Palette.text,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.accent700,
   },
   deleteBtn: {
     flexGrow: 1,

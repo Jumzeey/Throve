@@ -1,6 +1,7 @@
-import { PlaceholderImage } from '@/components/ui/placeholder-image';
+import { AppImage } from '@/components/ui/app-image';
 import { ScreenHeader } from '@/components/ui/screen-header';
-import { Palette } from '@/constants/theme';
+import { Palette, Typography, Radius } from '@/constants/theme';
+import { getListingImage } from '@/data/images';
 import { useAuth } from '@/context/auth-context';
 import { ORDER_STATUS_LABELS, orderStatusColor, useCheckout } from '@/context/checkout-context';
 import { formatNaira } from '@/lib/format';
@@ -43,7 +44,7 @@ export default function OrdersScreen() {
               key={order.id}
               onPress={() => router.push({ pathname: '/checkout/order', params: { id: order.id } })}
               style={styles.row}>
-              <PlaceholderImage style={styles.thumb} />
+              <AppImage source={getListingImage(order.listingId)} style={styles.thumb} />
               <View style={styles.meta}>
                 <Text style={styles.title}>{order.listingTitle}</Text>
                 <Text style={styles.counterpart}>
@@ -84,16 +85,16 @@ const styles = StyleSheet.create({
     borderBottomColor: 'transparent',
   },
   tabOn: {
-    borderBottomColor: Palette.text,
+    borderBottomColor: Palette.accent,
   },
   tabLabel: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.muted3,
   },
   tabLabelOn: {
-    fontWeight: '700',
-    color: Palette.text,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.accent700,
   },
   body: {
     paddingHorizontal: 20,
@@ -116,14 +117,14 @@ const styles = StyleSheet.create({
   thumb: {
     width: 52,
     height: 52,
-    borderRadius: 8,
+    borderRadius: Radius.sm,
   },
   meta: {
     flex: 1,
   },
   title: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
   },
   counterpart: {
@@ -136,8 +137,8 @@ const styles = StyleSheet.create({
   },
   amount: {
     fontSize: 13,
-    fontWeight: '700',
-    color: Palette.text,
+    fontFamily: Typography.headingBold,
+    color: Palette.accent700,
   },
   status: {
     marginTop: 2,

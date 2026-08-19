@@ -1,6 +1,6 @@
 import { ErrorBanner } from '@/components/ui/error-banner';
 import { TextField } from '@/components/ui/text-field';
-import { Palette } from '@/constants/theme';
+import { Palette, Radius, Shadows, Typography } from '@/constants/theme';
 import { minOfferAmount, validateOfferAmount } from '@/context/inbox-context';
 import { formatNaira } from '@/lib/format';
 import { useState } from 'react';
@@ -71,18 +71,19 @@ export function OfferSheet({ visible, listingPrice, onClose, onSubmit }: Props) 
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: 'rgba(23,23,23,0.3)',
     justifyContent: 'flex-end',
   },
   sheet: {
     backgroundColor: Palette.background,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    borderTopLeftRadius: Radius.lg,
+    borderTopRightRadius: Radius.lg,
+    ...Shadows.lg,
     padding: 20,
   },
   title: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 17,
+    fontFamily: Typography.heading,
     color: Palette.text,
     marginBottom: 4,
   },
@@ -100,28 +101,28 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 46,
     borderWidth: 1,
-    borderColor: Palette.text,
-    borderRadius: 8,
+    borderColor: Palette.accent,
+    borderRadius: Radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Palette.background,
   },
   cancelLabel: {
     fontSize: 13,
-    fontWeight: '600',
-    color: Palette.text,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.accent700,
   },
   send: {
     flex: 1,
     height: 46,
-    borderRadius: 8,
+    borderRadius: Radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Palette.text,
+    backgroundColor: Palette.accent,
   },
   sendLabel: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.background,
   },
 });

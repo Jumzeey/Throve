@@ -1,6 +1,7 @@
-import { PlaceholderImage } from '@/components/ui/placeholder-image';
+import { AppImage } from '@/components/ui/app-image';
 import { listingStatusStyle } from '@/components/ui/simulated-stage';
-import { Palette } from '@/constants/theme';
+import { Palette, Radius, Typography } from '@/constants/theme';
+import { getListingImage } from '@/data/images';
 import { useAuth } from '@/context/auth-context';
 import { useListings } from '@/context/listings-context';
 import type { Listing } from '@/data/types';
@@ -107,7 +108,7 @@ function ListingThumb({ listing, onPress }: { listing: Listing; onPress: () => v
   return (
     <Pressable onPress={onPress} style={styles.cell}>
       <View style={styles.imageWrap}>
-        <PlaceholderImage style={styles.image} />
+        <AppImage source={getListingImage(listing.id)} style={styles.image} />
         <View style={[styles.badge, { backgroundColor: status.backgroundColor }]}>
           <Text style={[styles.badgeText, { color: status.color }]}>{status.label}</Text>
         </View>
@@ -140,21 +141,21 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   title: {
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 22,
+    fontFamily: Typography.heading,
     color: Palette.text,
   },
   newBtn: {
     height: 36,
     paddingHorizontal: 14,
     borderRadius: 18,
-    backgroundColor: Palette.text,
+    backgroundColor: Palette.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
   newLabel: {
     fontSize: 12,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.background,
   },
   body: {
@@ -173,7 +174,7 @@ const styles = StyleSheet.create({
   },
   goLiveLabel: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.live,
   },
   tabs: {
@@ -190,16 +191,15 @@ const styles = StyleSheet.create({
     borderBottomColor: 'transparent',
   },
   tabOn: {
-    borderBottomColor: Palette.text,
+    borderBottomColor: Palette.accent,
   },
   tabLabel: {
     fontSize: 12,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.muted3,
   },
   tabLabelOn: {
-    fontWeight: '700',
-    color: Palette.text,
+    color: Palette.accent700,
   },
   empty: {
     textAlign: 'center',
@@ -223,7 +223,7 @@ const styles = StyleSheet.create({
   image: {
     width: '100%',
     aspectRatio: 1,
-    borderRadius: 8,
+    borderRadius: Radius.sm,
   },
   badge: {
     position: 'absolute',
@@ -235,19 +235,19 @@ const styles = StyleSheet.create({
   },
   badgeText: {
     fontSize: 10,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
   },
   cardTitle: {
     marginTop: 8,
     fontSize: 13,
     lineHeight: 17,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
   },
   cardPrice: {
     marginTop: 3,
-    fontSize: 13,
-    fontWeight: '700',
-    color: Palette.text,
+    fontSize: 14,
+    fontFamily: Typography.heading,
+    color: Palette.accent700,
   },
 });

@@ -4,7 +4,7 @@ import { ErrorBanner } from '@/components/ui/error-banner';
 import { ReadyToggle } from '@/components/ui/ready-toggle';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
-import { Palette } from '@/constants/theme';
+import { Palette, Typography, Radius } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useListings } from '@/context/listings-context';
 import { useLive } from '@/context/live-context';
@@ -139,14 +139,15 @@ const styles = StyleSheet.create({
     height: 90,
     borderWidth: 2,
     borderStyle: 'dashed',
-    borderColor: '#b8b5b0',
-    borderRadius: 10,
+    borderColor: Palette.border,
+    borderRadius: Radius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Palette.hatch,
+    backgroundColor: Palette.surface,
   },
   coverSet: {
-    backgroundColor: Palette.hatchAlt,
+    backgroundColor: Palette.accent100,
+    borderColor: Palette.accent300,
     borderStyle: 'solid',
   },
   coverLabel: {
@@ -161,7 +162,7 @@ const styles = StyleSheet.create({
   section: {
     marginTop: 6,
     fontSize: 11,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.muted2,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -173,13 +174,13 @@ const styles = StyleSheet.create({
   product: {
     height: 42,
     paddingHorizontal: 12,
-    borderRadius: 8,
+    borderRadius: Radius.sm,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
   productOn: {
-    backgroundColor: Palette.text,
+    backgroundColor: Palette.accent,
   },
   productOff: {
     backgroundColor: Palette.background,
@@ -188,7 +189,7 @@ const styles = StyleSheet.create({
   },
   productTitle: {
     fontSize: 12,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
   },
   productTitleOn: {
@@ -205,7 +206,7 @@ const styles = StyleSheet.create({
     padding: 12,
     borderWidth: 1,
     borderColor: Palette.borderSoft,
-    borderRadius: 10,
+    borderRadius: Radius.md,
   },
   toggleLabel: {
     fontSize: 13,

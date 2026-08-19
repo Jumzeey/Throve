@@ -4,7 +4,7 @@ import { PlaceholderImage } from '@/components/ui/placeholder-image';
 import { ReserveNotice } from '@/components/ui/reserve-notice';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
-import { Palette } from '@/constants/theme';
+import { Palette, Radius, Typography } from '@/constants/theme';
 import { leaveCheckout, useCheckout } from '@/context/checkout-context';
 import { useLive } from '@/context/live-context';
 import { formatNaira } from '@/lib/format';
@@ -123,33 +123,35 @@ const styles = StyleSheet.create({
     padding: 12,
     borderWidth: 1,
     borderColor: Palette.borderSoft,
-    borderRadius: 10,
+    borderRadius: Radius.md,
     marginBottom: 6,
   },
   thumb: {
     width: 52,
     height: 52,
-    borderRadius: 8,
+    borderRadius: Radius.sm,
   },
   itemTitle: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
   },
   itemMeta: {
     marginTop: 2,
     fontSize: 12,
-    color: Palette.muted2,
+    fontFamily: Typography.heading,
+    color: Palette.accent700,
   },
   section: {
     fontSize: 11,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.muted2,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   hint: {
     fontSize: 11,
+    fontFamily: Typography.body,
     color: Palette.muted3,
   },
   cta: {
@@ -163,6 +165,7 @@ const styles = StyleSheet.create({
   expired: {
     fontSize: 14,
     lineHeight: 22,
+    fontFamily: Typography.body,
     color: Palette.muted,
   },
 });

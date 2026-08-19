@@ -29,11 +29,11 @@ export function ListingGrid({ listings }: Props) {
 
 const styles = StyleSheet.create({
   grid: {
-    gap: 14,
+    gap: 16,
   },
   row: {
     flexDirection: 'row',
-    gap: 14,
+    gap: 10,
   },
   cell: {
     flex: 1,

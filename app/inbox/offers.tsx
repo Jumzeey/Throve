@@ -1,5 +1,5 @@
 import { ScreenHeader } from '@/components/ui/screen-header';
-import { Palette } from '@/constants/theme';
+import { Palette, Radius, Typography } from '@/constants/theme';
 import { offerStatusStyle, useInbox } from '@/context/inbox-context';
 import { useAuth } from '@/context/auth-context';
 import { useListings } from '@/context/listings-context';
@@ -104,16 +104,15 @@ const styles = StyleSheet.create({
     borderBottomColor: 'transparent',
   },
   tabOn: {
-    borderBottomColor: Palette.text,
+    borderBottomColor: Palette.accent,
   },
   tabLabel: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.muted3,
   },
   tabLabelOn: {
-    fontWeight: '700',
-    color: Palette.text,
+    color: Palette.accent700,
   },
   body: {
     paddingHorizontal: 20,
@@ -128,7 +127,7 @@ const styles = StyleSheet.create({
   card: {
     borderWidth: 1,
     borderColor: Palette.borderSoft,
-    borderRadius: 10,
+    borderRadius: Radius.md,
     padding: 14,
     marginBottom: 12,
   },
@@ -141,7 +140,7 @@ const styles = StyleSheet.create({
   cardTitle: {
     flex: 1,
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
   },
   chip: {
@@ -151,17 +150,18 @@ const styles = StyleSheet.create({
   },
   chipText: {
     fontSize: 11,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
   },
   cardMeta: {
     marginTop: 4,
     fontSize: 12,
+    fontFamily: Typography.body,
     color: Palette.muted2,
   },
   cardAmount: {
     marginTop: 8,
     fontSize: 17,
-    fontWeight: '700',
-    color: Palette.text,
+    fontFamily: Typography.heading,
+    color: Palette.accent800,
   },
 });

@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button';
-import { Palette } from '@/constants/theme';
+import { Palette, Typography, Radius } from '@/constants/theme';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAuth } from '@/context/auth-context';
 import { Redirect, useRouter } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
@@ -16,7 +17,7 @@ export default function HostAccessScreen() {
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-      <Text style={styles.lock}>🔒</Text>
+      <Ionicons name="lock-closed-outline" size={36} color={Palette.accent} />
       <Text style={styles.title}>Live hosting is invite-only</Text>
       <Text style={styles.copy}>
         Throve is currently rolling out live-shopping hosting to a small group of approved sellers. There's no application to fill
@@ -37,18 +38,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     gap: 14,
   },
-  lock: {
-    fontSize: 36,
-  },
   title: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 20,
+    fontFamily: Typography.headingBold,
     color: Palette.text,
     textAlign: 'center',
   },
   copy: {
     fontSize: 13,
     lineHeight: 21,
+    fontFamily: Typography.body,
     color: Palette.muted,
     textAlign: 'center',
     maxWidth: 280,

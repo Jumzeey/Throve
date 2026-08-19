@@ -2,8 +2,9 @@ import { Button } from '@/components/ui/button';
 import { ErrorBanner } from '@/components/ui/error-banner';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
-import { Palette } from '@/constants/theme';
+import { Palette, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -71,7 +72,9 @@ export default function SignupScreen() {
           </ScrollView>
         ) : (
           <View style={styles.verify}>
-            <Text style={styles.emoji}>✉️</Text>
+            <View style={styles.iconCircle}>
+              <Ionicons name="mail-outline" size={28} color={Palette.background} />
+            </View>
             <Text style={styles.verifyTitle}>Check your email</Text>
             <Text style={styles.verifyCopy}>We sent a verification link to {email.trim()}. Click it to continue.</Text>
             <ErrorBanner message={error} />
@@ -84,29 +87,18 @@ export default function SignupScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: Palette.background,
-  },
-  flex: {
-    flex: 1,
-  },
-  form: {
-    paddingHorizontal: 24,
-    paddingBottom: 24,
-  },
-  fields: {
-    gap: 12,
-  },
+  screen: { flex: 1, backgroundColor: Palette.background },
+  flex: { flex: 1 },
+  form: { paddingHorizontal: 24, paddingBottom: 24 },
+  fields: { gap: 12 },
   helper: {
     marginTop: 12,
     fontSize: 12,
     lineHeight: 18,
+    fontFamily: Typography.body,
     color: Palette.muted3,
   },
-  submit: {
-    marginTop: 20,
-  },
+  submit: { marginTop: 20 },
   verify: {
     flex: 1,
     alignItems: 'center',
@@ -114,23 +106,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     gap: 14,
   },
-  emoji: {
-    fontSize: 40,
+  iconCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: Palette.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   verifyTitle: {
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: 18,
+    fontFamily: Typography.heading,
     color: Palette.text,
   },
   verifyCopy: {
     fontSize: 13,
     lineHeight: 21,
+    fontFamily: Typography.body,
     color: Palette.muted,
     textAlign: 'center',
     maxWidth: 260,
   },
-  simulate: {
-    marginTop: 8,
-    height: 48,
-  },
+  simulate: { marginTop: 8 },
 });

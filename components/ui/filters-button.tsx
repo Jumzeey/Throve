@@ -1,4 +1,4 @@
-import { Palette } from '@/constants/theme';
+import { Palette, Typography } from '@/constants/theme';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
 type Props = {
@@ -26,7 +26,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 12,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
   },
 });

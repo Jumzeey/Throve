@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { PhotoPager } from '@/components/ui/photo-pager';
-import { Palette } from '@/constants/theme';
+import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { isListingFormPublishable, parseListingPrice, useListings } from '@/context/listings-context';
 import { formatNaira } from '@/lib/format';
@@ -88,14 +88,14 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     lineHeight: 26,
-    fontWeight: '700',
+    fontFamily: Typography.heading,
     color: Palette.text,
   },
   price: {
     marginTop: 4,
-    fontSize: 19,
-    fontWeight: '700',
-    color: Palette.text,
+    fontSize: 22,
+    fontFamily: Typography.headingBold,
+    color: Palette.accent700,
   },
   chips: {
     flexDirection: 'row',
@@ -106,17 +106,19 @@ const styles = StyleSheet.create({
   chip: {
     paddingHorizontal: 9,
     paddingVertical: 4,
-    borderRadius: 6,
+    borderRadius: Radius.sm,
     backgroundColor: Palette.chipBg,
   },
   chipText: {
     fontSize: 12,
+    fontFamily: Typography.body,
     color: Palette.muted,
   },
   description: {
     marginTop: 14,
     fontSize: 13,
     lineHeight: 21,
+    fontFamily: Typography.body,
     color: Palette.muted,
   },
   actions: {

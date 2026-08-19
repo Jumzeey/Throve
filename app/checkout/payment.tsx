@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { ScreenHeader } from '@/components/ui/screen-header';
-import { Palette } from '@/constants/theme';
+import { Palette, Radius, Typography } from '@/constants/theme';
 import { useCheckout } from '@/context/checkout-context';
 import { useLive } from '@/context/live-context';
 import { getDeliveryOption } from '@/data/checkout';
@@ -70,26 +70,28 @@ const styles = StyleSheet.create({
     backgroundColor: '#fdf3e3',
     borderWidth: 1,
     borderColor: '#ecd39a',
-    borderRadius: 10,
+    borderRadius: Radius.md,
     marginBottom: 24,
   },
   noticeText: {
     fontSize: 13,
     lineHeight: 20,
+    fontFamily: Typography.body,
     color: '#8a6112',
     textAlign: 'center',
   },
   amountLabel: {
     textAlign: 'center',
     fontSize: 12,
+    fontFamily: Typography.body,
     color: Palette.muted2,
     marginBottom: 8,
   },
   amount: {
     textAlign: 'center',
     fontSize: 30,
-    fontWeight: '700',
-    color: Palette.text,
+    fontFamily: Typography.headingBold,
+    color: Palette.accent700,
     marginBottom: 28,
   },
   cta: {

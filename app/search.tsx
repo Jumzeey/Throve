@@ -1,14 +1,16 @@
+import { AppImage } from '@/components/ui/app-image';
 import { FiltersButton } from '@/components/ui/filters-button';
 import { FiltersSheet } from '@/components/ui/filters-sheet';
 import { ListingCard } from '@/components/ui/listing-card';
 import { ListingGrid } from '@/components/ui/listing-grid';
-import { PlaceholderImage } from '@/components/ui/placeholder-image';
 import { TextField } from '@/components/ui/text-field';
-import { Palette } from '@/constants/theme';
+import { Palette, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useListings } from '@/context/listings-context';
 import { DEFAULT_FILTERS, filterListings, hasSearchCriteria } from '@/data/filter-listings';
+import { getSellerAvatar } from '@/data/images';
 import type { ListingFilters } from '@/data/types';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -51,7 +53,7 @@ export default function SearchScreen() {
     <View style={[styles.screen, { paddingTop: insets.top }]}>
       <View style={styles.searchRow}>
         <Pressable onPress={() => router.back()} hitSlop={12} style={styles.back}>
-          <Text style={styles.backText}>←</Text>
+          <Ionicons name="chevron-back" size={18} color={Palette.text} />
         </Pressable>
         <TextField
           placeholder="Search products, brands, sellers"
@@ -62,10 +64,12 @@ export default function SearchScreen() {
           returnKeyType="search"
           style={styles.searchField}
         />
+        <Pressable onPress={() => setSheetOpen(true)} hitSlop={8}>
+          <Ionicons name="options-outline" size={20} color={Palette.text} />
+        </Pressable>
       </View>
       <View style={styles.countRow}>
         <Text style={styles.count}>{searched ? `${results.length} results` : 'Search to see results'}</Text>
-        <FiltersButton onPress={() => setSheetOpen(true)} />
       </View>
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         {searched && results.length === 0 && sellers.length === 0 ? (
@@ -81,7 +85,7 @@ export default function SearchScreen() {
                     onPress={() => router.push({ pathname: '/seller/[username]', params: { username: name } })}
                     style={styles.sellerRow}>
                     <View style={styles.sellerAvatarWrap}>
-                      <PlaceholderImage style={styles.sellerAvatar} />
+                      <AppImage source={getSellerAvatar(name)} style={styles.sellerAvatar} />
                     </View>
                     <Text style={styles.sellerName}>@{name}</Text>
                   </Pressable>
@@ -90,11 +94,7 @@ export default function SearchScreen() {
             ) : null}
             <ListingGrid
               listings={results.map((listing) => (
-                <ListingCard
-                  key={listing.id}
-                  listing={listing}
-                  onPress={() => router.push(`/product/${listing.id}`)}
-                />
+                <ListingCard key={listing.id} listing={listing} onPress={() => router.push(`/product/${listing.id}`)} />
               ))}
             />
           </>
@@ -105,20 +105,14 @@ export default function SearchScreen() {
         value={filters}
         showDepartment
         onClose={() => setSheetOpen(false)}
-        onApply={(next) => {
-          setFilters(next);
-          setSheetOpen(false);
-        }}
+        onApply={(next) => { setFilters(next); setSheetOpen(false); }}
       />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: Palette.background,
-  },
+  screen: { flex: 1, backgroundColor: Palette.background },
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -127,17 +121,11 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 10,
   },
-  back: {
-    paddingVertical: 4,
-  },
-  backText: {
-    fontSize: 16,
-    color: Palette.text,
-  },
+  back: { paddingVertical: 4 },
   searchField: {
     flex: 1,
-    height: 42,
-    borderRadius: 21,
+    height: 38,
+    borderRadius: 19,
     paddingHorizontal: 16,
     fontSize: 14,
   },
@@ -148,26 +136,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 10,
   },
-  count: {
-    fontSize: 12,
-    color: Palette.muted2,
-  },
-  body: {
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-  },
+  count: { fontSize: 12, fontFamily: Typography.body, color: Palette.muted2 },
+  body: { paddingHorizontal: 20, paddingBottom: 24 },
   empty: {
     textAlign: 'center',
     paddingTop: 50,
     fontSize: 13,
+    fontFamily: Typography.body,
     color: Palette.muted3,
   },
-  sellers: {
-    marginBottom: 12,
-  },
+  sellers: { marginBottom: 12 },
   sellersLabel: {
     fontSize: 11,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.muted2,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
@@ -179,19 +160,7 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingVertical: 8,
   },
-  sellerAvatarWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    overflow: 'hidden',
-  },
-  sellerAvatar: {
-    width: 36,
-    height: 36,
-  },
-  sellerName: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Palette.text,
-  },
+  sellerAvatarWrap: { width: 36, height: 36, borderRadius: 18, overflow: 'hidden' },
+  sellerAvatar: { width: 36, height: 36 },
+  sellerName: { fontSize: 13, fontFamily: Typography.bodySemiBold, color: Palette.text },
 });

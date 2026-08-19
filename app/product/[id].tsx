@@ -1,13 +1,16 @@
+import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
 import { OfferSheet } from '@/components/ui/offer-sheet';
 import { PhotoPager } from '@/components/ui/photo-pager';
-import { PlaceholderImage } from '@/components/ui/placeholder-image';
-import { Palette } from '@/constants/theme';
+import { StarRating } from '@/components/ui/star-rating';
+import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
 import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
-import { formatNaira, starString } from '@/lib/format';
+import { getSellerAvatar } from '@/data/images';
+import { formatNaira } from '@/lib/format';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -31,15 +34,13 @@ export default function ProductScreen() {
     return () => clearTimeout(timer);
   }, [banner]);
 
-  if (!session) {
-    return <Redirect href="/(auth)/welcome" />;
-  }
+  if (!session) return <Redirect href="/(auth)/welcome" />;
 
   if (!listing) {
     return (
       <View style={styles.screen}>
         <Pressable onPress={() => router.back()} style={[styles.missingBack, { marginTop: insets.top + 12 }]}>
-          <Text style={styles.backText}>←</Text>
+          <Ionicons name="chevron-back" size={18} color={Palette.text} />
         </Pressable>
         <Text style={styles.missing}>This listing is unavailable.</Text>
       </View>
@@ -54,7 +55,6 @@ export default function ProductScreen() {
   const canOffer = !isOwn && product.status === 'available';
   const canBuy = !isOwn && product.status === 'available';
   const sellerRating = checkout.ratingInfo(product.seller);
-  const sellerLine = sellerRating.count > 0 ? `${starString(sellerRating.avg)} (${sellerRating.count} reviews)` : 'No reviews yet';
 
   function messageSeller() {
     const conv = inbox.openOrCreateConversation(product.seller, product.id, username);
@@ -70,19 +70,17 @@ export default function ProductScreen() {
     <View style={styles.screen}>
       <ScrollView>
         <View>
-          <PhotoPager count={listing.photoCount} />
-          <Pressable onPress={() => router.back()} style={[styles.backBtn, { top: insets.top + 8 }]}>
-            <Text style={styles.backText}>←</Text>
+          <PhotoPager count={listing.photoCount} listingId={listing.id} />
+          <Pressable onPress={() => router.back()} style={[styles.circleBtn, { top: insets.top + 8, left: 14 }]}>
+            <Ionicons name="chevron-back" size={18} color={Palette.text} />
           </Pressable>
-          <Pressable
-            onPress={() => toggleSave(product.id, username)}
-            style={[styles.saveBtn, { top: insets.top + 8 }]}>
-            <Text style={[styles.saveHeart, saved ? styles.saveOn : styles.saveOff]}>♥</Text>
+          <Pressable onPress={() => toggleSave(product.id, username)} style={[styles.circleBtn, { top: insets.top + 8, right: 14 }]}>
+            <Ionicons name={saved ? 'heart' : 'heart-outline'} size={16} color={saved ? Palette.live : Palette.muted2} />
           </Pressable>
           {statusLabel ? (
             <View style={[styles.status, listing.status === 'reserved' ? styles.reserved : styles.sold]}>
               <Text style={[styles.statusText, listing.status === 'reserved' ? styles.reservedText : styles.soldText]}>
-                {statusLabel}
+                {statusLabel.toUpperCase()}
               </Text>
             </View>
           ) : null}
@@ -107,21 +105,24 @@ export default function ProductScreen() {
           <Pressable
             onPress={() => router.push({ pathname: '/seller/[username]', params: { username: listing.seller } })}
             style={styles.sellerCard}>
-            <PlaceholderImage style={styles.sellerAvatar} />
+            <AppImage source={getSellerAvatar(listing.seller)} style={styles.sellerAvatar} />
             <View style={styles.sellerMeta}>
               <Text style={styles.sellerName}>@{listing.seller}</Text>
-              <Text style={styles.sellerRating}>{sellerLine}</Text>
+              <View style={styles.ratingRow}>
+                <StarRating rating={sellerRating.avg} size={12} />
+                <Text style={styles.sellerRating}>
+                  {sellerRating.count > 0 ? `(${sellerRating.count})` : 'No reviews'}
+                </Text>
+              </View>
             </View>
-            <Text style={styles.sellerChevron}>›</Text>
+            <Ionicons name="chevron-forward" size={16} color={Palette.muted2} />
           </Pressable>
         </View>
       </ScrollView>
       <View style={[styles.actions, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-        {!isOwn ? <Button label="Message" variant="secondary" onPress={messageSeller} style={styles.action} /> : null}
-        {!isOwn ? (
-          <Button label="Make offer" variant="secondary" disabled={!canOffer} onPress={() => setOfferOpen(true)} style={styles.action} />
-        ) : null}
-        {canBuy ? <Button label="Buy now" onPress={buyNow} style={styles.action} /> : null}
+        {!isOwn ? <Button label="Message" variant="secondary" onPress={messageSeller} style={styles.actionSm} /> : null}
+        {!isOwn ? <Button label="Make offer" variant="secondary" disabled={!canOffer} onPress={() => setOfferOpen(true)} style={styles.actionSm} /> : null}
+        {canBuy ? <Button label="Buy now" onPress={buyNow} style={styles.actionLg} /> : null}
       </View>
       {!isOwn ? (
         <OfferSheet
@@ -154,44 +155,15 @@ function Chip({ label }: { label: string }) {
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: Palette.background,
-  },
-  backBtn: {
+  screen: { flex: 1, backgroundColor: Palette.background },
+  circleBtn: {
     position: 'absolute',
-    top: 14,
-    left: 14,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: 'rgba(255,255,255,0.92)',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  backText: {
-    fontSize: 16,
-    color: Palette.text,
-  },
-  saveBtn: {
-    position: 'absolute',
-    top: 14,
-    right: 14,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  saveHeart: {
-    fontSize: 15,
-  },
-  saveOn: {
-    color: Palette.live,
-  },
-  saveOff: {
-    color: '#b8b5b0',
   },
   status: {
     position: 'absolute',
@@ -199,83 +171,41 @@ const styles = StyleSheet.create({
     left: 14,
     paddingHorizontal: 9,
     paddingVertical: 4,
-    borderRadius: 6,
+    borderRadius: Radius.sm,
   },
-  reserved: {
-    backgroundColor: '#fdf3e3',
-  },
-  sold: {
-    backgroundColor: Palette.chipBg,
-  },
-  statusText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  reservedText: {
-    color: '#8a6112',
-  },
-  soldText: {
-    color: Palette.muted,
-  },
+  reserved: { backgroundColor: Palette.accent100 },
+  sold: { backgroundColor: Palette.chipBg },
+  statusText: { fontSize: 10, fontFamily: Typography.bodySemiBold, letterSpacing: 0.5 },
+  reservedText: { color: Palette.accent700 },
+  soldText: { color: Palette.muted },
   banner: {
     position: 'absolute',
     left: 14,
     right: 14,
     paddingVertical: 10,
     paddingHorizontal: 14,
-    backgroundColor: Palette.text,
-    borderRadius: 10,
+    backgroundColor: Palette.accent,
+    borderRadius: Radius.md,
   },
-  bannerText: {
-    fontSize: 13,
-    color: Palette.background,
-    textAlign: 'center',
-  },
-  body: {
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 24,
-  },
+  bannerText: { fontSize: 13, fontFamily: Typography.bodySemiBold, color: Palette.background, textAlign: 'center' },
+  body: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 24 },
   title: {
     fontSize: 20,
     lineHeight: 26,
-    fontWeight: '700',
+    fontFamily: Typography.heading,
     color: Palette.text,
   },
   price: {
     marginTop: 4,
-    fontSize: 19,
-    fontWeight: '700',
-    color: Palette.text,
+    fontSize: 22,
+    fontFamily: Typography.headingBold,
+    color: Palette.accent700,
   },
-  chips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 10,
-  },
-  chip: {
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 6,
-    backgroundColor: Palette.chipBg,
-  },
-  chipText: {
-    fontSize: 12,
-    color: Palette.muted,
-  },
-  description: {
-    marginTop: 16,
-    fontSize: 14,
-    lineHeight: 22,
-    color: Palette.muted,
-  },
-  shipping: {
-    marginTop: 12,
-    fontSize: 13,
-    lineHeight: 20,
-    color: Palette.muted2,
-  },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  chip: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: Radius.sm, backgroundColor: Palette.chipBg },
+  chipText: { fontSize: 12, fontFamily: Typography.body, color: Palette.muted },
+  description: { marginTop: 16, fontSize: 14, lineHeight: 22, fontFamily: Typography.body, color: Palette.muted },
+  shipping: { marginTop: 12, fontSize: 13, lineHeight: 20, fontFamily: Typography.body, color: Palette.muted2 },
   sellerCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -284,30 +214,13 @@ const styles = StyleSheet.create({
     padding: 12,
     borderWidth: 1,
     borderColor: Palette.borderSoft,
-    borderRadius: 10,
+    borderRadius: Radius.md,
   },
-  sellerAvatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-  },
-  sellerMeta: {
-    flex: 1,
-  },
-  sellerName: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Palette.text,
-  },
-  sellerRating: {
-    marginTop: 1,
-    fontSize: 12,
-    color: Palette.muted2,
-  },
-  sellerChevron: {
-    fontSize: 16,
-    color: Palette.muted2,
-  },
+  sellerAvatar: { width: 34, height: 34, borderRadius: 17 },
+  sellerMeta: { flex: 1 },
+  sellerName: { fontSize: 13, fontFamily: Typography.bodySemiBold, color: Palette.text },
+  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  sellerRating: { fontSize: 12, fontFamily: Typography.body, color: Palette.muted2 },
   actions: {
     flexDirection: 'row',
     gap: 10,
@@ -316,16 +229,8 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: Palette.borderSoft,
   },
-  action: {
-    flex: 1,
-    height: 48,
-  },
-  missing: {
-    marginTop: 40,
-    textAlign: 'center',
-    color: Palette.muted2,
-  },
-  missingBack: {
-    marginLeft: 20,
-  },
+  actionSm: { flex: 1 },
+  actionLg: { flex: 1.4 },
+  missing: { marginTop: 40, textAlign: 'center', fontFamily: Typography.body, color: Palette.muted2 },
+  missingBack: { marginLeft: 20 },
 });

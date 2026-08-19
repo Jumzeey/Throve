@@ -1,5 +1,6 @@
-import { PlaceholderImage } from '@/components/ui/placeholder-image';
+import { AppImage } from '@/components/ui/app-image';
 import { Palette } from '@/constants/theme';
+import { getListingImage } from '@/data/images';
 import { useState } from 'react';
 import { Dimensions, NativeScrollEvent, NativeSyntheticEvent, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -7,11 +8,13 @@ const WIDTH = Dimensions.get('window').width;
 
 type Props = {
   count: number;
+  listingId?: string;
 };
 
-export function PhotoPager({ count }: Props) {
+export function PhotoPager({ count, listingId }: Props) {
   const slides = Math.max(1, Math.min(count, 8));
   const [index, setIndex] = useState(0);
+  const source = listingId ? getListingImage(listingId) : null;
 
   function onScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
     const next = Math.round(event.nativeEvent.contentOffset.x / WIDTH);
@@ -20,14 +23,9 @@ export function PhotoPager({ count }: Props) {
 
   return (
     <View>
-      <ScrollView
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        onScroll={onScroll}
-        scrollEventThrottle={16}>
+      <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} onScroll={onScroll} scrollEventThrottle={16}>
         {Array.from({ length: slides }).map((_, slide) => (
-          <PlaceholderImage key={slide} style={styles.slide} />
+          <AppImage key={slide} source={slide === 0 ? source : null} style={styles.slide} />
         ))}
       </ScrollView>
       {slides > 1 ? (
@@ -42,10 +40,7 @@ export function PhotoPager({ count }: Props) {
 }
 
 const styles = StyleSheet.create({
-  slide: {
-    width: WIDTH,
-    aspectRatio: 1,
-  },
+  slide: { width: WIDTH, aspectRatio: 1 },
   dots: {
     position: 'absolute',
     bottom: 12,
@@ -55,15 +50,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
   },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  dotActive: {
-    backgroundColor: Palette.text,
-  },
-  dotIdle: {
-    backgroundColor: 'rgba(255,255,255,0.8)',
-  },
+  dot: { width: 6, height: 6, borderRadius: 3 },
+  dotActive: { backgroundColor: Palette.accent },
+  dotIdle: { backgroundColor: 'rgba(255,255,255,0.8)' },
 });

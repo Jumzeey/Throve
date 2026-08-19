@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
+import { Dialog } from '@/components/ui/dialog';
 import { ScreenHeader } from '@/components/ui/screen-header';
-import { Palette } from '@/constants/theme';
+import { Palette, Typography, Radius } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
@@ -10,7 +11,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { session, logout, updateSettings, deactivateAccount } = useAuth();
+  const { session, logout, deactivateAccount } = useAuth();
   const inbox = useInbox();
   const { hideActiveForSeller } = useListings();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -21,8 +22,7 @@ export default function SettingsScreen() {
   }
 
   const username = session.username;
-  const offersOn = session.notifOffers !== false;
-  const messagesOn = session.notifMessages !== false;
+  const blockedCount = inbox.blockedUsers.length;
 
   async function onLogout() {
     await logout();
@@ -40,89 +40,51 @@ export default function SettingsScreen() {
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="Settings and account" onBack={() => router.back()} />
+      <ScreenHeader title="Settings" onBack={() => router.back()} />
       <ScrollView contentContainerStyle={styles.body}>
         <Text style={styles.section}>Account</Text>
         <View style={styles.group}>
-          <InfoRow label="Email" value={session.email} />
-          <InfoRow label="Phone number" value={session.phone || 'Not set'} />
-          <Pressable onPress={() => router.push('/profile/edit')} style={styles.navRow}>
+          <Pressable onPress={() => router.push('/profile/edit')} style={styles.row}>
             <Text style={styles.rowLabel}>Edit profile</Text>
-            <Text style={styles.chevron}>›</Text>
+          </Pressable>
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>Email address</Text>
+            <Text style={styles.rowValue}>{session.email}</Text>
+          </View>
+          <Pressable style={styles.row}>
+            <Text style={styles.rowLabel}>Login &amp; security</Text>
+          </Pressable>
+          <Pressable style={styles.row}>
+            <Text style={styles.rowLabel}>Blocked users{blockedCount > 0 ? ` (${blockedCount})` : ''}</Text>
           </Pressable>
         </View>
-        <Text style={styles.section}>Login / security</Text>
-        <Text style={styles.note}>Sign-in uses a simulated magic link sent to your email.</Text>
-        <Text style={styles.section}>Notifications</Text>
-        <View style={styles.group}>
-          <ToggleRow
-            label="Offer alerts"
-            on={offersOn}
-            onToggle={() => updateSettings({ notifOffers: !offersOn })}
-          />
-          <ToggleRow
-            label="New messages"
-            on={messagesOn}
-            onToggle={() => updateSettings({ notifMessages: !messagesOn })}
-          />
+
+        <Text style={styles.section}>Prototype</Text>
+        <View style={styles.protoBox}>
+          <Text style={styles.protoText}>
+            This is a working prototype — accounts are real, but purchases and payments are simulated.
+          </Text>
         </View>
-        <Text style={styles.section}>Blocked users</Text>
-        <View style={styles.group}>
-          {inbox.blockedUsers.length === 0 ? (
-            <Text style={styles.empty}>No blocked users.</Text>
-          ) : (
-            inbox.blockedUsers.map((username) => (
-              <View key={username} style={styles.blockRow}>
-                <Text style={styles.rowLabel}>@{username}</Text>
-                <Pressable onPress={() => inbox.toggleBlock(username)} hitSlop={8}>
-                  <Text style={styles.unblock}>Unblock</Text>
-                </Pressable>
-              </View>
-            ))
-          )}
-        </View>
-        <View style={styles.actions}>
-          <Button label="Log out" variant="secondary" onPress={onLogout} style={styles.logout} />
-          {confirmDelete ? (
-            <View style={styles.confirm}>
-              <Text style={styles.confirmText}>
-                This deactivates your account: you'll be logged out, your active listings will be hidden, and normal
-                account access will be disabled. Order and review records remain for marketplace integrity.
-              </Text>
-              <View style={styles.confirmBtns}>
-                <Button label="Cancel" variant="danger" onPress={() => setConfirmDelete(false)} style={styles.confirmBtn} />
-                <Pressable
-                  disabled={busy}
-                  onPress={onConfirmDeactivate}
-                  style={[styles.deactivateBtn, busy ? styles.busy : null]}>
-                  <Text style={styles.deactivateLabel}>Deactivate</Text>
-                </Pressable>
-              </View>
-            </View>
-          ) : null}
-          <Button label="Delete account" variant="danger" onPress={() => setConfirmDelete(true)} />
+
+        <Text style={styles.section}>More</Text>
+        <View style={styles.moreGroup}>
+          <Button label="Log out" variant="secondary" onPress={onLogout} style={styles.logoutBtn} />
+          <Pressable onPress={() => setConfirmDelete(true)} style={styles.deleteBtn}>
+            <Text style={styles.deleteLabel}>Delete account</Text>
+          </Pressable>
         </View>
       </ScrollView>
-    </View>
-  );
-}
 
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.infoRow}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.infoValue}>{value}</Text>
-    </View>
-  );
-}
-
-function ToggleRow({ label, on, onToggle }: { label: string; on: boolean; onToggle: () => void }) {
-  return (
-    <View style={styles.infoRow}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Pressable onPress={onToggle} style={[styles.track, on ? styles.trackOn : styles.trackOff]}>
-        <View style={[styles.knob, on ? styles.knobOn : null]} />
-      </Pressable>
+      <Dialog
+        visible={confirmDelete}
+        title="Delete your account?"
+        body="This deactivates your account — you'll be logged out and normal access disabled. Active listings are hidden. Records needed for order, transaction and review history may be retained."
+        actions={[
+          { label: 'Cancel', onPress: () => setConfirmDelete(false) },
+          { label: 'Deactivate account', variant: 'primary', onPress: onConfirmDeactivate },
+        ]}
+        onClose={() => setConfirmDelete(false)}
+      />
     </View>
   );
 }
@@ -133,143 +95,71 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.background,
   },
   body: {
-    paddingBottom: 32,
+    paddingBottom: 40,
   },
   section: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingHorizontal: 18,
+    marginTop: 16,
+    marginBottom: 6,
     fontSize: 11,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.muted2,
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    letterSpacing: 0.6,
   },
   group: {
-    paddingHorizontal: 20,
-    paddingTop: 6,
-    paddingBottom: 16,
+    paddingHorizontal: 18,
   },
-  infoRow: {
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 12,
+    paddingVertical: 11,
     borderBottomWidth: 1,
-    borderBottomColor: Palette.hatch,
-  },
-  navRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Palette.hatch,
+    borderBottomColor: Palette.divider,
   },
   rowLabel: {
     fontSize: 14,
+    fontFamily: Typography.body,
     color: Palette.text,
   },
-  infoValue: {
-    fontSize: 13,
+  rowValue: {
+    fontSize: 14,
+    fontFamily: Typography.body,
     color: Palette.muted2,
   },
-  chevron: {
-    fontSize: 16,
-    color: Palette.muted2,
-  },
-  note: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 16,
-    fontSize: 13,
-    lineHeight: 20,
-    color: Palette.muted,
-  },
-  empty: {
-    paddingVertical: 12,
-    fontSize: 13,
-    color: Palette.muted3,
-  },
-  blockRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Palette.hatch,
-  },
-  unblock: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Palette.live,
-  },
-  actions: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 24,
-  },
-  logout: {
-    height: 48,
-    marginBottom: 10,
-  },
-  confirm: {
-    padding: 14,
-    backgroundColor: Palette.errorBg,
+  protoBox: {
+    marginHorizontal: 18,
+    padding: 12,
     borderWidth: 1,
-    borderColor: Palette.errorBorder,
-    borderRadius: 8,
-    marginBottom: 10,
+    borderColor: Palette.divider,
+    borderRadius: Radius.md,
+    marginBottom: 16,
   },
-  confirmText: {
-    fontSize: 13,
-    lineHeight: 20,
-    color: Palette.errorText,
-    marginBottom: 10,
+  protoText: {
+    fontSize: 12,
+    fontFamily: Typography.body,
+    color: Palette.muted,
+    lineHeight: 18,
   },
-  confirmBtns: {
-    flexDirection: 'row',
-    gap: 10,
+  moreGroup: {
+    paddingHorizontal: 18,
+    gap: 16,
   },
-  confirmBtn: {
-    flex: 1,
-    height: 40,
+  logoutBtn: {
+    minHeight: 44,
   },
-  deactivateBtn: {
-    flex: 1,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: Palette.live,
+  deleteBtn: {
+    minHeight: 44,
+    borderWidth: 1,
+    borderColor: Palette.accent700,
+    borderRadius: Radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  deactivateLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Palette.background,
-  },
-  busy: {
-    opacity: 0.55,
-  },
-  track: {
-    width: 44,
-    height: 26,
-    borderRadius: 13,
-    padding: 2,
-    justifyContent: 'center',
-  },
-  trackOn: {
-    backgroundColor: Palette.text,
-  },
-  trackOff: {
-    backgroundColor: Palette.border,
-  },
-  knob: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: Palette.background,
-  },
-  knobOn: {
-    alignSelf: 'flex-end',
+  deleteLabel: {
+    fontSize: 14,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.accent800,
   },
 });

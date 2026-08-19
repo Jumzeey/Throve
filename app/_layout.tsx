@@ -4,9 +4,21 @@ import { InboxProvider } from '@/context/inbox-context';
 import { ListingsProvider } from '@/context/listings-context';
 import { LiveProvider } from '@/context/live-context';
 import { SplashScreen } from '@/components/ui/splash-screen';
+import { Palette } from '@/constants/theme';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import {
+  CormorantGaramond_600SemiBold,
+  CormorantGaramond_700Bold,
+} from '@expo-google-fonts/cormorant-garamond';
+import {
+  Lora_400Regular,
+  Lora_400Regular_Italic,
+  Lora_500Medium,
+  Lora_600SemiBold,
+} from '@expo-google-fonts/lora';
+import { useFonts } from 'expo-font';
 import 'react-native-reanimated';
 
 const ThroveTheme = {
@@ -15,9 +27,9 @@ const ThroveTheme = {
     ...DefaultTheme.colors,
     background: '#ffffff',
     card: '#ffffff',
-    text: '#1a1a1a',
-    border: '#ece9e4',
-    primary: '#1a1a1a',
+    text: Palette.text,
+    border: Palette.borderSoft,
+    primary: Palette.accent700,
   },
 };
 
@@ -48,6 +60,19 @@ function RootNavigator() {
 }
 
 export default function RootLayout() {
+  const [fontsLoaded] = useFonts({
+    CormorantGaramond_600SemiBold,
+    CormorantGaramond_700Bold,
+    Lora_400Regular,
+    Lora_400Regular_Italic,
+    Lora_500Medium,
+    Lora_600SemiBold,
+  });
+
+  if (!fontsLoaded) {
+    return <SplashScreen />;
+  }
+
   return (
     <AuthProvider>
       <ListingsProvider>

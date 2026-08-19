@@ -1,5 +1,6 @@
-import { PlaceholderImage } from '@/components/ui/placeholder-image';
-import { Palette } from '@/constants/theme';
+import { AppImage } from '@/components/ui/app-image';
+import { Palette, Typography } from '@/constants/theme';
+import { getSellerAvatar } from '@/data/images';
 import { useAuth } from '@/context/auth-context';
 import { useInbox } from '@/context/inbox-context';
 import { formatRelativeTime } from '@/lib/format';
@@ -35,7 +36,7 @@ export default function InboxScreen() {
             const unread = conv.unreadBy.includes(me);
             return (
               <Pressable key={conv.id} onPress={() => router.push(`/inbox/chat/${conv.id}`)} style={styles.row}>
-                <PlaceholderImage style={styles.avatar} />
+                <AppImage source={getSellerAvatar(other)} style={styles.avatar} />
                 <View style={styles.meta}>
                   <View style={styles.top}>
                     <Text style={styles.name}>@{other}</Text>
@@ -61,8 +62,8 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.background,
   },
   title: {
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 22,
+    fontFamily: Typography.heading,
     color: Palette.text,
     paddingHorizontal: 20,
     paddingTop: 16,
@@ -83,16 +84,15 @@ const styles = StyleSheet.create({
     borderBottomColor: 'transparent',
   },
   tabOn: {
-    borderBottomColor: Palette.text,
+    borderBottomColor: Palette.accent,
   },
   tabLabel: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.muted3,
   },
   tabLabelOn: {
-    fontWeight: '700',
-    color: Palette.text,
+    color: Palette.accent700,
   },
   body: {
     paddingBottom: 24,
@@ -113,9 +113,9 @@ const styles = StyleSheet.create({
     borderBottomColor: Palette.hatch,
   },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
   meta: {
     flex: 1,
@@ -128,7 +128,7 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
   },
   time: {
@@ -138,12 +138,13 @@ const styles = StyleSheet.create({
   preview: {
     marginTop: 2,
     fontSize: 12,
+    fontFamily: Typography.body,
     color: Palette.muted2,
   },
   dot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: Palette.text,
+    backgroundColor: Palette.accent,
   },
 });

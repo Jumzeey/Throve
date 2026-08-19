@@ -16,7 +16,7 @@ export function SimulatedStage({ children }: { children?: ReactNode }) {
 
 export function listingStatusStyle(status: ListingStatus) {
   if (status === 'reserved') {
-    return { backgroundColor: '#fdf3e3', color: '#8a6112', label: 'Reserved' };
+    return { backgroundColor: Palette.accent100, color: Palette.accent700, label: 'Reserved' };
   }
   if (status === 'sold') {
     return { backgroundColor: Palette.chipBg, color: Palette.muted, label: 'Sold' };
@@ -27,7 +27,7 @@ export function listingStatusStyle(status: ListingStatus) {
   if (status === 'hidden') {
     return { backgroundColor: Palette.chipBg, color: Palette.muted3, label: 'Hidden' };
   }
-  return { backgroundColor: '#eaf5ea', color: '#2e6b2e', label: 'Available' };
+  return { backgroundColor: Palette.accent100, color: Palette.accent700, label: 'Available' };
 }
 
 const styles = StyleSheet.create({

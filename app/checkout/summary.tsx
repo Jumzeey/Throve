@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button';
 import { PlaceholderImage } from '@/components/ui/placeholder-image';
 import { ReserveNotice } from '@/components/ui/reserve-notice';
 import { ScreenHeader } from '@/components/ui/screen-header';
-import { Palette } from '@/constants/theme';
+import { Palette, Radius, Typography } from '@/constants/theme';
 import { deliveryLabel, leaveCheckout, useCheckout } from '@/context/checkout-context';
 import { useLive } from '@/context/live-context';
 import { getDeliveryOption } from '@/data/checkout';
@@ -70,7 +70,7 @@ function Row({ label, value, bold }: { label: string; value: string; bold?: bool
   return (
     <View style={styles.row}>
       <Text style={[styles.rowText, bold ? styles.bold : null]}>{label}</Text>
-      <Text style={[styles.rowText, bold ? styles.bold : null]}>{value}</Text>
+      <Text style={[styles.rowText, bold ? styles.boldValue : null]}>{value}</Text>
     </View>
   );
 }
@@ -91,26 +91,28 @@ const styles = StyleSheet.create({
     padding: 12,
     borderWidth: 1,
     borderColor: Palette.borderSoft,
-    borderRadius: 10,
+    borderRadius: Radius.md,
     marginBottom: 16,
   },
   thumb: {
     width: 52,
     height: 52,
-    borderRadius: 8,
+    borderRadius: Radius.sm,
   },
   itemTitle: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
   },
   itemMeta: {
     marginTop: 2,
     fontSize: 12,
+    fontFamily: Typography.body,
     color: Palette.muted2,
   },
   ship: {
     fontSize: 13,
+    fontFamily: Typography.body,
     color: Palette.muted,
     marginBottom: 4,
   },
@@ -127,13 +129,20 @@ const styles = StyleSheet.create({
   },
   rowText: {
     fontSize: 13,
+    fontFamily: Typography.body,
     color: Palette.muted,
   },
   bold: {
     marginTop: 4,
     fontSize: 15,
-    fontWeight: '700',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
+  },
+  boldValue: {
+    marginTop: 4,
+    fontSize: 15,
+    fontFamily: Typography.headingBold,
+    color: Palette.accent700,
   },
   notice: {
     marginTop: 16,
@@ -143,10 +152,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#fdf3e3',
     borderWidth: 1,
     borderColor: '#ecd39a',
-    borderRadius: 8,
+    borderRadius: Radius.sm,
   },
   noticeText: {
     fontSize: 12,
+    fontFamily: Typography.body,
     color: '#8a6112',
     textAlign: 'center',
   },

@@ -4,7 +4,7 @@ import { FiltersSheet } from '@/components/ui/filters-sheet';
 import { ListingCard } from '@/components/ui/listing-card';
 import { ListingGrid } from '@/components/ui/listing-grid';
 import { ScreenHeader } from '@/components/ui/screen-header';
-import { Palette } from '@/constants/theme';
+import { Palette, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useListings } from '@/context/listings-context';
 import { DEFAULT_FILTERS, filterListings } from '@/data/filter-listings';
@@ -116,6 +116,7 @@ const styles = StyleSheet.create({
   },
   count: {
     fontSize: 12,
+    fontFamily: Typography.body,
     color: Palette.muted2,
   },
   body: {
@@ -126,6 +127,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingTop: 50,
     fontSize: 13,
+    fontFamily: Typography.body,
     color: Palette.muted3,
   },
 });

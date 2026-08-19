@@ -1,17 +1,10 @@
 import { HapticTab } from '@/components/haptic-tab';
 import { SplashScreen } from '@/components/ui/splash-screen';
-import { Palette } from '@/constants/theme';
+import { HomeIcon, InboxIcon, LiveIcon, ProfileIcon, SellIcon } from '@/components/ui/tab-icons';
+import { Palette, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, Tabs } from 'expo-router';
-import { type ComponentProps } from 'react';
 import { StyleSheet } from 'react-native';
-
-type IconName = ComponentProps<typeof Ionicons>['name'];
-
-function TabIcon({ focused, color, outline, filled }: { focused: boolean; color: string; outline: IconName; filled: IconName }) {
-  return <Ionicons name={focused ? filled : outline} size={22} color={color} />;
-}
 
 export default function TabLayout() {
   const { isReady, session } = useAuth();
@@ -31,7 +24,7 @@ export default function TabLayout() {
       screenOptions={{
         headerShown: false,
         tabBarButton: HapticTab,
-        tabBarActiveTintColor: Palette.text,
+        tabBarActiveTintColor: Palette.accent700,
         tabBarInactiveTintColor: Palette.muted3,
         tabBarLabelStyle: styles.label,
         tabBarStyle: styles.bar,
@@ -40,43 +33,35 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color, focused }) => <TabIcon focused={focused} color={color} outline="home-outline" filled="home" />,
+          tabBarIcon: ({ color }) => <HomeIcon color={color} />,
         }}
       />
       <Tabs.Screen
         name="live"
         options={{
           title: 'Live',
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon focused={focused} color={color} outline="videocam-outline" filled="videocam" />
-          ),
+          tabBarIcon: ({ color }) => <LiveIcon color={color} />,
         }}
       />
       <Tabs.Screen
         name="sell"
         options={{
           title: 'Sell',
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon focused={focused} color={color} outline="add-circle-outline" filled="add-circle" />
-          ),
+          tabBarIcon: ({ color }) => <SellIcon color={color} />,
         }}
       />
       <Tabs.Screen
         name="inbox"
         options={{
           title: 'Inbox',
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon focused={focused} color={color} outline="chatbubble-ellipses-outline" filled="chatbubble-ellipses" />
-          ),
+          tabBarIcon: ({ color }) => <InboxIcon color={color} />,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon focused={focused} color={color} outline="person-outline" filled="person" />
-          ),
+          tabBarIcon: ({ color }) => <ProfileIcon color={color} />,
         }}
       />
     </Tabs>
@@ -85,12 +70,12 @@ export default function TabLayout() {
 
 const styles = StyleSheet.create({
   bar: {
-    borderTopColor: Palette.borderSoft,
+    borderTopColor: Palette.divider,
     borderTopWidth: 1,
     backgroundColor: Palette.background,
   },
   label: {
     fontSize: 11,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
   },
 });

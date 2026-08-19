@@ -1,7 +1,8 @@
+import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
-import { PlaceholderImage } from '@/components/ui/placeholder-image';
 import { ScreenHeader } from '@/components/ui/screen-header';
-import { Palette } from '@/constants/theme';
+import { Palette, Radius, Typography } from '@/constants/theme';
+import { getListingImage } from '@/data/images';
 import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
 import { offerStatusStyle, useInbox } from '@/context/inbox-context';
@@ -53,7 +54,7 @@ export default function OfferDetailsScreen() {
       <ScreenHeader title="Offer details" onBack={() => router.back()} />
       <ScrollView contentContainerStyle={styles.body}>
         <Pressable onPress={() => listing && router.push(`/product/${listing.id}`)} style={styles.product}>
-          <PlaceholderImage style={styles.thumb} />
+          <AppImage source={getListingImage(current.listingId)} style={styles.thumb} />
           <View style={styles.productMeta}>
             <Text style={styles.productTitle}>{listing?.title ?? 'Listing'}</Text>
             <Text style={styles.productSub}>
@@ -104,19 +105,19 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 1,
     borderColor: Palette.borderSoft,
-    borderRadius: 10,
+    borderRadius: Radius.md,
   },
   thumb: {
-    width: 56,
-    height: 56,
-    borderRadius: 8,
+    width: 60,
+    height: 60,
+    borderRadius: Radius.sm,
   },
   productMeta: {
     flex: 1,
   },
   productTitle: {
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
   },
   productSub: {
@@ -132,13 +133,14 @@ const styles = StyleSheet.create({
   },
   amountLabel: {
     fontSize: 12,
+    fontFamily: Typography.body,
     color: Palette.muted2,
   },
   amount: {
     marginTop: 2,
     fontSize: 22,
-    fontWeight: '700',
-    color: Palette.text,
+    fontFamily: Typography.headingBold,
+    color: Palette.accent700,
   },
   chip: {
     paddingHorizontal: 10,
@@ -147,7 +149,7 @@ const styles = StyleSheet.create({
   },
   chipText: {
     fontSize: 12,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
   },
   date: {
     marginTop: 10,

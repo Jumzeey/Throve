@@ -1,6 +1,8 @@
-import { PlaceholderImage } from '@/components/ui/placeholder-image';
+import { AppImage } from '@/components/ui/app-image';
 import { TextField } from '@/components/ui/text-field';
-import { Palette } from '@/constants/theme';
+import { Palette, Radius, Typography } from '@/constants/theme';
+import { getSellerAvatar } from '@/data/images';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAuth } from '@/context/auth-context';
 import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
@@ -59,9 +61,9 @@ export default function ChatScreen() {
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: Math.max(insets.top, 14) }]}>
         <Pressable onPress={() => router.back()} hitSlop={12} style={styles.back}>
-          <Text style={styles.backText}>←</Text>
+          <Ionicons name="chevron-back" size={18} color={Palette.text} />
         </Pressable>
-        <PlaceholderImage style={styles.avatar} />
+        <AppImage source={getSellerAvatar(other)} style={styles.avatar} />
         <View style={styles.headerMeta}>
           <Pressable onPress={() => router.push({ pathname: '/seller/[username]', params: { username: other } })}>
             <Text style={styles.name}>@{other}</Text>
@@ -73,7 +75,7 @@ export default function ChatScreen() {
           </Pressable>
         </View>
         <Pressable onPress={() => setMenuOpen(true)} hitSlop={12}>
-          <Text style={styles.menu}>⋮</Text>
+          <Ionicons name="ellipsis-vertical" size={18} color={Palette.muted2} />
         </Pressable>
       </View>
 
@@ -106,7 +108,7 @@ export default function ChatScreen() {
             returnKeyType="send"
           />
           <Pressable onPress={send} disabled={!canSend} style={[styles.send, !canSend ? styles.sendOff : null]}>
-            <Text style={styles.sendLabel}>Send</Text>
+            <Ionicons name="send" size={16} color={Palette.background} />
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -174,10 +176,6 @@ const styles = StyleSheet.create({
   back: {
     paddingVertical: 4,
   },
-  backText: {
-    fontSize: 16,
-    color: Palette.text,
-  },
   avatar: {
     width: 34,
     height: 34,
@@ -189,18 +187,14 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
   },
   listing: {
     marginTop: 1,
     fontSize: 11,
+    fontFamily: Typography.body,
     color: Palette.muted2,
-  },
-  menu: {
-    fontSize: 18,
-    color: Palette.muted2,
-    paddingHorizontal: 4,
   },
   thread: {
     paddingHorizontal: 20,
@@ -222,21 +216,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   bubbleMine: {
-    backgroundColor: Palette.text,
-    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Palette.accent,
+    borderRadius: Radius.md,
     borderBottomRightRadius: 4,
   },
   bubbleTheirs: {
-    backgroundColor: Palette.chipBg,
-    borderRadius: 14,
+    backgroundColor: Palette.surface,
+    borderRadius: Radius.md,
     borderBottomLeftRadius: 4,
   },
   bubbleText: {
     fontSize: 14,
     lineHeight: 20,
+    fontFamily: Typography.body,
   },
   bubbleTextMine: {
-    color: Palette.background,
+    color: Palette.accent800,
   },
   bubbleTextTheirs: {
     color: Palette.text,
@@ -266,29 +262,24 @@ const styles = StyleSheet.create({
   },
   send: {
     height: 42,
-    paddingHorizontal: 18,
+    width: 42,
     borderRadius: 21,
-    backgroundColor: Palette.text,
+    backgroundColor: Palette.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
   sendOff: {
     opacity: 0.4,
   },
-  sendLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Palette.background,
-  },
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    backgroundColor: 'rgba(23,23,23,0.3)',
     justifyContent: 'flex-end',
   },
   sheet: {
     backgroundColor: Palette.background,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    borderTopLeftRadius: Radius.lg,
+    borderTopRightRadius: Radius.lg,
     paddingTop: 10,
   },
   sheetRow: {
@@ -298,6 +289,7 @@ const styles = StyleSheet.create({
   },
   sheetLabel: {
     fontSize: 14,
+    fontFamily: Typography.body,
     color: Palette.text,
   },
   sheetDanger: {
@@ -314,8 +306,8 @@ const styles = StyleSheet.create({
     right: 14,
     paddingVertical: 10,
     paddingHorizontal: 14,
-    backgroundColor: Palette.text,
-    borderRadius: 10,
+    backgroundColor: Palette.accent,
+    borderRadius: Radius.md,
   },
   toastText: {
     fontSize: 13,

@@ -1,5 +1,5 @@
 import { SimulatedStage, listingStatusStyle } from '@/components/ui/simulated-stage';
-import { Palette } from '@/constants/theme';
+import { Palette, Typography, Radius } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useListings } from '@/context/listings-context';
 import { useLive } from '@/context/live-context';
@@ -118,7 +118,7 @@ export default function LiveBroadcastScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#111',
+    backgroundColor: Palette.neutral900,
   },
   topBar: {
     flexDirection: 'row',
@@ -136,7 +136,7 @@ const styles = StyleSheet.create({
   liveBadgeText: {
     color: Palette.background,
     fontSize: 11,
-    fontWeight: '700',
+    fontFamily: Typography.bodySemiBold,
   },
   viewers: {
     color: Palette.background,
@@ -152,7 +152,7 @@ const styles = StyleSheet.create({
   endLabel: {
     color: Palette.live,
     fontSize: 12,
-    fontWeight: '700',
+    fontFamily: Typography.bodySemiBold,
   },
   overlay: {
     flex: 1,
@@ -194,7 +194,7 @@ const styles = StyleSheet.create({
   },
   section: {
     fontSize: 11,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.muted2,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -211,7 +211,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   pinChipOn: {
-    backgroundColor: Palette.text,
+    backgroundColor: Palette.accent,
   },
   pinChipOff: {
     backgroundColor: Palette.background,
@@ -220,7 +220,7 @@ const styles = StyleSheet.create({
   },
   pinChipLabel: {
     fontSize: 11,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
   },
   pinChipLabelOn: {
     color: Palette.background,
@@ -245,11 +245,11 @@ const styles = StyleSheet.create({
   statusChip: {
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 6,
+    borderRadius: Radius.sm,
   },
   statusLabel: {
     fontSize: 10,
-    fontWeight: '700',
+    fontFamily: Typography.bodySemiBold,
   },
   comments: {
     backgroundColor: Palette.background,
@@ -274,7 +274,7 @@ const styles = StyleSheet.create({
     color: Palette.text,
   },
   commentUser: {
-    fontWeight: '700',
+    fontFamily: Typography.bodySemiBold,
   },
   remove: {
     fontSize: 11,

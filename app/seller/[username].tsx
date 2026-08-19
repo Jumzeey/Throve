@@ -1,15 +1,18 @@
+import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
-import { PlaceholderImage } from '@/components/ui/placeholder-image';
 import { ScreenHeader } from '@/components/ui/screen-header';
+import { StarRating } from '@/components/ui/star-rating';
 import { listingStatusStyle } from '@/components/ui/simulated-stage';
-import { Palette } from '@/constants/theme';
+import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
 import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
 import { useLive } from '@/context/live-context';
+import { getListingImage, getSellerAvatar } from '@/data/images';
 import { getPublicSeller } from '@/data/seed';
-import { formatNaira, starString } from '@/lib/format';
+import { formatNaira } from '@/lib/format';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -26,23 +29,18 @@ export default function SellerProfileScreen() {
   const [tab, setTab] = useState<'active' | 'sold'>('active');
   const [reviewsOpen, setReviewsOpen] = useState(false);
 
-  if (!session) {
-    return <Redirect href="/(auth)/welcome" />;
-  }
-  if (!username) {
-    return <Redirect href="/(tabs)" />;
-  }
+  if (!session) return <Redirect href="/(auth)/welcome" />;
+  if (!username) return <Redirect href="/(tabs)" />;
 
   const seller = getPublicSeller(username);
   const profile = session.username === username
     ? { bio: session.bio, location: session.location || seller.location }
     : seller;
   const mine = listingsForSeller(username);
-  const shown = tab === 'sold' ? mine.filter((item) => item.status === 'sold') : mine.filter((item) => item.status === 'available' || item.status === 'reserved');
+  const shown = tab === 'sold' ? mine.filter((i) => i.status === 'sold') : mine.filter((i) => i.status === 'available' || i.status === 'reserved');
   const rating = ratingInfo(username);
   const reviews = getReviews(username);
-  const ratingLine = rating.count > 0 ? `${starString(rating.avg)} (${rating.count} reviews)` : 'No reviews yet';
-  const liveSession = live.liveNow.find((item) => item.host === username);
+  const liveSession = live.liveNow.find((i) => i.host === username);
   const isOwn = session.username === username;
   const me = session.username;
   const messageListing = mine[0];
@@ -58,16 +56,23 @@ export default function SellerProfileScreen() {
       <ScreenHeader title="Seller profile" onBack={() => router.back()} />
       <ScrollView contentContainerStyle={styles.body}>
         <View style={styles.identity}>
-          <PlaceholderImage style={styles.avatar} />
+          <View style={styles.avatarWrap}>
+            <AppImage source={getSellerAvatar(username)} style={styles.avatar} />
+            {liveSession ? <View style={styles.liveDot} /> : null}
+          </View>
           <Text style={styles.name}>@{username}</Text>
           {profile.location ? <Text style={styles.meta}>{profile.location}</Text> : null}
           {profile.bio ? <Text style={styles.bio}>{profile.bio}</Text> : null}
-          <Pressable onPress={() => setReviewsOpen(true)}>
-            <Text style={styles.rating}>{ratingLine} ›</Text>
+          <Pressable onPress={() => setReviewsOpen(true)} style={styles.ratingRow}>
+            <StarRating rating={rating.avg} />
+            <Text style={styles.ratingText}>
+              {rating.count > 0 ? `${rating.avg.toFixed(1)} (${rating.count} reviews)` : 'No reviews yet'}
+            </Text>
+            <Ionicons name="chevron-forward" size={14} color={Palette.muted2} />
           </Pressable>
           {liveSession ? (
             <Pressable onPress={() => router.push(`/live/${liveSession.id}`)} style={styles.liveBtn}>
-              <Text style={styles.liveLabel}>● LIVE — join now</Text>
+              <Text style={styles.liveLabel}>LIVE — join now</Text>
             </Pressable>
           ) : null}
           {!isOwn ? (
@@ -75,11 +80,11 @@ export default function SellerProfileScreen() {
           ) : null}
         </View>
         <View style={styles.tabs}>
-          <Pressable onPress={() => setTab('active')} style={[styles.tab, tab === 'active' ? styles.tabOn : null]}>
-            <Text style={[styles.tabLabel, tab === 'active' ? styles.tabLabelOn : null]}>Active</Text>
+          <Pressable onPress={() => setTab('active')} style={[styles.tab, tab === 'active' && styles.tabOn]}>
+            <Text style={[styles.tabLabel, tab === 'active' && styles.tabLabelOn]}>Active</Text>
           </Pressable>
-          <Pressable onPress={() => setTab('sold')} style={[styles.tab, tab === 'sold' ? styles.tabOn : null]}>
-            <Text style={[styles.tabLabel, tab === 'sold' ? styles.tabLabelOn : null]}>Sold</Text>
+          <Pressable onPress={() => setTab('sold')} style={[styles.tab, tab === 'sold' && styles.tabOn]}>
+            <Text style={[styles.tabLabel, tab === 'sold' && styles.tabLabelOn]}>Sold</Text>
           </Pressable>
         </View>
         {shown.length === 0 ? (
@@ -91,9 +96,9 @@ export default function SellerProfileScreen() {
               return (
                 <Pressable key={item.id} onPress={() => router.push(`/product/${item.id}`)} style={styles.card}>
                   <View style={styles.photo}>
-                    <PlaceholderImage style={styles.photoFill} />
-                    <View style={[styles.chip, { backgroundColor: status.backgroundColor }]}>
-                      <Text style={[styles.chipText, { color: status.color }]}>{status.label}</Text>
+                    <AppImage source={getListingImage(item.id)} style={StyleSheet.absoluteFillObject} />
+                    <View style={[styles.statusChip, { backgroundColor: status.backgroundColor }]}>
+                      <Text style={[styles.statusChipText, { color: status.color }]}>{status.label}</Text>
                     </View>
                   </View>
                   <Text style={styles.cardTitle}>{item.title}</Text>
@@ -108,20 +113,20 @@ export default function SellerProfileScreen() {
         <Pressable style={styles.overlay} onPress={() => setReviewsOpen(false)}>
           <Pressable style={styles.sheet} onPress={() => {}}>
             <View style={styles.sheetTop}>
-              <Text style={styles.sheetTitle}>{ratingLine}</Text>
+              <Text style={styles.sheetTitle}>Reviews</Text>
               <Pressable onPress={() => setReviewsOpen(false)} hitSlop={12}>
-                <Text style={styles.close}>×</Text>
+                <Ionicons name="close" size={20} color={Palette.muted2} />
               </Pressable>
             </View>
             <ScrollView style={styles.sheetList}>
               {reviews.length === 0 ? (
                 <Text style={styles.empty}>No reviews yet.</Text>
               ) : (
-                reviews.map((review, index) => (
-                  <View key={`${review.buyer}-${index}`} style={styles.review}>
+                reviews.map((review, i) => (
+                  <View key={`${review.buyer}-${i}`} style={styles.review}>
                     <View style={styles.reviewTop}>
                       <Text style={styles.reviewBuyer}>{review.buyer}</Text>
-                      <Text style={styles.stars}>{starString(review.rating)}</Text>
+                      <StarRating rating={review.rating} size={12} />
                     </View>
                     {review.comment ? <Text style={styles.reviewComment}>{review.comment}</Text> : null}
                     <Text style={styles.reviewDate}>{review.date}</Text>
@@ -137,46 +142,27 @@ export default function SellerProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: Palette.background,
+  screen: { flex: 1, backgroundColor: Palette.background },
+  body: { paddingBottom: 24 },
+  identity: { alignItems: 'center', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 16, gap: 6 },
+  avatarWrap: { position: 'relative' },
+  avatar: { width: 58, height: 58, borderRadius: 29 },
+  liveDot: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: Palette.live,
+    borderWidth: 2,
+    borderColor: Palette.background,
   },
-  body: {
-    paddingBottom: 24,
-  },
-  identity: {
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 16,
-    gap: 8,
-  },
-  avatar: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-  },
-  name: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Palette.text,
-  },
-  meta: {
-    fontSize: 13,
-    color: Palette.muted2,
-  },
-  bio: {
-    fontSize: 13,
-    lineHeight: 20,
-    color: Palette.muted,
-    textAlign: 'center',
-    maxWidth: 280,
-  },
-  rating: {
-    fontSize: 13,
-    color: Palette.text,
-    paddingVertical: 2,
-  },
+  name: { fontSize: 17, fontFamily: Typography.heading, color: Palette.text },
+  meta: { fontSize: 13, fontFamily: Typography.body, color: Palette.muted2 },
+  bio: { fontSize: 13, lineHeight: 20, fontFamily: Typography.body, color: Palette.muted, textAlign: 'center', maxWidth: 280 },
+  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 2 },
+  ratingText: { fontSize: 13, fontFamily: Typography.body, color: Palette.text },
   liveBtn: {
     height: 36,
     paddingHorizontal: 16,
@@ -186,17 +172,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 4,
   },
-  liveLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Palette.background,
-  },
-  message: {
-    marginTop: 8,
-    height: 42,
-    paddingHorizontal: 24,
-    alignSelf: 'center',
-  },
+  liveLabel: { fontSize: 12, fontFamily: Typography.bodySemiBold, color: Palette.background },
+  message: { marginTop: 8, height: 42, paddingHorizontal: 24, alignSelf: 'center' },
   tabs: {
     flexDirection: 'row',
     borderBottomWidth: 1,
@@ -204,51 +181,15 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginBottom: 14,
   },
-  tab: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
-  tabOn: {
-    borderBottomColor: Palette.text,
-  },
-  tabLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Palette.muted3,
-  },
-  tabLabelOn: {
-    fontWeight: '700',
-    color: Palette.text,
-  },
-  empty: {
-    textAlign: 'center',
-    paddingTop: 40,
-    fontSize: 13,
-    color: Palette.muted3,
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 14,
-    paddingHorizontal: 20,
-  },
-  card: {
-    width: '47%',
-    flexGrow: 1,
-    maxWidth: '48%',
-  },
-  photo: {
-    aspectRatio: 1,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  photoFill: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  chip: {
+  tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tabOn: { borderBottomColor: Palette.accent },
+  tabLabel: { fontSize: 13, fontFamily: Typography.bodySemiBold, color: Palette.muted3 },
+  tabLabelOn: { color: Palette.accent700 },
+  empty: { textAlign: 'center', paddingTop: 40, fontSize: 13, fontFamily: Typography.body, color: Palette.muted3 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: 20 },
+  card: { width: '47%', flexGrow: 1, maxWidth: '48%' },
+  photo: { aspectRatio: 1, borderRadius: Radius.sm, overflow: 'hidden' },
+  statusChip: {
     position: 'absolute',
     top: 6,
     left: 6,
@@ -256,82 +197,23 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
     borderRadius: 5,
   },
-  chipText: {
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  cardTitle: {
-    marginTop: 8,
-    fontSize: 13,
-    lineHeight: 17,
-    fontWeight: '600',
-    color: Palette.text,
-  },
-  cardPrice: {
-    marginTop: 3,
-    fontSize: 13,
-    fontWeight: '700',
-    color: Palette.text,
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'flex-end',
-  },
+  statusChipText: { fontSize: 10, fontFamily: Typography.bodySemiBold },
+  cardTitle: { marginTop: 8, fontSize: 13, lineHeight: 17, fontFamily: Typography.bodySemiBold, color: Palette.text },
+  cardPrice: { marginTop: 3, fontSize: 14, fontFamily: Typography.heading, color: Palette.accent700 },
+  overlay: { flex: 1, backgroundColor: 'rgba(23,23,23,0.3)', justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: Palette.background,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    borderTopLeftRadius: Radius.lg,
+    borderTopRightRadius: Radius.lg,
     padding: 20,
     maxHeight: '70%',
   },
-  sheetTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  sheetTitle: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '700',
-    color: Palette.text,
-  },
-  close: {
-    fontSize: 18,
-    color: Palette.muted2,
-  },
-  sheetList: {
-    maxHeight: 360,
-  },
-  review: {
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: Palette.hatch,
-  },
-  reviewTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  reviewBuyer: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Palette.text,
-  },
-  stars: {
-    fontSize: 13,
-    color: '#c9a227',
-  },
-  reviewComment: {
-    marginTop: 4,
-    fontSize: 13,
-    lineHeight: 20,
-    color: Palette.muted,
-  },
-  reviewDate: {
-    marginTop: 3,
-    fontSize: 11,
-    color: Palette.muted3,
-  },
+  sheetTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  sheetTitle: { flex: 1, fontSize: 17, fontFamily: Typography.heading, color: Palette.text },
+  sheetList: { maxHeight: 360 },
+  review: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Palette.divider },
+  reviewTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  reviewBuyer: { fontSize: 13, fontFamily: Typography.bodySemiBold, color: Palette.text },
+  reviewComment: { marginTop: 4, fontSize: 13, lineHeight: 20, fontFamily: Typography.body, color: Palette.muted },
+  reviewDate: { marginTop: 3, fontSize: 11, fontFamily: Typography.body, color: Palette.muted3 },
 });

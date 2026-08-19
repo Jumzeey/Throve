@@ -1,10 +1,10 @@
 import { Button } from '@/components/ui/button';
 import { ErrorBanner } from '@/components/ui/error-banner';
-import { PlaceholderImage } from '@/components/ui/placeholder-image';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
-import { Palette } from '@/constants/theme';
+import { Palette, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
@@ -62,17 +62,18 @@ export default function SetupScreen() {
         {!saved ? (
           <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
             <Pressable onPress={onPickPhoto} style={styles.avatarWrap}>
-              {photoUri ? <Image source={{ uri: photoUri }} style={styles.avatar} /> : <PlaceholderImage style={styles.avatar} />}
+              {photoUri ? (
+                <Image source={{ uri: photoUri }} style={styles.avatar} />
+              ) : (
+                <View style={styles.avatarEmpty}>
+                  <Ionicons name="camera-outline" size={28} color={Palette.muted3} />
+                </View>
+              )}
             </Pressable>
+            <Text style={styles.usernameLabel}>Username</Text>
             <View style={styles.fields}>
               <TextField placeholder="Username" autoCapitalize="none" value={username} onChangeText={setUsername} />
-              <TextField
-                placeholder="Short bio"
-                value={bio}
-                onChangeText={setBio}
-                multiline
-                style={styles.bio}
-              />
+              <TextField placeholder="Short bio" value={bio} onChangeText={setBio} multiline style={styles.bio} />
               <TextField placeholder="Location (e.g. Lagos, NG)" value={location} onChangeText={setLocation} />
             </View>
             <ErrorBanner message={error} />
@@ -81,7 +82,7 @@ export default function SetupScreen() {
         ) : (
           <View style={styles.done}>
             <View style={styles.check}>
-              <Text style={styles.checkMark}>✓</Text>
+              <Ionicons name="checkmark" size={24} color={Palette.background} />
             </View>
             <Text style={styles.doneTitle}>Profile saved</Text>
             <Text style={styles.doneCopy}>{"Let's show you around before you start browsing."}</Text>
@@ -94,37 +95,31 @@ export default function SetupScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: Palette.background,
-  },
-  flex: {
-    flex: 1,
-  },
-  form: {
-    paddingHorizontal: 24,
-    paddingBottom: 24,
-  },
-  avatarWrap: {
+  screen: { flex: 1, backgroundColor: Palette.background },
+  flex: { flex: 1 },
+  form: { paddingHorizontal: 24, paddingBottom: 24 },
+  avatarWrap: { alignItems: 'center', marginBottom: 16 },
+  avatar: { width: 84, height: 84, borderRadius: 42 },
+  avatarEmpty: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: Palette.hatch,
     alignItems: 'center',
-    marginBottom: 16,
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Palette.border,
+    borderStyle: 'dashed',
   },
-  avatar: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
+  usernameLabel: {
+    fontSize: 14,
+    fontFamily: Typography.heading,
+    color: Palette.muted,
+    marginBottom: 6,
   },
-  fields: {
-    gap: 12,
-  },
-  bio: {
-    height: 70,
-    paddingTop: 10,
-    textAlignVertical: 'top',
-  },
-  submit: {
-    marginTop: 22,
-  },
+  fields: { gap: 12 },
+  bio: { height: 70, paddingTop: 10, textAlignVertical: 'top' },
+  submit: { marginTop: 22 },
   done: {
     flex: 1,
     alignItems: 'center',
@@ -133,32 +128,25 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   check: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: Palette.text,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: Palette.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  checkMark: {
-    color: Palette.background,
-    fontSize: 18,
-    fontWeight: '700',
-  },
   doneTitle: {
-    fontSize: 19,
-    fontWeight: '700',
+    fontSize: 20,
+    fontFamily: Typography.heading,
     color: Palette.text,
   },
   doneCopy: {
     fontSize: 14,
     lineHeight: 21,
+    fontFamily: Typography.body,
     color: Palette.muted,
     textAlign: 'center',
     maxWidth: 270,
   },
-  doneButton: {
-    marginTop: 10,
-    height: 48,
-  },
+  doneButton: { marginTop: 10 },
 });

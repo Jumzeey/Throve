@@ -1,4 +1,5 @@
-import { Palette } from '@/constants/theme';
+import { Palette, Typography } from '@/constants/theme';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -15,7 +16,7 @@ export function ScreenHeader({ title, onBack, right }: Props) {
     <View style={[styles.row, { paddingTop: Math.max(insets.top, 16) }]}>
       {onBack ? (
         <Pressable onPress={onBack} hitSlop={12} style={styles.back}>
-          <Text style={styles.backText}>←</Text>
+          <Ionicons name="chevron-back" size={18} color={Palette.text} />
         </Pressable>
       ) : null}
       <Text style={styles.title}>{title}</Text>
@@ -33,20 +34,12 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     backgroundColor: Palette.background,
   },
-  back: {
-    paddingVertical: 4,
-  },
-  backText: {
-    fontSize: 16,
-    color: Palette.text,
-  },
+  back: { paddingVertical: 4 },
   title: {
     flex: 1,
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 20,
+    fontFamily: Typography.heading,
     color: Palette.text,
   },
-  right: {
-    marginLeft: 'auto',
-  },
+  right: { marginLeft: 'auto' },
 });

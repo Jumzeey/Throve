@@ -1,7 +1,7 @@
-import { Palette } from '@/constants/theme';
+import { Palette, Radius, Typography } from '@/constants/theme';
 import { ActivityIndicator, Pressable, StyleSheet, Text, type PressableProps, type StyleProp, type ViewStyle } from 'react-native';
 
-type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
+type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'live';
 
 type Props = Omit<PressableProps, 'style'> & {
   label: string;
@@ -25,11 +25,9 @@ export function Button({ label, variant = 'primary', loading, disabled, style, .
       ]}
       {...props}>
       {loading ? (
-        <ActivityIndicator color={variant === 'primary' ? Palette.background : Palette.text} />
+        <ActivityIndicator color={variant === 'primary' || variant === 'live' ? Palette.background : Palette.text} />
       ) : (
-        <Text style={[styles.label, variant === 'primary' ? styles.primaryLabel : styles.secondaryLabel, variant === 'ghost' && styles.ghostLabel, variant === 'danger' && styles.dangerLabel]}>
-          {label}
-        </Text>
+        <Text style={[styles.label, labelStyle[variant]]}>{label}</Text>
       )}
     </Pressable>
   );
@@ -37,20 +35,19 @@ export function Button({ label, variant = 'primary', loading, disabled, style, .
 
 const styles = StyleSheet.create({
   base: {
-    height: 52,
-    borderRadius: 10,
+    height: 50,
+    borderRadius: Radius.md,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 22,
   },
   primary: {
-    backgroundColor: Palette.text,
-    borderWidth: 0,
+    backgroundColor: Palette.accent,
   },
   secondary: {
     backgroundColor: Palette.background,
     borderWidth: 1,
-    borderColor: Palette.text,
+    borderColor: Palette.accent,
   },
   ghost: {
     backgroundColor: 'transparent',
@@ -61,29 +58,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Palette.live,
   },
-  pressed: {
-    opacity: 0.85,
+  live: {
+    backgroundColor: Palette.live,
   },
-  disabled: {
-    opacity: 0.55,
-  },
+  pressed: { opacity: 0.85 },
+  disabled: { opacity: 0.55 },
   label: {
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 15,
+    fontFamily: Typography.bodySemiBold,
   },
-  primaryLabel: {
-    color: Palette.background,
-  },
-  secondaryLabel: {
-    color: Palette.text,
-  },
-  ghostLabel: {
-    color: Palette.muted,
-    fontSize: 13,
-    fontWeight: '400',
-  },
-  dangerLabel: {
-    color: Palette.live,
-    fontSize: 14,
-  },
+});
+
+const labelStyle = StyleSheet.create({
+  primary: { color: Palette.background },
+  secondary: { color: Palette.accent700 },
+  ghost: { color: Palette.muted, fontSize: 13, fontFamily: Typography.body },
+  danger: { color: Palette.live, fontSize: 14 },
+  live: { color: Palette.background },
 });

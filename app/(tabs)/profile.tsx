@@ -1,5 +1,7 @@
-import { PlaceholderImage } from '@/components/ui/placeholder-image';
-import { Palette } from '@/constants/theme';
+import { AppImage } from '@/components/ui/app-image';
+import { Palette, Typography, Radius } from '@/constants/theme';
+import { getSellerAvatar } from '@/data/images';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
 import { useListings } from '@/context/listings-context';
@@ -28,7 +30,7 @@ export default function ProfileScreen() {
       <View style={styles.top}>
         <Text style={styles.title}>Profile</Text>
         <Pressable onPress={() => router.push('/profile/settings')} hitSlop={12}>
-          <Text style={styles.gear}>⚙</Text>
+          <Ionicons name="settings-outline" size={22} color={Palette.text} />
         </Pressable>
       </View>
       <ScrollView contentContainerStyle={styles.body}>
@@ -36,7 +38,7 @@ export default function ProfileScreen() {
           {session.photoUri ? (
             <Image source={{ uri: session.photoUri }} style={styles.avatar} />
           ) : (
-            <PlaceholderImage style={styles.avatar} />
+            <AppImage source={getSellerAvatar(session.username)} style={styles.avatar} />
           )}
           <Text style={styles.name}>{session.name}</Text>
           <Text style={styles.meta}>{locationLine}</Text>
@@ -52,7 +54,7 @@ export default function ProfileScreen() {
         </View>
         <View style={styles.rows}>
           <Row label="My listings" onPress={() => router.push('/(tabs)/sell')} />
-          <Row label="Saved items" hint={`${savedCount} ›`} onPress={() => router.push('/profile/saved')} />
+          <Row label="Saved items" hint={`${savedCount}`} onPress={() => router.push('/profile/saved')} />
           <Row label="Orders" onPress={() => router.push('/profile/orders')} />
           <Row label="Settings and account" onPress={() => router.push('/profile/settings')} />
         </View>
@@ -70,11 +72,11 @@ function Stat({ value, label }: { value: string; label: string }) {
   );
 }
 
-function Row({ label, hint = '›', onPress }: { label: string; hint?: string; onPress: () => void }) {
+function Row({ label, hint, onPress }: { label: string; hint?: string; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowHint}>{hint}</Text>
+      {hint ? <Text style={styles.rowHint}>{hint}</Text> : <Ionicons name="chevron-forward" size={16} color={Palette.muted2} />}
     </Pressable>
   );
 }
@@ -93,12 +95,8 @@ const styles = StyleSheet.create({
     paddingBottom: 0,
   },
   title: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: Palette.text,
-  },
-  gear: {
-    fontSize: 20,
+    fontSize: 22,
+    fontFamily: Typography.headingBold,
     color: Palette.text,
   },
   body: {
@@ -116,8 +114,8 @@ const styles = StyleSheet.create({
     borderRadius: 36,
   },
   name: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 18,
+    fontFamily: Typography.headingBold,
     color: Palette.text,
   },
   meta: {
@@ -135,8 +133,8 @@ const styles = StyleSheet.create({
     height: 38,
     paddingHorizontal: 18,
     borderWidth: 1,
-    borderColor: Palette.text,
-    borderRadius: 19,
+    borderColor: Palette.accent,
+    borderRadius: Radius.full,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 4,
@@ -144,8 +142,8 @@ const styles = StyleSheet.create({
   },
   editLabel: {
     fontSize: 13,
-    fontWeight: '600',
-    color: Palette.text,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.accent700,
   },
   stats: {
     flexDirection: 'row',
@@ -158,15 +156,15 @@ const styles = StyleSheet.create({
     flex: 1,
     borderWidth: 1,
     borderColor: Palette.borderSoft,
-    borderRadius: 10,
+    borderRadius: Radius.md,
     paddingVertical: 12,
     paddingHorizontal: 8,
     alignItems: 'center',
   },
   statValue: {
     fontSize: 18,
-    fontWeight: '700',
-    color: Palette.text,
+    fontFamily: Typography.headingBold,
+    color: Palette.accent700,
   },
   statLabel: {
     marginTop: 2,
@@ -185,12 +183,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderWidth: 1,
     borderColor: Palette.borderSoft,
-    borderRadius: 10,
+    borderRadius: Radius.md,
     backgroundColor: Palette.background,
   },
   rowLabel: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
   },
   rowHint: {

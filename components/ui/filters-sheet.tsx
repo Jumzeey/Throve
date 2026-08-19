@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button';
-import { Palette } from '@/constants/theme';
+import { Palette, Radius, Shadows, Typography } from '@/constants/theme';
 import { CONDITIONS, DEPARTMENTS, FILTER_BRANDS } from '@/data/seed';
 import { DEFAULT_FILTERS, PRICE_BANDS, SORT_OPTIONS } from '@/data/filter-listings';
 import type { ListingFilters } from '@/data/types';
@@ -119,7 +119,7 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: 'rgba(23,23,23,0.3)',
   },
   backdrop: {
     flex: 1,
@@ -127,10 +127,11 @@ const styles = StyleSheet.create({
   sheet: {
     maxHeight: '80%',
     backgroundColor: Palette.background,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    borderTopLeftRadius: Radius.lg,
+    borderTopRightRadius: Radius.lg,
     paddingHorizontal: 20,
     paddingTop: 20,
+    ...Shadows.lg,
   },
   header: {
     flexDirection: 'row',
@@ -139,8 +140,8 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   title: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 17,
+    fontFamily: Typography.heading,
     color: Palette.text,
   },
   close: {
@@ -155,9 +156,10 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     fontSize: 11,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.muted2,
     textTransform: 'uppercase',
+    letterSpacing: 0.4,
     marginBottom: 6,
   },
   chips: {
@@ -172,7 +174,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   chipActive: {
-    backgroundColor: Palette.text,
+    backgroundColor: Palette.accent,
   },
   chipIdle: {
     backgroundColor: Palette.background,
@@ -181,7 +183,7 @@ const styles = StyleSheet.create({
   },
   chipLabel: {
     fontSize: 12,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
   },
   chipLabelActive: {
     color: Palette.background,

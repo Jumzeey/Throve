@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button';
-import { Palette } from '@/constants/theme';
+import { Palette, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { Redirect, useRouter } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
@@ -27,7 +27,8 @@ export default function WelcomeScreen() {
         <Text style={styles.tagline}>Buy and sell fashion & beauty finds — pre-owned, new, and live.</Text>
         <View style={styles.actions}>
           <Button label="Create account" onPress={() => router.push('/(auth)/signup')} />
-          <Button label="Log in" variant="secondary" onPress={() => router.push('/(auth)/login')} style={styles.login} />
+          <Button label="Log in" variant="secondary" onPress={() => router.push('/(auth)/login')} />
+          <Button label="Browse as guest" variant="ghost" onPress={() => router.replace('/(tabs)')} />
         </View>
       </View>
     </View>
@@ -47,27 +48,28 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   mark: {
-    width: 64,
-    height: 64,
+    width: 56,
+    height: 56,
     borderWidth: 2,
-    borderColor: Palette.text,
-    borderRadius: 16,
+    borderColor: Palette.accent,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
   markText: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: Palette.text,
+    fontSize: 24,
+    fontFamily: Typography.headingBold,
+    color: Palette.accent700,
   },
   title: {
-    fontSize: 26,
-    fontWeight: '700',
+    fontSize: 38,
+    fontFamily: Typography.headingBold,
     color: Palette.text,
   },
   tagline: {
     fontSize: 14,
     lineHeight: 22,
+    fontFamily: Typography.body,
     color: Palette.muted,
     textAlign: 'center',
     maxWidth: 280,
@@ -77,8 +79,5 @@ const styles = StyleSheet.create({
     maxWidth: 260,
     marginTop: 8,
     gap: 10,
-  },
-  login: {
-    height: 50,
   },
 });

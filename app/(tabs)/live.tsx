@@ -1,5 +1,6 @@
-import { PlaceholderImage } from '@/components/ui/placeholder-image';
-import { Palette } from '@/constants/theme';
+import { AppImage } from '@/components/ui/app-image';
+import { Palette, Typography, Radius } from '@/constants/theme';
+import { getLiveImage } from '@/data/images';
 import { useLive } from '@/context/live-context';
 import type { LiveSession } from '@/data/types';
 import { useRouter } from 'expo-router';
@@ -60,7 +61,7 @@ function SessionRow({
   return (
     <Pressable onPress={onPress} disabled={!onPress} style={styles.row}>
       <View style={styles.thumbWrap}>
-        <PlaceholderImage style={styles.thumb} />
+        <AppImage source={getLiveImage(session.id)} style={styles.thumb} />
         {live ? (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>LIVE</Text>
@@ -93,8 +94,8 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.background,
   },
   title: {
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 22,
+    fontFamily: Typography.headingBold,
     color: Palette.text,
     paddingHorizontal: 20,
     paddingTop: 16,
@@ -106,7 +107,7 @@ const styles = StyleSheet.create({
   },
   section: {
     fontSize: 12,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.muted2,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -129,13 +130,13 @@ const styles = StyleSheet.create({
     padding: 12,
     borderWidth: 1,
     borderColor: Palette.borderSoft,
-    borderRadius: 10,
+    borderRadius: Radius.md,
     marginBottom: 12,
   },
   thumbWrap: {
     width: 64,
     height: 64,
-    borderRadius: 10,
+    borderRadius: Radius.md,
     overflow: 'hidden',
   },
   thumb: {
@@ -153,7 +154,7 @@ const styles = StyleSheet.create({
   },
   badgeText: {
     fontSize: 9,
-    fontWeight: '700',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.background,
   },
   meta: {
@@ -161,7 +162,7 @@ const styles = StyleSheet.create({
   },
   rowTitle: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.bodySemiBold,
     color: Palette.text,
   },
   rowSub: {
