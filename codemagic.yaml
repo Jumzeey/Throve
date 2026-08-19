@@ -23,6 +23,13 @@ workflows:
         - google_play
       vars:
         PACKAGE_NAME: "com.throve.app"
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
     scripts:
       - name: Install npm dependencies
         script: |
