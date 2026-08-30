@@ -1,50 +1,54 @@
-# Welcome to your Expo app 👋
+# Throve Monorepo
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+## Structure
 
-## Get started
+- `frontend/` — Expo React Native app (Supabase Auth direct; all data via Node API)
+- `backend/` — Express API (talks to Supabase with user JWT + RLS)
+- `supabase/migrations/` — Postgres schema, RLS, triggers
 
-1. Install dependencies
+## Setup
 
-   ```bash
-   npm install
-   ```
+### 1. Supabase
 
-2. Start the app
+1. Create or open your Supabase project
+2. Run migrations in order (SQL editor or `supabase db push`):
+   - `supabase/migrations/20260820000000_initial_schema.sql`
+   - `supabase/migrations/20260820000001_storage_buckets.sql`
+   - `supabase/migrations/20260820000002_live_commerce.sql`
+3. Enable Realtime for `live_comments`, `live_stream_products`, `live_claims`
+4. Enable **Email magic link** auth
+5. Add redirect URL: `throveapp://auth/callback`
+6. Copy project URL, anon key, and **service role** key into env files
 
-   ```bash
-   npx expo start
-   ```
+### LiveKit (live video)
 
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+1. Create a LiveKit Cloud project
+2. Set `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` in `backend/.env`
+3. Use a **dev client / prebuild** for the app (LiveKit WebRTC does not run in Expo Go):
 
 ```bash
-npm run reset-project
+cd frontend
+npx expo prebuild
+npx expo run:ios   # or run:android
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+### Claim concurrency smoke test
 
-## Learn more
+```bash
+ACCESS_TOKEN=... SESSION_ID=... PRODUCT_ID=... CONCURRENCY=50 \
+  node backend/scripts/stress-claim.mjs
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+## Architecture
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```
+Mobile App
+  ├─ Auth → Supabase Auth (magic link)
+  ├─ Video → LiveKit Cloud (token from Express)
+  ├─ Live events → Supabase Realtime (comments, pin, stock, claims)
+  └─ Commerce → Express API → Postgres RPCs (atomic claims)
+```
 
-## Join the community
+## CI
 
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Codemagic builds from `frontend/` — see root `codemagic.yaml`.

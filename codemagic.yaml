@@ -5,8 +5,11 @@
 # 1. Add this repository as a React Native app, then scan for this file.
 # 2. Android signing — Team settings > codemagic.yaml settings > Code signing identities:
 #    upload a keystore and set its Reference name to `throve`.
-# 3. Android Play publishing: create a `google_play` env group with secret
-#    GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS (the Play service-account JSON).
+# 3. Environment groups (Team settings > Global variables and secrets):
+#    - `throve_frontend` — EXPO_PUBLIC_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_ANON_KEY, EXPO_PUBLIC_API_URL
+#    - `google_play` — GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS (Play service-account JSON)
+# 4. Mark secret values as Secure in the UI. Do not put localhost in EXPO_PUBLIC_API_URL —
+#    use your hosted backend URL (https://...).
 #
 # Docs: https://docs.codemagic.io/yaml-quick-start/building-a-react-native-app/
 
@@ -20,6 +23,7 @@ workflows:
       android_signing:
         - throve
       groups:
+        - throve_frontend
         - google_play
       vars:
         PACKAGE_NAME: "com.throve.app"
@@ -33,18 +37,33 @@ workflows:
     scripts:
       - name: Install npm dependencies
         script: |
+          cd frontend
           npm install
+      - name: Write Expo env file
+        script: |
+          set -e
+          test -n "$EXPO_PUBLIC_SUPABASE_URL" || { echo "Missing EXPO_PUBLIC_SUPABASE_URL in throve_frontend group"; exit 1; }
+          test -n "$EXPO_PUBLIC_SUPABASE_ANON_KEY" || { echo "Missing EXPO_PUBLIC_SUPABASE_ANON_KEY in throve_frontend group"; exit 1; }
+          test -n "$EXPO_PUBLIC_API_URL" || { echo "Missing EXPO_PUBLIC_API_URL in throve_frontend group"; exit 1; }
+          printf '%s\n' \
+            "EXPO_PUBLIC_SUPABASE_URL=$EXPO_PUBLIC_SUPABASE_URL" \
+            "EXPO_PUBLIC_SUPABASE_ANON_KEY=$EXPO_PUBLIC_SUPABASE_ANON_KEY" \
+            "EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL" \
+            > frontend/.env
+          echo "Wrote frontend/.env (API → $EXPO_PUBLIC_API_URL)"
       - name: Run Expo Prebuild
         script: |
+          cd frontend
           npx expo prebuild --platform android --non-interactive
       - name: Set up app/build.gradle
         script: |
-          cp ./support-files/build.gradle android/app/build.gradle
+          cp ./support-files/build.gradle frontend/android/app/build.gradle
       - name: Set Android SDK location
         script: |
-          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/android/local.properties"
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/frontend/android/local.properties"
       - name: Build Android release
         script: |
+          cd frontend
           LATEST_GOOGLE_PLAY_BUILD_NUMBER=""
           if [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS:-}" ]; then
             LATEST_GOOGLE_PLAY_BUILD_NUMBER=$(google-play get-latest-build-number --package-name "$PACKAGE_NAME" || true)
@@ -59,7 +78,7 @@ workflows:
             -PversionCode=$UPDATED_BUILD_NUMBER \
             -PversionName=1.0.$UPDATED_BUILD_NUMBER
     artifacts:
-      - android/app/build/outputs/**/*.aab
+      - frontend/android/app/build/outputs/**/*.aab
     publishing:
       google_play:
         credentials: $GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS

@@ -1,0 +1,12 @@
+# Railway config for the Throve Express API.
+# Service settings should use Root Directory: /backend
+# (or set config file path to /backend/railway.toml).
+
+[build]
+builder = "NIXPACKS"
+buildCommand = "npm install && npm run build"
+
+[deploy]
+startCommand = "npm run start"
+healthcheckPath = "/health"
+restartPolicyType = "ON_FAILURE"

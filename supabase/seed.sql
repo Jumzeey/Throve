@@ -1,0 +1,2 @@
+-- Demo data is loaded via: npm run db:seed
+-- Creates demo sellers, 19 listings, live sessions, reviews and saved items.
