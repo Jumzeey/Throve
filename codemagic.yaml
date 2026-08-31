@@ -49,6 +49,7 @@ workflows:
             "EXPO_PUBLIC_SUPABASE_URL=$EXPO_PUBLIC_SUPABASE_URL" \
             "EXPO_PUBLIC_SUPABASE_ANON_KEY=$EXPO_PUBLIC_SUPABASE_ANON_KEY" \
             "EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL" \
+            "EXPO_PUBLIC_AUTH_REDIRECT_URL=${EXPO_PUBLIC_AUTH_REDIRECT_URL:-throveapp://auth/callback}" \
             > frontend/.env
           echo "Wrote frontend/.env (API → $EXPO_PUBLIC_API_URL)"
       - name: Run Expo Prebuild

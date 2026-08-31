@@ -1,4 +1,5 @@
 import { apiFetch, API_URL, ApiError } from '@/lib/api';
+import { completeAuthFromRedirectUrl } from '@/lib/auth-redirect';
 import { getAuthRedirectUrl, supabase } from '@/lib/supabase';
 import type { UserProfile } from '@/data/types';
 import { isValidDob, isValidEmail } from '@/lib/validation';
@@ -56,15 +57,6 @@ async function fetchProfile(): Promise<UserProfile | null> {
     }
     return null;
   }
-}
-
-function parseAuthUrl(url: string) {
-  const hash = url.includes('#') ? url.split('#')[1] : '';
-  const query = url.includes('?') ? url.split('?')[1]?.split('#')[0] : '';
-  const params = new URLSearchParams(hash || query);
-  const access_token = params.get('access_token');
-  const refresh_token = params.get('refresh_token');
-  return { access_token, refresh_token };
 }
 
 async function simulateDevLink(input: { email: string; name?: string; username?: string; dob?: string }) {
@@ -140,20 +132,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     const linkingSub = Linking.addEventListener('url', ({ url }) => {
-      const { access_token, refresh_token } = parseAuthUrl(url);
-      if (!access_token || !refresh_token) return;
-      void supabase.auth
-        .setSession({ access_token, refresh_token })
+      if (!url.includes('auth/callback')) return;
+      void completeAuthFromRedirectUrl(url)
         .then(() => hydrateProfile())
         .catch(() => setSession(null));
     });
 
     void Linking.getInitialURL()
       .then(async (url) => {
-        if (!url) return;
-        const { access_token, refresh_token } = parseAuthUrl(url);
-        if (!access_token || !refresh_token) return;
-        await supabase.auth.setSession({ access_token, refresh_token });
+        if (!url?.includes('auth/callback')) return;
+        await completeAuthFromRedirectUrl(url);
         await hydrateProfile();
       })
       .catch(() => setSession(null));

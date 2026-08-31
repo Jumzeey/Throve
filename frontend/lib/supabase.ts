@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
-import Constants from 'expo-constants';
+import * as Linking from 'expo-linking';
 import { Platform } from 'react-native';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
@@ -25,7 +25,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
+/** Redirect target for magic links — must match Supabase Auth → URL Configuration. */
 export function getAuthRedirectUrl() {
-  const scheme = Constants.expoConfig?.scheme ?? 'throveapp';
-  return `${scheme}://auth/callback`;
+  const override = process.env.EXPO_PUBLIC_AUTH_REDIRECT_URL?.trim();
+  if (override) return override;
+  return Linking.createURL('auth/callback');
 }
