@@ -3,9 +3,9 @@ import { SplashScreen } from '@/components/ui/splash-screen';
 import { Redirect } from 'expo-router';
 
 export default function Index() {
-  const { isReady, session } = useAuth();
+  const { isReady, isAuthenticatingLink, session } = useAuth();
 
-  if (!isReady) {
+  if (!isReady || isAuthenticatingLink) {
     return <SplashScreen />;
   }
   if (!session) {

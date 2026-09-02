@@ -9,15 +9,15 @@ import { StyleSheet, Text, View } from 'react-native';
 
 /**
  * Handles throveapp://auth/callback deep links from Mailjet magic-link emails.
+ * Keeps the Throve splash visible while verifying the link and loading the profile.
  */
 export default function AuthCallbackScreen() {
   const router = useRouter();
   const inboundUrl = Linking.useURL();
-  const { session, isReady, finishAuthFromUrl } = useAuth();
+  const { session, isReady, isAuthenticatingLink, finishAuthFromUrl } = useAuth();
   const [url, setUrl] = useState<string | null>(inboundUrl);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-  const [resolvedProfile, setResolvedProfile] = useState(session);
 
   useEffect(() => {
     if (inboundUrl) {
@@ -40,11 +40,8 @@ export default function AuthCallbackScreen() {
     let cancelled = false;
     (async () => {
       try {
-        const profile = await finishAuthFromUrl(url);
-        if (!cancelled) {
-          setResolvedProfile(profile);
-          setDone(true);
-        }
+        await finishAuthFromUrl(url);
+        if (!cancelled) setDone(true);
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Could not complete sign-in.');
@@ -58,17 +55,13 @@ export default function AuthCallbackScreen() {
     };
   }, [url, finishAuthFromUrl]);
 
-  // Still resolving the inbound URL (cold start).
-  if (url === null || !isReady) {
+  // Keep splash up for cold start, profile hydrate, and in-flight deep link auth.
+  if (url === null || !isReady || isAuthenticatingLink || (!done && url.includes('auth/callback'))) {
     return <SplashScreen />;
   }
 
   if (!url.includes('auth/callback')) {
     return <Redirect href="/(auth)/welcome" />;
-  }
-
-  if (!done) {
-    return <SplashScreen />;
   }
 
   if (error) {
@@ -83,9 +76,8 @@ export default function AuthCallbackScreen() {
     );
   }
 
-  const profile = resolvedProfile ?? session;
-  if (profile?.setupComplete) return <Redirect href="/(tabs)" />;
-  if (profile) return <Redirect href="/(auth)/setup" />;
+  if (session?.setupComplete) return <Redirect href="/(tabs)" />;
+  if (session) return <Redirect href="/(auth)/setup" />;
   return <Redirect href="/(auth)/welcome" />;
 }
 

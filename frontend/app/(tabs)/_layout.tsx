@@ -9,7 +9,7 @@ import { useMemo } from 'react';
 import { Platform, StyleSheet } from 'react-native';
 
 export default function TabLayout() {
-  const { isReady, session } = useAuth();
+  const { isReady, isAuthenticatingLink, session } = useAuth();
   const { bottom, tabBarHeight } = useScreenInsets();
 
   const tabBarStyle = useMemo(
@@ -40,7 +40,7 @@ export default function TabLayout() {
     [tabBarStyle],
   );
 
-  if (!isReady) {
+  if (!isReady || isAuthenticatingLink) {
     return <SplashScreen />;
   }
   if (!session) {

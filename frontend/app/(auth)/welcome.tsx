@@ -1,5 +1,6 @@
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
+import { SplashScreen } from '@/components/ui/splash-screen';
 import { Palette, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useNetworkStatus } from '@/hooks/use-network-status';
@@ -10,9 +11,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 export default function WelcomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { session, isReady } = useAuth();
+  const { session, isReady, isAuthenticatingLink } = useAuth();
   const { isConnected } = useNetworkStatus();
 
+  if (!isReady || isAuthenticatingLink) {
+    return <SplashScreen />;
+  }
   if (session?.setupComplete) {
     return <Redirect href="/(tabs)" />;
   }
@@ -53,11 +57,6 @@ export default function WelcomeScreen() {
           By continuing you agree to our Terms and Privacy Policy.
         </Text>
       </View>
-      {!isReady ? (
-        <View style={styles.initOverlay}>
-          <Text style={styles.wordmarkSmall}>throve</Text>
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -75,11 +74,6 @@ const styles = StyleSheet.create({
     lineHeight: 44,
     color: Palette.plum,
     letterSpacing: -0.3,
-  },
-  wordmarkSmall: {
-    fontFamily: Typography.display,
-    fontSize: 30,
-    color: Palette.plum,
   },
   hero: { flex: 1, justifyContent: 'center', gap: 16 },
   headline: {
@@ -104,11 +98,5 @@ const styles = StyleSheet.create({
     color: Palette.muted,
     fontFamily: Typography.body,
     marginTop: 6,
-  },
-  initOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: Palette.ivory,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });

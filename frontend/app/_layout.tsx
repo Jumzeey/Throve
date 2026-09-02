@@ -39,9 +39,9 @@ const ThroveTheme = {
 };
 
 function RootNavigator() {
-  const { isReady } = useAuth();
+  const { isReady, isAuthenticatingLink } = useAuth();
 
-  if (!isReady) {
+  if (!isReady || isAuthenticatingLink) {
     return <SplashScreen />;
   }
 

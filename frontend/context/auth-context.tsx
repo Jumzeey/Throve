@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase';
 import type { UserProfile } from '@/data/types';
 import { isValidDob, isValidEmail } from '@/lib/validation';
 import * as Linking from 'expo-linking';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 const DEACTIVATED_ERROR = 'This account has been deactivated.';
 
@@ -30,6 +30,8 @@ type PendingSignup = {
 
 type AuthContextValue = {
   isReady: boolean;
+  /** True while a magic-link / deep-link sign-in is in progress. */
+  isAuthenticatingLink: boolean;
   session: UserProfile | null;
   signup: (input: { email: string; name: string; username: string; dob: string }) => Promise<void>;
   completeVerification: (input?: PendingSignup) => Promise<void>;
@@ -104,9 +106,11 @@ async function simulateDevLink(input: { email: string; name?: string; username?:
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isReady, setIsReady] = useState(false);
+  const [isAuthenticatingLink, setIsAuthenticatingLink] = useState(false);
   const [session, setSession] = useState<UserProfile | null>(null);
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
   const [pendingSignup, setPendingSignup] = useState<PendingSignup | null>(null);
+  const deepLinkInflight = useRef<{ url: string; promise: Promise<UserProfile | null> } | null>(null);
 
   const hydrateProfile = useCallback(async () => {
     const { data } = await supabase.auth.getSession();
@@ -130,8 +134,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const finishAuthFromUrl = useCallback(
     async (url: string) => {
-      await completeAuthFromRedirectUrl(url);
-      return hydrateProfile();
+      if (deepLinkInflight.current?.url === url) {
+        return deepLinkInflight.current.promise;
+      }
+
+      setIsAuthenticatingLink(true);
+      const promise = (async () => {
+        try {
+          await completeAuthFromRedirectUrl(url);
+          return await hydrateProfile();
+        } finally {
+          setIsAuthenticatingLink(false);
+        }
+      })();
+      deepLinkInflight.current = { url, promise };
+
+      try {
+        return await promise;
+      } catch (err) {
+        if (deepLinkInflight.current?.url === url) {
+          deepLinkInflight.current = null;
+        }
+        throw err;
+      }
     },
     [hydrateProfile],
   );
@@ -141,9 +166,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
-        await hydrateProfile();
+        // Finish magic-link auth before marking the app ready, so index never
+        // flashes the welcome screen while the profile is still loading.
+        const initialUrl = await Linking.getInitialURL();
+        if (cancelled) return;
+        if (initialUrl?.includes('auth/callback')) {
+          await finishAuthFromUrl(initialUrl);
+        } else {
+          await hydrateProfile();
+        }
       } catch {
-        setSession(null);
+        if (!cancelled) setSession(null);
       } finally {
         if (!cancelled) setIsReady(true);
       }
@@ -163,13 +196,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!url.includes('auth/callback')) return;
       void finishAuthFromUrl(url).catch(() => setSession(null));
     });
-
-    void Linking.getInitialURL()
-      .then(async (url) => {
-        if (!url?.includes('auth/callback')) return;
-        await finishAuthFromUrl(url);
-      })
-      .catch(() => setSession(null));
 
     return () => {
       cancelled = true;
@@ -311,6 +337,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       isReady,
+      isAuthenticatingLink,
       session,
       signup,
       completeVerification,
@@ -330,6 +357,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       completeVerification,
       deactivateAccount,
       finishAuthFromUrl,
+      isAuthenticatingLink,
       isReady,
       logout,
       requestMagicLink,
