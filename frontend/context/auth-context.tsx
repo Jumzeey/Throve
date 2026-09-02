@@ -36,6 +36,7 @@ type AuthContextValue = {
   requestMagicLink: (email: string) => Promise<void>;
   completeMagicLink: (email?: string) => Promise<void>;
   requestRecovery: (email: string) => Promise<void>;
+  finishAuthFromUrl: (url: string) => Promise<UserProfile | null>;
   completeSetup: (input: { username: string; bio: string; location: string; photoUri?: string }) => Promise<void>;
   updateProfile: (input: ProfilePatch) => Promise<void>;
   updateSettings: (input: SettingsPatch) => Promise<void>;
@@ -127,6 +128,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return profile;
   }, []);
 
+  const finishAuthFromUrl = useCallback(
+    async (url: string) => {
+      await completeAuthFromRedirectUrl(url);
+      return hydrateProfile();
+    },
+    [hydrateProfile],
+  );
+
   useEffect(() => {
     let cancelled = false;
 
@@ -152,16 +161,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const linkingSub = Linking.addEventListener('url', ({ url }) => {
       if (!url.includes('auth/callback')) return;
-      void completeAuthFromRedirectUrl(url)
-        .then(() => hydrateProfile())
-        .catch(() => setSession(null));
+      void finishAuthFromUrl(url).catch(() => setSession(null));
     });
 
     void Linking.getInitialURL()
       .then(async (url) => {
         if (!url?.includes('auth/callback')) return;
-        await completeAuthFromRedirectUrl(url);
-        await hydrateProfile();
+        await finishAuthFromUrl(url);
       })
       .catch(() => setSession(null));
 
@@ -170,7 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       subscription.subscription.unsubscribe();
       linkingSub.remove();
     };
-  }, [hydrateProfile]);
+  }, [hydrateProfile, finishAuthFromUrl]);
 
   const signup = useCallback(async (input: { email: string; name: string; username: string; dob: string }) => {
     const email = input.email.trim().toLowerCase();
@@ -311,6 +317,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       requestMagicLink,
       completeMagicLink,
       requestRecovery,
+      finishAuthFromUrl,
       completeSetup,
       updateProfile,
       updateSettings,
@@ -322,6 +329,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       completeSetup,
       completeVerification,
       deactivateAccount,
+      finishAuthFromUrl,
       isReady,
       logout,
       requestMagicLink,

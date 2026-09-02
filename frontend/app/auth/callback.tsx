@@ -2,30 +2,49 @@ import { SplashScreen } from '@/components/ui/splash-screen';
 import { AlertBanner } from '@/components/ui/alert-banner';
 import { Palette, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import { completeAuthFromRedirectUrl } from '@/lib/auth-redirect';
 import * as Linking from 'expo-linking';
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 /**
- * Handles throveapp://auth/callback deep links from Supabase magic-link emails.
+ * Handles throveapp://auth/callback deep links from Mailjet magic-link emails.
  */
 export default function AuthCallbackScreen() {
   const router = useRouter();
-  const url = Linking.useURL();
-  const { session, isReady } = useAuth();
+  const inboundUrl = Linking.useURL();
+  const { session, isReady, finishAuthFromUrl } = useAuth();
+  const [url, setUrl] = useState<string | null>(inboundUrl);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [resolvedProfile, setResolvedProfile] = useState(session);
 
   useEffect(() => {
-    if (!url?.includes('auth/callback')) return;
+    if (inboundUrl) {
+      setUrl(inboundUrl);
+      return;
+    }
+    let cancelled = false;
+    void Linking.getInitialURL().then((initial) => {
+      if (!cancelled && initial) setUrl(initial);
+      if (!cancelled && !initial) setUrl('');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [inboundUrl]);
+
+  useEffect(() => {
+    if (!url || !url.includes('auth/callback')) return;
 
     let cancelled = false;
     (async () => {
       try {
-        await completeAuthFromRedirectUrl(url);
-        if (!cancelled) setDone(true);
+        const profile = await finishAuthFromUrl(url);
+        if (!cancelled) {
+          setResolvedProfile(profile);
+          setDone(true);
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Could not complete sign-in.');
@@ -37,13 +56,18 @@ export default function AuthCallbackScreen() {
     return () => {
       cancelled = true;
     };
-  }, [url]);
+  }, [url, finishAuthFromUrl]);
 
-  if (!url?.includes('auth/callback')) {
+  // Still resolving the inbound URL (cold start).
+  if (url === null || !isReady) {
+    return <SplashScreen />;
+  }
+
+  if (!url.includes('auth/callback')) {
     return <Redirect href="/(auth)/welcome" />;
   }
 
-  if (!done || !isReady) {
+  if (!done) {
     return <SplashScreen />;
   }
 
@@ -59,8 +83,9 @@ export default function AuthCallbackScreen() {
     );
   }
 
-  if (session?.setupComplete) return <Redirect href="/(tabs)" />;
-  if (session) return <Redirect href="/(auth)/setup" />;
+  const profile = resolvedProfile ?? session;
+  if (profile?.setupComplete) return <Redirect href="/(tabs)" />;
+  if (profile) return <Redirect href="/(auth)/setup" />;
   return <Redirect href="/(auth)/welcome" />;
 }
 

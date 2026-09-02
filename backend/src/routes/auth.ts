@@ -72,10 +72,17 @@ router.post('/send-link', async (req, res) => {
     });
   }
 
-  const actionLink = linkResult.data?.properties?.action_link;
-  if (linkResult.error || !actionLink) {
+  const hashedToken = linkResult.data?.properties?.hashed_token;
+  if (linkResult.error || !hashedToken) {
     return sendError(res, 400, linkResult.error?.message ?? 'Could not generate auth link', 'AUTH_ERROR');
   }
+
+  // Deep-link straight into the app with token_hash. Avoids the Supabase web verify
+  // hop, which often strips #access_token fragments on mobile custom schemes.
+  const verificationType =
+    linkResult.data.properties.verification_type ||
+    (type === 'recovery' ? 'recovery' : type === 'signup' ? 'signup' : 'magiclink');
+  const deepLink = `${redirectTo}?token_hash=${encodeURIComponent(hashedToken)}&type=${encodeURIComponent(verificationType)}`;
 
   const userId = linkResult.data.user?.id;
   if (userId && Object.keys(metadata).length) {
@@ -89,7 +96,7 @@ router.post('/send-link', async (req, res) => {
   }
 
   try {
-    const content = buildAuthEmail(type, actionLink, email);
+    const content = buildAuthEmail(type, deepLink, email);
     await sendMailjetEmail({
       to: email,
       subject: content.subject,
