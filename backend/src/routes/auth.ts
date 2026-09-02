@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { buildAuthEmail } from '../lib/auth-email.js';
+import { deepLinks } from '../lib/email/deep-links.js';
 import { sendError } from '../lib/errors.js';
 import { sendMailjetEmail } from '../lib/mailjet.js';
 import { createServiceClient } from '../lib/supabase.js';
@@ -82,7 +83,10 @@ router.post('/send-link', async (req, res) => {
   const verificationType =
     linkResult.data.properties.verification_type ||
     (type === 'recovery' ? 'recovery' : type === 'signup' ? 'signup' : 'magiclink');
-  const deepLink = `${redirectTo}?token_hash=${encodeURIComponent(hashedToken)}&type=${encodeURIComponent(verificationType)}`;
+  // Email clients need https:// — bridge via /open then hand off to the app scheme.
+  const emailActionLink = deepLinks.authCallback(
+    `?token_hash=${encodeURIComponent(hashedToken)}&type=${encodeURIComponent(verificationType)}`,
+  );
 
   const userId = linkResult.data.user?.id;
   if (userId && Object.keys(metadata).length) {
@@ -96,7 +100,7 @@ router.post('/send-link', async (req, res) => {
   }
 
   try {
-    const content = buildAuthEmail(type, deepLink, email);
+    const content = buildAuthEmail(type, emailActionLink, email);
     await sendMailjetEmail({
       to: email,
       subject: content.subject,

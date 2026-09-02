@@ -52,7 +52,7 @@ export function brandedEmail(input: BrandedEmailInput) {
             hasCta
               ? `<tr>
             <td align="center" style="padding:0 32px 28px;">
-              <a href="${link}" target="_blank" style="display:inline-block;padding:15px 32px;font-size:15px;font-weight:600;color:#FFF7F0;text-decoration:none;border-radius:26px;background-color:#5A1F45;">
+              <a href="${link}" style="display:inline-block;padding:15px 32px;font-size:15px;font-weight:600;color:#FFF7F0;text-decoration:none;border-radius:26px;background-color:#5A1F45;">
                 ${escapeHtml(input.ctaLabel!)}
               </a>
             </td>

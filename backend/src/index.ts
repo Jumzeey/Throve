@@ -11,6 +11,7 @@ import inboxRoutes from './routes/inbox.js';
 import listingsRoutes from './routes/listings.js';
 import liveRoutes from './routes/live.js';
 import mediaRoutes from './routes/media.js';
+import openRoutes from './routes/open.js';
 import profilesRoutes from './routes/profiles.js';
 
 dotenv.config();
@@ -25,6 +26,7 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'throve-backend' });
 });
 
+app.use('/open', openRoutes);
 app.use('/auth', authRoutes);
 app.use('/profiles', profilesRoutes);
 app.use('/listings', listingsRoutes);
