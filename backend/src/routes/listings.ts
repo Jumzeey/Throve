@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { handleSupabaseError, sendError } from '../lib/errors.js';
 import type { DbRow } from '../lib/db-types.js';
+import { queueEmail } from '../lib/email/send.js';
+import { listingPublishedEmail } from '../lib/email/templates/listings.js';
 import { getProfileById, getSellerMap, mapListing } from '../lib/mappers.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
 
@@ -205,6 +207,15 @@ router.post('/:id/publish', requireAuth, async (req, res) => {
 
   if (error) return handleSupabaseError(res, error);
   const profile = await getProfileById(supabase, userId);
+
+  queueEmail({
+    toUserId: userId,
+    content: listingPublishedEmail({
+      listingId: data.id,
+      title: data.title,
+    }),
+  });
+
   return res.json(mapListing(data, profile?.username ?? 'unknown'));
 });
 

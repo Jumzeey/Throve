@@ -2,7 +2,7 @@ import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { ScreenHeader } from '@/components/ui/screen-header';
-import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
+import { Palette, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
@@ -10,16 +10,17 @@ import { useNetworkStatus } from '@/hooks/use-network-status';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { session, logout, deactivateAccount } = useAuth();
+  const { session, logout, deactivateAccount, updateSettings } = useAuth();
   const inbox = useInbox();
   const { hideActiveForSeller } = useListings();
   const { isConnected } = useNetworkStatus();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [prefsBusy, setPrefsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!session) {
@@ -28,6 +29,8 @@ export default function SettingsScreen() {
 
   const username = session.username;
   const blockedCount = inbox.blockedUsers.length;
+  const notifOffers = session.notifOffers !== false;
+  const notifMessages = session.notifMessages !== false;
 
   async function onLogout() {
     if (!isConnected) return;
@@ -36,6 +39,19 @@ export default function SettingsScreen() {
       await logout();
     } catch {
       setError('Could not log out. Check your connection and try again.');
+    }
+  }
+
+  async function onTogglePref(key: 'notifOffers' | 'notifMessages', value: boolean) {
+    if (!isConnected || prefsBusy) return;
+    setPrefsBusy(true);
+    setError(null);
+    try {
+      await updateSettings({ [key]: value });
+    } catch {
+      setError('Could not update notification preferences.');
+    } finally {
+      setPrefsBusy(false);
     }
   }
 
@@ -68,16 +84,50 @@ export default function SettingsScreen() {
           <SettingsRow label="Login & security" />
           <SettingsRow label={`Blocked users${blockedCount > 0 ? ` (${blockedCount})` : ''}`} />
         </View>
+        <Text style={styles.sectionTitle}>Email notifications</Text>
+        <View style={styles.group}>
+          <View style={[styles.row, styles.rowLast]}>
+            <View style={styles.toggleCopy}>
+              <Text style={styles.rowLabel}>Offer updates</Text>
+              <Text style={styles.rowHint}>New offers, accepts, and expiries</Text>
+            </View>
+            <Switch
+              value={notifOffers}
+              onValueChange={(value) => onTogglePref('notifOffers', value)}
+              disabled={!isConnected || prefsBusy}
+              trackColor={{ false: Palette.border, true: Palette.blush }}
+              thumbColor={notifOffers ? Palette.plum : Palette.ivoryElevated}
+            />
+          </View>
+          <View style={styles.row}>
+            <View style={styles.toggleCopy}>
+              <Text style={styles.rowLabel}>Messages</Text>
+              <Text style={styles.rowHint}>New chat messages from buyers and sellers</Text>
+            </View>
+            <Switch
+              value={notifMessages}
+              onValueChange={(value) => onTogglePref('notifMessages', value)}
+              disabled={!isConnected || prefsBusy}
+              trackColor={{ false: Palette.border, true: Palette.blush }}
+              thumbColor={notifMessages ? Palette.plum : Palette.ivoryElevated}
+            />
+          </View>
+        </View>
         <Text style={styles.sectionTitle}>Prototype</Text>
         <AlertBanner
           variant="info"
           title="Working prototype"
-          message="Accounts are real, but purchases and payments are simulated."
+          message="Accounts are real, but purchases and payments are simulated. Order emails always send."
         />
         <Text style={styles.sectionTitle}>More</Text>
         <View style={styles.moreGroup}>
           <Button label="Log out" variant="secondary" onPress={onLogout} disabled={!isConnected} />
-          <Button label="Delete account" variant="ghost" onPress={() => setConfirmDelete(true)} disabled={!isConnected} />
+          <Button
+            label="Delete account"
+            variant="ghost"
+            onPress={() => setConfirmDelete(true)}
+            disabled={!isConnected || busy}
+          />
         </View>
       </ScrollView>
       <Dialog
@@ -133,11 +183,25 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: Palette.divider,
+    gap: Spacing.md,
+  },
+  rowLast: {
+    borderBottomWidth: 1,
+  },
+  toggleCopy: {
+    flex: 1,
+    gap: 2,
   },
   rowLabel: {
     fontSize: 14,
     fontFamily: Typography.body,
     color: Palette.espresso,
+  },
+  rowHint: {
+    fontSize: 12,
+    fontFamily: Typography.body,
+    color: Palette.muted,
+    lineHeight: 16,
   },
   rowValue: {
     fontSize: 14,

@@ -2,6 +2,14 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { handleSupabaseError, sendError } from '../lib/errors.js';
 import type { DbRow } from '../lib/db-types.js';
+import { queueMessageEmail } from '../lib/email/message-debounce.js';
+import { queueEmail } from '../lib/email/send.js';
+import {
+  offerAcceptedEmail,
+  offerReceivedEmail,
+  offerRejectedEmail,
+  offerWithdrawnEmail,
+} from '../lib/email/templates/offers.js';
 import { getProfileById, getProfileByUsername } from '../lib/mappers.js';
 import { type AuthedRequest, requireAuth } from '../middleware/auth.js';
 
@@ -11,6 +19,14 @@ const OFFER_TTL_MS = 24 * 60 * 60 * 1000;
 async function usernameToId(supabase: ReturnType<typeof import('../lib/supabase.js').createSupabaseClient>, username: string) {
   const profile = await getProfileByUsername(supabase, username);
   return profile?.id ?? null;
+}
+
+async function listingTitle(
+  supabase: ReturnType<typeof import('../lib/supabase.js').createSupabaseClient>,
+  listingId: string,
+) {
+  const { data } = await supabase.from('listings').select('title').eq('id', listingId).maybeSingle();
+  return (data?.title as string) || 'your listing';
 }
 
 router.get('/conversations', requireAuth, async (req, res) => {
@@ -162,6 +178,14 @@ router.post('/conversations/:id/messages', requireAuth, async (req, res) => {
 
     const otherId = conv.participant_a === userId ? conv.participant_b : conv.participant_a;
     await supabase.from('conversation_unread').upsert({ conversation_id: req.params.id, user_id: otherId });
+
+    const senderProfile = await getProfileById(supabase, userId);
+    queueMessageEmail({
+      conversationId: String(req.params.id),
+      toUserId: otherId,
+      fromUsername: senderProfile?.username ?? 'someone',
+      preview: parsed.data.text.trim(),
+    });
   }
 
   const sender = await getProfileById(supabase, userId);
@@ -247,6 +271,21 @@ router.post('/offers', requireAuth, async (req, res) => {
 
   if (error) return handleSupabaseError(res, error);
 
+  const title = await listingTitle(supabase, parsed.data.listingId);
+  const recipientId = parsed.data.initiator === 'buyer' ? sellerId : buyerId;
+  const fromUsername = parsed.data.initiator === 'buyer' ? parsed.data.buyer : parsed.data.seller;
+  queueEmail({
+    toUserId: recipientId,
+    preference: 'offers',
+    content: offerReceivedEmail({
+      offerId: data.id,
+      listingTitle: title,
+      amount: data.amount,
+      otherUsername: fromUsername,
+      expiresAt: expiresAt,
+    }),
+  });
+
   return res.status(201).json({
     id: data.id,
     listingId: data.listing_id,
@@ -280,6 +319,42 @@ router.patch('/offers/:id', requireAuth, async (req, res) => {
 
   const buyer = await getProfileById(supabase, data.buyer_id);
   const seller = await getProfileById(supabase, data.seller_id);
+  const title = await listingTitle(supabase, data.listing_id);
+
+  if (status === 'accepted') {
+    queueEmail({
+      toUserId: data.buyer_id,
+      preference: 'offers',
+      content: offerAcceptedEmail({
+        offerId: data.id,
+        listingTitle: title,
+        amount: data.amount,
+        otherUsername: seller?.username ?? 'seller',
+      }),
+    });
+  } else if (status === 'rejected') {
+    queueEmail({
+      toUserId: data.buyer_id,
+      preference: 'offers',
+      content: offerRejectedEmail({
+        offerId: data.id,
+        listingTitle: title,
+        amount: data.amount,
+        otherUsername: seller?.username ?? 'seller',
+      }),
+    });
+  } else if (status === 'withdrawn') {
+    queueEmail({
+      toUserId: data.seller_id,
+      preference: 'offers',
+      content: offerWithdrawnEmail({
+        offerId: data.id,
+        listingTitle: title,
+        amount: data.amount,
+        otherUsername: buyer?.username ?? 'buyer',
+      }),
+    });
+  }
 
   return res.json({
     id: data.id,

@@ -2,6 +2,14 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { handleSupabaseError, sendError } from '../lib/errors.js';
 import type { DbRow } from '../lib/db-types.js';
+import { queueEmail } from '../lib/email/send.js';
+import {
+  orderCancelledEmail,
+  orderCompletedEmail,
+  orderDispatchedEmail,
+  orderPlacedBuyerEmail,
+  orderPlacedSellerEmail,
+} from '../lib/email/templates/orders.js';
 import { getProfileById, getProfileByUsername } from '../lib/mappers.js';
 import { createServiceClient } from '../lib/supabase.js';
 import { type AuthedRequest, requireAuth } from '../middleware/auth.js';
@@ -299,6 +307,25 @@ router.post('/complete', requireAuth, async (req, res) => {
 
   const buyer = await getProfileById(supabase, userId);
   const seller = await getProfileById(supabase, listing.seller_id);
+  const fromLive = Boolean(data.from_live_id);
+  const orderVars = {
+    orderId: data.id,
+    listingTitle: data.listing_title,
+    total: data.total,
+    buyerName: buyer?.username ?? 'buyer',
+    sellerName: seller?.username ?? 'seller',
+    deliveryMethod: data.delivery_method,
+    fromLive,
+  };
+
+  queueEmail({
+    toUserId: userId,
+    content: orderPlacedBuyerEmail(orderVars),
+  });
+  queueEmail({
+    toUserId: listing.seller_id,
+    content: orderPlacedSellerEmail(orderVars),
+  });
 
   return res.status(201).json({
     id: data.id,
@@ -335,6 +362,16 @@ router.post('/orders/:id/dispatch', requireAuth, async (req, res) => {
     .single();
   if (error) return handleSupabaseError(res, error);
   if (!data) return sendError(res, 400, 'Order not eligible');
+
+  queueEmail({
+    toUserId: data.buyer_id,
+    content: orderDispatchedEmail({
+      orderId: data.id,
+      listingTitle: data.listing_title,
+      total: data.total,
+    }),
+  });
+
   return res.json({ ok: true });
 });
 
@@ -350,6 +387,18 @@ router.post('/orders/:id/confirm-received', requireAuth, async (req, res) => {
     .single();
   if (error) return handleSupabaseError(res, error);
   if (!data) return sendError(res, 400, 'Order not eligible');
+
+  const buyer = await getProfileById(supabase, userId);
+  queueEmail({
+    toUserId: data.seller_id,
+    content: orderCompletedEmail({
+      orderId: data.id,
+      listingTitle: data.listing_title,
+      total: data.total,
+      buyerName: buyer?.username ?? 'buyer',
+    }),
+  });
+
   return res.json({ ok: true });
 });
 
@@ -372,6 +421,18 @@ router.post('/orders/:id/cancel', requireAuth, async (req, res) => {
   if (!order.live_stream_product_id) {
     await supabase.from('listings').update({ status: 'available' }).eq('id', order.listing_id);
   }
+
+  const otherId = order.buyer_id === userId ? order.seller_id : order.buyer_id;
+  queueEmail({
+    toUserId: otherId,
+    content: orderCancelledEmail({
+      orderId: order.id,
+      listingTitle: order.listing_title,
+      total: order.total,
+      reason: parsed.data.reason,
+    }),
+  });
+
   return res.json({ ok: true });
 });
 

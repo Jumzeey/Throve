@@ -2,6 +2,12 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { handleSupabaseError, sendError } from '../lib/errors.js';
 import type { DbRow } from '../lib/db-types.js';
+import { queueEmail } from '../lib/email/send.js';
+import {
+  liveClaimReservedEmail,
+  liveStartedEmail,
+  liveUpcomingEmail,
+} from '../lib/email/templates/live.js';
 import { mapLiveClaim, mapLiveSession, mapLiveStreamProduct } from '../lib/live-mappers.js';
 import { createLiveKitToken, getLiveKitUrl, isLiveKitConfigured } from '../lib/livekit.js';
 import { getProfileById, getSellerMap, mapListing } from '../lib/mappers.js';
@@ -10,6 +16,20 @@ import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/aut
 
 const router = Router();
 const CLAIM_TTL_SECONDS = 5 * 60;
+
+function formatStart(iso: string) {
+  try {
+    return new Date(iso).toLocaleString('en-GB', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
 
 function publicClient(req: AuthedRequest) {
   return req.supabase ?? createSupabaseClient();
@@ -179,8 +199,31 @@ router.post('/sessions', requireAuth, async (req, res) => {
 
   const host = await getProfileById(supabase, userId);
   const products = await loadProducts(supabase, data.id);
+  const hostUsername = host?.username ?? 'unknown';
+
+  if (scheduled && parsed.data.scheduledAt) {
+    queueEmail({
+      toUserId: userId,
+      content: liveUpcomingEmail({
+        sessionId: data.id,
+        hostUsername,
+        title: data.title,
+        startTimeLabel: formatStart(parsed.data.scheduledAt),
+      }),
+    });
+  } else {
+    queueEmail({
+      toUserId: userId,
+      content: liveStartedEmail({
+        sessionId: data.id,
+        hostUsername,
+        title: data.title,
+      }),
+    });
+  }
+
   return res.status(201).json(
-    mapLiveSession({ ...data, livekit_room_name: roomName }, host?.username ?? 'unknown', products),
+    mapLiveSession({ ...data, livekit_room_name: roomName }, hostUsername, products),
   );
 });
 
@@ -197,7 +240,18 @@ router.post('/sessions/:id/start', requireAuth, async (req, res) => {
   if (!data) return sendError(res, 404, 'Session not found');
   const host = await getProfileById(supabase, userId);
   const products = await loadProducts(supabase, data.id);
-  return res.json(mapLiveSession(data, host?.username ?? 'unknown', products));
+  const hostUsername = host?.username ?? 'unknown';
+
+  queueEmail({
+    toUserId: userId,
+    content: liveStartedEmail({
+      sessionId: data.id,
+      hostUsername,
+      title: data.title,
+    }),
+  });
+
+  return res.json(mapLiveSession(data, hostUsername, products));
 });
 
 router.post('/sessions/:id/end', requireAuth, async (req, res) => {
@@ -366,7 +420,36 @@ router.post('/sessions/:id/products/:productId/claim', requireAuth, async (req, 
       return sendError(res, mapped.status, mapped.message, mapped.code);
     }
     const profile = await getProfileById(supabase, userId);
-    return res.json(mapLiveClaim(data as DbRow, profile?.username ?? 'unknown'));
+    const claim = data as DbRow;
+
+    let listingTitle = 'your item';
+    const productId = claim.live_stream_product_id ? String(claim.live_stream_product_id) : req.params.productId;
+    if (productId) {
+      const { data: product } = await supabase
+        .from('live_stream_products')
+        .select('listing_id')
+        .eq('id', productId)
+        .maybeSingle();
+      if (product?.listing_id) {
+        const { data: listing } = await supabase
+          .from('listings')
+          .select('title')
+          .eq('id', product.listing_id)
+          .maybeSingle();
+        if (listing?.title) listingTitle = String(listing.title);
+      }
+    }
+
+    queueEmail({
+      toUserId: userId,
+      content: liveClaimReservedEmail({
+        sessionId: String(req.params.id),
+        listingTitle,
+        expiresInMinutes: Math.round(CLAIM_TTL_SECONDS / 60),
+      }),
+    });
+
+    return res.json(mapLiveClaim(claim, profile?.username ?? 'unknown'));
   } catch (err) {
     return sendError(res, 500, err instanceof Error ? err.message : 'Claim failed');
   }
@@ -511,6 +594,21 @@ router.post('/sessions/:id/claim/:listingId', requireAuth, async (req, res) => {
       return sendError(res, mapped.status, mapped.message, mapped.code);
     }
     const profile = await getProfileById(supabase, userId);
+    const { data: listing } = await supabase
+      .from('listings')
+      .select('title')
+      .eq('id', req.params.listingId)
+      .maybeSingle();
+
+    queueEmail({
+      toUserId: userId,
+      content: liveClaimReservedEmail({
+        sessionId: String(req.params.id),
+        listingTitle: (listing?.title as string) || 'your item',
+        expiresInMinutes: Math.round(CLAIM_TTL_SECONDS / 60),
+      }),
+    });
+
     return res.json(mapLiveClaim(data as DbRow, profile?.username ?? 'unknown'));
   } catch (err) {
     return sendError(res, 500, err instanceof Error ? err.message : 'Claim failed');

@@ -1,9 +1,11 @@
-import { Router } from 'express';
-import { z } from 'zod';
-import { handleSupabaseError, sendError } from '../lib/errors.js';
+import { sendTransactionalEmail } from '../lib/email/send.js';
+import { accountDeactivatedEmail } from '../lib/email/templates/account.js';
 import { getProfileById, getProfileByUsername, mapProfile } from '../lib/mappers.js';
 import { createSupabaseClient } from '../lib/supabase.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
+import { Router } from 'express';
+import { z } from 'zod';
+import { handleSupabaseError, sendError } from '../lib/errors.js';
 
 const router = Router();
 
@@ -133,6 +135,12 @@ router.post('/me/deactivate', requireAuth, async (req, res) => {
     .update({ status: 'hidden' })
     .eq('seller_id', userId)
     .in('status', ['available', 'draft']);
+
+  // Send before deactivating — recipients skip deactivated profiles.
+  await sendTransactionalEmail({
+    toUserId: userId,
+    content: accountDeactivatedEmail(),
+  });
 
   const { error } = await supabase.from('profiles').update({ deactivated: true }).eq('id', userId);
   if (error) return handleSupabaseError(res, error);

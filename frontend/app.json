@@ -28,6 +28,26 @@
               "scheme": "throveapp",
               "host": "auth",
               "pathPrefix": "/callback"
+            },
+            {
+              "scheme": "throveapp",
+              "host": "inbox"
+            },
+            {
+              "scheme": "throveapp",
+              "host": "checkout"
+            },
+            {
+              "scheme": "throveapp",
+              "host": "product"
+            },
+            {
+              "scheme": "throveapp",
+              "host": "live"
+            },
+            {
+              "scheme": "throveapp",
+              "host": "profile"
             }
           ],
           "category": ["BROWSABLE", "DEFAULT"]

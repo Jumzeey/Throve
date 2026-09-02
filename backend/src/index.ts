@@ -2,6 +2,9 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
 import { startClaimExpiryWorker } from './jobs/claim-expiry.js';
+import { startLiveUpcomingWorker } from './jobs/live-upcoming.js';
+import { startOfferExpiryWorker } from './jobs/offer-expiry.js';
+import { startReviewNudgeWorker } from './jobs/review-nudge.js';
 import checkoutRoutes from './routes/checkout.js';
 import authRoutes from './routes/auth.js';
 import inboxRoutes from './routes/inbox.js';
@@ -37,4 +40,7 @@ app.use((_req, res) => {
 app.listen(port, () => {
   console.log(`Throve backend listening on http://localhost:${port}`);
   startClaimExpiryWorker();
+  startOfferExpiryWorker();
+  startLiveUpcomingWorker();
+  startReviewNudgeWorker();
 });
