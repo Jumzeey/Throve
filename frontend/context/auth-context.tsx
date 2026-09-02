@@ -1,6 +1,6 @@
 import { apiFetch, API_URL, ApiError } from '@/lib/api';
 import { completeAuthFromRedirectUrl } from '@/lib/auth-redirect';
-import { getAuthRedirectUrl, supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import type { UserProfile } from '@/data/types';
 import { isValidDob, isValidEmail } from '@/lib/validation';
 import * as Linking from 'expo-linking';
@@ -59,21 +59,40 @@ async function fetchProfile(): Promise<UserProfile | null> {
   }
 }
 
-async function simulateDevLink(input: { email: string; name?: string; username?: string; dob?: string }) {
+async function postAuthJson(path: string, body: Record<string, unknown>) {
   let response: Response;
   try {
-    response = await fetch(`${API_URL}/auth/dev/simulate-link`, {
+    response = await fetch(`${API_URL}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
+      body: JSON.stringify(body),
     });
   } catch {
     throw new Error('Cannot reach the Throve backend. Start it with npm run start:backend.');
   }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.message ?? 'Could not simulate verification.');
+    throw new Error(payload.message ?? 'Request failed.');
   }
+  return payload;
+}
+
+/** Auth emails are sent by the backend via Mailjet — not Supabase SMTP. */
+async function requestAuthEmail(input: {
+  email: string;
+  type: 'magiclink' | 'signup' | 'recovery';
+  name?: string;
+  username?: string;
+  dob?: string;
+}) {
+  await postAuthJson('/auth/send-link', input);
+}
+
+async function simulateDevLink(input: { email: string; name?: string; username?: string; dob?: string }) {
+  const payload = (await postAuthJson('/auth/dev/simulate-link', input)) as {
+    access_token: string;
+    refresh_token: string;
+  };
 
   const { error } = await supabase.auth.setSession({
     access_token: payload.access_token,
@@ -163,16 +182,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!isValidEmail(email)) throw new Error('Enter a valid email address.');
     if (!isValidDob(dob)) throw new Error('Select a valid date of birth.');
 
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        shouldCreateUser: true,
-        emailRedirectTo: getAuthRedirectUrl(),
-        data: { name, username, dob },
-      },
-    });
-
-    if (error) throw new Error(error.message);
+    await requestAuthEmail({ email, type: 'signup', name, username, dob });
     setPendingSignup({ email, name, username, dob });
     setPendingEmail(email);
   }, []);
@@ -203,12 +213,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!trimmed) throw new Error('Enter your email address.');
     if (!isValidEmail(trimmed)) throw new Error('Enter a valid email address.');
 
-    const { error } = await supabase.auth.signInWithOtp({
-      email: trimmed,
-      options: { emailRedirectTo: getAuthRedirectUrl() },
-    });
-
-    if (error) throw new Error(error.message);
+    await requestAuthEmail({ email: trimmed, type: 'magiclink' });
     setPendingEmail(trimmed);
   }, []);
 
@@ -236,10 +241,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!trimmed) throw new Error('Enter your email address.');
     if (!isValidEmail(trimmed)) throw new Error('Enter a valid email address.');
 
-    const { error } = await supabase.auth.resetPasswordForEmail(trimmed, {
-      redirectTo: getAuthRedirectUrl(),
-    });
-    if (error) throw new Error(error.message);
+    await requestAuthEmail({ email: trimmed, type: 'recovery' });
   }, []);
 
   const completeSetup = useCallback(
