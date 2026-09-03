@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useAuth } from '@/auth/AuthContext';
+import { useEffect, useState } from 'react';
+import { useAuth, roleLabel } from '@/auth/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -22,6 +22,10 @@ export function ConfirmActionDialog({
   destructive,
   requireCheckbox,
   checkboxLabel = 'I have reviewed this record and understand this cannot be undone.',
+  reasonLabel = 'Reason (required)',
+  reasonPlaceholder = 'Document why this action is being taken…',
+  defaultReason = '',
+  metaRows,
   onConfirm,
 }: {
   open: boolean;
@@ -32,11 +36,23 @@ export function ConfirmActionDialog({
   destructive?: boolean;
   requireCheckbox?: boolean;
   checkboxLabel?: string;
+  reasonLabel?: string;
+  reasonPlaceholder?: string;
+  defaultReason?: string;
+  /** Extra audit rows shown under the acting-admin strip (e.g. Recommended by). */
+  metaRows?: { label: string; value: string }[];
   onConfirm: (reason: string) => void;
 }) {
   const { session } = useAuth();
-  const [reason, setReason] = useState('');
+  const [reason, setReason] = useState(defaultReason);
   const [checked, setChecked] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setReason(defaultReason);
+      setChecked(false);
+    }
+  }, [open, defaultReason]);
 
   const canSubmit = reason.trim().length >= 3 && (!requireCheckbox || checked);
 
@@ -62,22 +78,34 @@ export function ConfirmActionDialog({
       <DialogContent className="sm:max-w-md" showCloseButton>
         <DialogHeader>
           <DialogTitle className="font-display text-xl font-normal text-espresso">{title}</DialogTitle>
-          <DialogDescription className="text-[12.5px] leading-relaxed text-body">{description}</DialogDescription>
+          {description ? (
+            <DialogDescription className="text-[12.5px] leading-relaxed text-body">{description}</DialogDescription>
+          ) : null}
         </DialogHeader>
         <div className="flex flex-col gap-3">
-          <div className="rounded border border-border-soft bg-panel-elevated px-3 py-2 text-[11.5px] text-muted">
-            Acting as <span className="font-semibold text-espresso">{session?.name ?? 'Staff'}</span>
-            {session ? ` · ${session.email}` : null}
+          <div className="rounded border border-border-soft bg-panel-elevated px-3 py-2.5 text-[11.5px] text-muted">
+            <div>
+              Acting admin{' '}
+              <span className="font-semibold text-espresso">
+                {session?.name ?? 'Staff'}
+                {session ? ` · ${roleLabel(session.role)}` : null}
+              </span>
+            </div>
+            {metaRows?.map((row) => (
+              <div key={row.label} className="mt-1">
+                {row.label} <span className="font-semibold text-espresso">{row.value}</span>
+              </div>
+            ))}
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="confirm-reason" className="text-[10px] font-semibold tracking-[0.12em] text-muted-2 uppercase">
-              Reason (required)
+              {reasonLabel}
             </Label>
             <Textarea
               id="confirm-reason"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="Document why this action is being taken…"
+              placeholder={reasonPlaceholder}
               className="min-h-20 bg-card text-[12.5px]"
             />
           </div>

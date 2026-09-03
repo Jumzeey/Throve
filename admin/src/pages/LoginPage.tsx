@@ -13,7 +13,7 @@ import { ROLE_LABELS, type AdminRole } from '@/lib/roles';
 import { Loader2 } from 'lucide-react';
 
 const DEMO_ROLES: { role: AdminRole; name: string; email: string }[] = [
-  { role: 'super_admin', name: 'Amara Nwosu', email: 'amara@throve.store' },
+  { role: 'super_admin', name: 'M. Okafor', email: 'okafor@throve.store' },
   { role: 'trust_safety', name: 'O. Bello', email: 'safety@throve.store' },
   { role: 'support', name: 'S. Mensah', email: 'support@throve.store' },
   { role: 'finance', name: 'A. Okoro', email: 'finance@throve.store' },
@@ -23,7 +23,7 @@ type GateState = 'form' | 'verifying' | 'authorized' | 'unauthorized' | 'revoked
 
 export function LoginPage() {
   const { session, signIn } = useAuth();
-  const [email, setEmail] = useState('amara@throve.store');
+  const [email, setEmail] = useState('okafor@throve.store');
   const [password, setPassword] = useState('••••••••');
   const [role, setRole] = useState<AdminRole>('super_admin');
   const [error, setError] = useState<string | null>(null);

@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { Lock } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
@@ -9,7 +10,7 @@ import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Button } from '@/components/ui/button';
 import { mockUsers, type MockUser } from '@/data/mock';
 import { useToast } from '@/hooks/use-toast';
-import { canAct, canViewPayoutFields } from '@/lib/roles';
+import { canAct, canViewPayoutFields, ROLE_LABELS } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 
 function statusTone(s: MockUser['status']) {
@@ -40,6 +41,10 @@ function initials(name: string) {
   return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase();
 }
 
+function isHighRisk(u: MockUser) {
+  return u.flags >= 3 || u.relatedReports.length >= 3 || u.relatedDisputes.length >= 2;
+}
+
 type ConfirmKind = 'note' | 'escalate' | 'restrict' | 'suspend' | 'ban' | 'approve_host' | null;
 
 export function UsersPage() {
@@ -49,6 +54,8 @@ export function UsersPage() {
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState(mockUsers[0]?.id ?? null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
+  const [loading, setLoading] = useState(false);
+  const [dismissedStale, setDismissedStale] = useState<Record<string, boolean>>({});
 
   usePageChrome({
     title: 'Users',
@@ -61,9 +68,17 @@ export function UsersPage() {
 
   const role = session?.role;
   const isSuper = role === 'super_admin';
+  const isTrust = role === 'trust_safety';
+  const isSupport = role === 'support';
   const canEnforce = role ? canAct(role, 'suspend_user') : false;
   const canApproveHost = role ? canAct(role, 'approve_live_host') : false;
   const seePayout = role ? canViewPayoutFields(role) : false;
+
+  useEffect(() => {
+    setLoading(true);
+    const id = window.setTimeout(() => setLoading(false), 320);
+    return () => window.clearTimeout(id);
+  }, [filter, search]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -86,6 +101,8 @@ export function UsersPage() {
   }, [filter, search]);
 
   const selected = mockUsers.find((u) => u.id === selectedId) ?? null;
+  const showStale = Boolean(selected?.recordStale && !dismissedStale[selected.id]);
+  const actionsLabel = role ? ROLE_LABELS[role] : 'Staff';
 
   const confirmCopy: Record<Exclude<ConfirmKind, null>, { title: string; description: string; label: string }> = {
     note: {
@@ -94,9 +111,11 @@ export function UsersPage() {
       label: 'Add note',
     },
     escalate: {
-      title: 'Escalate account',
-      description: `Escalate @${selected?.username} to Trust & Safety for review.`,
-      label: 'Escalate',
+      title: isSupport ? 'Escalate to Trust & Safety' : 'Escalate account',
+      description: isSupport
+        ? `Escalate @${selected?.username} to Trust & Safety for review.`
+        : `Escalate @${selected?.username} for further review.`,
+      label: isSupport ? 'Escalate to T&S' : 'Escalate',
     },
     restrict: {
       title: 'Restrict account',
@@ -111,8 +130,8 @@ export function UsersPage() {
     ban: {
       title: isSuper ? `Permanently ban @${selected?.username}?` : 'Recommend permanent ban',
       description: isSuper
-        ? `This permanently disables @${selected?.username}. Active listings will no longer remain publicly available. Existing orders continue in their workflows. This cannot be undone from this console.`
-        : `Queue a permanent ban recommendation for @${selected?.username}. Super Admin executes the ban.`,
+        ? ''
+        : `Permanent ban is executed by Super Admin. Trust & Safety records a recommendation with reason; no executable ban control is shown to this role.`,
       label: isSuper ? 'Permanently ban' : 'Recommend ban',
     },
     approve_host: {
@@ -139,12 +158,30 @@ export function UsersPage() {
               { id: 'kyc', label: 'KYC pending' },
             ]}
           />
-          <span className="ml-auto text-[11px] tabular-nums text-muted">{rows.length} results</span>
+          <span className="ml-auto text-[11px] tabular-nums text-muted">{loading ? '…' : `${rows.length} results`}</span>
         </div>
 
         {banner}
 
-        {rows.length === 0 ? (
+        {loading ? (
+          <div className="overflow-hidden rounded-[6px] border border-[#e7dcd2] bg-panel">
+            <div className="border-b border-[#e7dcd2] bg-[#fbf5ef] px-4 py-2.5 text-[11px] font-semibold text-[#8c7a73]">
+              Loading results
+            </div>
+            <div className="flex flex-col gap-3 px-4 py-4">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <div className="size-[30px] animate-pulse rounded-full bg-[#e7dcd2]" />
+                  <div className="flex flex-1 flex-col gap-1.5">
+                    <div className="h-2.5 w-[38%] animate-pulse rounded bg-[#e7dcd2]" />
+                    <div className="h-2 w-[52%] animate-pulse rounded bg-[#f0e7de]" />
+                  </div>
+                  <div className="h-5 w-16 animate-pulse rounded bg-[#f0e7de]" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : rows.length === 0 ? (
           <div className="rounded-[6px] border border-border-soft bg-panel">
             <EmptyState
               title="No accounts found"
@@ -275,45 +312,104 @@ export function UsersPage() {
             </div>
 
             <div className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-auto px-5 py-4">
-              <AiAdvisory>{selected.aiSummary}</AiAdvisory>
+              {showStale && selected.recordStale ? (
+                <div className="rounded-[5px] border border-[#e0b87a] bg-[#fbf3e6] px-3 py-2.5">
+                  <div className="text-[12px] font-semibold text-[#8a5a15]">Record changed by another admin</div>
+                  <p className="mt-1 text-[11.5px] leading-relaxed text-[#8a5a15]">
+                    This account was updated {selected.recordStale.at}. {selected.recordStale.by}{' '}
+                    {selected.recordStale.action} while you were reviewing.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-2.5 h-8 border-[#d4a574] text-[11.5px] text-[#8a5a15]"
+                    onClick={() => setDismissedStale((prev) => ({ ...prev, [selected.id]: true }))}
+                  >
+                    Reload record
+                  </Button>
+                </div>
+              ) : null}
 
-              <div className="grid grid-cols-2 gap-2.5">
-                {[
-                  {
-                    label: 'Listings',
-                    value: `${selected.listingsActive} active${
-                      selected.listingsHidden ? ` · ${selected.listingsHidden} hidden` : ''
-                    } · ${selected.ordersSold} sold`,
-                  },
-                  {
-                    label: 'Orders',
-                    value: `${selected.ordersSold} sold · ${selected.ordersBought ?? 0} bought${
-                      selected.relatedDisputes.length ? ` · ${selected.relatedDisputes.length} open dispute` : ''
-                    }`,
-                  },
-                  {
-                    label: 'Reviews',
-                    value:
-                      selected.reviewAvg != null
-                        ? `${selected.reviewAvg} average · ${selected.reviewCount ?? 0} reviews`
-                        : 'No reviews yet',
-                  },
-                  {
-                    label: 'Live',
-                    value:
-                      selected.liveHost === 'Approved'
-                        ? `Host approved · ${selected.streams} streams`
-                        : selected.liveHost === 'Pending'
-                          ? 'Host pending approval'
-                          : 'Not a live host',
-                  },
-                ].map((c) => (
-                  <div key={c.label} className="rounded-[5px] border border-[#e7dcd2] px-3 py-2.5">
-                    <div className="text-[9.5px] font-semibold tracking-[0.12em] text-[#8c7a73] uppercase">{c.label}</div>
-                    <div className="mt-1 text-[12.5px] text-espresso">{c.value}</div>
+              {selected.actionAlreadyApplied ? (
+                <div className="rounded-[5px] border border-[#9fbfa8] bg-[#eef6f0] px-3 py-2.5">
+                  <div className="text-[12px] font-semibold text-[#2f6b45]">
+                    {selected.actionAlreadyApplied.action} already applied
                   </div>
-                ))}
-              </div>
+                  <p className="mt-1 text-[11.5px] leading-relaxed text-[#2f6b45]">
+                    Applied by {selected.actionAlreadyApplied.by} at {selected.actionAlreadyApplied.at}. No further action
+                    taken.
+                  </p>
+                </div>
+              ) : null}
+
+              {isHighRisk(selected) ? (
+                <div className="rounded-[5px] border border-[#e4b4b4] bg-[#fbf0f0] px-3 py-2.5">
+                  <div className="text-[12px] font-semibold text-[#8a2323]">High-risk linkage</div>
+                  <p className="mt-1 text-[11.5px] leading-relaxed text-[#8a2323]">
+                    {selected.relatedReports.length} linked report{selected.relatedReports.length === 1 ? '' : 's'}
+                    {selected.relatedDisputes.length
+                      ? ` · ${selected.relatedDisputes.length} open dispute${selected.relatedDisputes.length === 1 ? '' : 's'}`
+                      : ''}
+                    . Flagged for Trust & Safety review before any payout-related action proceeds.
+                  </p>
+                </div>
+              ) : null}
+
+              {!isSupport ? <AiAdvisory>{selected.aiSummary}</AiAdvisory> : null}
+
+              {isSupport ? (
+                <div className="rounded-[5px] border border-[#e7dcd2] p-3">
+                  <div className="text-[9.5px] font-semibold tracking-[0.12em] text-[#8c7a73] uppercase">Support context</div>
+                  <div className="mt-1.5 text-[13px] font-semibold text-espresso">
+                    {selected.status} · {selected.ordersSold} sold
+                    {selected.relatedDisputes.length
+                      ? ` · ${selected.relatedDisputes.length} open dispute${selected.relatedDisputes.length === 1 ? '' : 's'}`
+                      : ''}
+                  </div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted">
+                    Sales and dispute history visible for support work. Enforcement controls stay with Trust & Safety.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2.5">
+                  {[
+                    {
+                      label: 'Listings',
+                      value: `${selected.listingsActive} active${
+                        selected.listingsHidden ? ` · ${selected.listingsHidden} hidden` : ''
+                      } · ${selected.ordersSold} sold`,
+                    },
+                    {
+                      label: 'Orders',
+                      value: `${selected.ordersSold} sold · ${selected.ordersBought ?? 0} bought${
+                        selected.relatedDisputes.length ? ` · ${selected.relatedDisputes.length} open dispute` : ''
+                      }`,
+                    },
+                    {
+                      label: 'Reviews',
+                      value:
+                        selected.reviewAvg != null
+                          ? `${selected.reviewAvg} average · ${selected.reviewCount ?? 0} reviews`
+                          : 'No reviews yet',
+                    },
+                    {
+                      label: 'Live',
+                      value:
+                        selected.liveHost === 'Approved'
+                          ? `Host approved · ${selected.streams} streams`
+                          : selected.liveHost === 'Pending'
+                            ? 'Host pending approval'
+                            : 'Not a live host',
+                    },
+                  ].map((c) => (
+                    <div key={c.label} className="rounded-[5px] border border-[#e7dcd2] px-3 py-2.5">
+                      <div className="text-[9.5px] font-semibold tracking-[0.12em] text-[#8c7a73] uppercase">{c.label}</div>
+                      <div className="mt-1 text-[12.5px] text-espresso">{c.value}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {selected.relatedReports.length > 0 || selected.relatedDisputes.length > 0 ? (
                 <div className="overflow-hidden rounded-[5px] border border-[#e7dcd2]">
@@ -358,26 +454,49 @@ export function UsersPage() {
                     </p>
                   </>
                 ) : (
-                  <div className="rounded border border-dashed border-[#dccfc4] bg-[#fbf5ef] px-3 py-2.5 text-[11.5px] text-muted">
-                    Payout & verification details restricted for this role.
+                  <div className="rounded border border-dashed border-[#dccfc4] bg-[#fbf5ef] px-3 py-2.5">
+                    <div className="flex items-start gap-2">
+                      <Lock className="mt-0.5 size-3.5 shrink-0 text-[#8c7a73]" strokeWidth={1.75} />
+                      <div>
+                        <div className="text-[11.5px] font-semibold text-espresso">Payout & verification details restricted</div>
+                        <p className="mt-1 text-[11px] leading-relaxed text-muted">
+                          Item required for support work — identity documents and payout destinations are never shown to this
+                          role.
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
 
-              <div className="rounded-[5px] border border-[#e7dcd2] p-3">
-                <div className="mb-2 text-[11.5px] font-semibold text-espresso">Moderation & action history</div>
-                {selected.history.map((h, i) => (
-                  <div key={i} className="border-t border-[#f0e7de] py-2">
-                    <div className="text-[11.5px] text-espresso">{h.text}</div>
-                    <div className="mt-0.5 text-[10.5px] text-muted">{h.at}</div>
+              {!isSupport ? (
+                <div className="rounded-[5px] border border-[#e7dcd2] p-3">
+                  <div className="mb-2 text-[11.5px] font-semibold text-espresso">Moderation & action history</div>
+                  {selected.history.map((h, i) => (
+                    <div key={i} className="border-t border-[#f0e7de] py-2">
+                      <div className="text-[11.5px] text-espresso">{h.text}</div>
+                      <div className="mt-0.5 text-[10.5px] text-muted">{h.at}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-[5px] border border-dashed border-[#dccfc4] bg-[#fbf5ef] px-3 py-2.5">
+                  <div className="flex items-start gap-2">
+                    <Lock className="mt-0.5 size-3.5 shrink-0 text-[#8c7a73]" strokeWidth={1.75} />
+                    <div>
+                      <div className="text-[11.5px] font-semibold text-espresso">Moderation history restricted</div>
+                      <p className="mt-1 text-[11px] leading-relaxed text-muted">
+                        Full enforcement history stays with Trust & Safety. Support can escalate when needed.
+                      </p>
+                    </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              )}
             </div>
 
             <div className="border-t border-[#dccfc4] bg-[#fbf5ef] px-5 py-3.5">
               <div className="mb-2.5 text-[9.5px] font-semibold tracking-[0.13em] text-[#8c7a73] uppercase">
-                Actions · {isSuper ? 'Super Admin' : role === 'trust_safety' ? 'Trust & Safety' : 'Staff'}
+                Actions · {actionsLabel}
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <Button
@@ -392,7 +511,7 @@ export function UsersPage() {
                   className="h-auto border-[#dccfc4] py-2.5 text-[12px] font-semibold text-espresso"
                   onClick={() => setConfirm('escalate')}
                 >
-                  Escalate
+                  {isSupport ? 'Escalate to T&S' : 'Escalate'}
                 </Button>
                 {canApproveHost && selected.liveHost === 'Pending' ? (
                   <Button className="col-span-2 h-auto py-2.5 text-[12px] font-semibold" onClick={() => setConfirm('approve_host')}>
@@ -405,6 +524,7 @@ export function UsersPage() {
                       variant="outline"
                       className="h-auto border-[#b4762a] py-2.5 text-[12px] font-semibold text-[#8a5a15]"
                       onClick={() => setConfirm('restrict')}
+                      disabled={Boolean(selected.actionAlreadyApplied)}
                     >
                       Restrict account
                     </Button>
@@ -412,6 +532,7 @@ export function UsersPage() {
                       variant="outline"
                       className="h-auto border-[#b4762a] py-2.5 text-[12px] font-semibold text-[#8a5a15]"
                       onClick={() => setConfirm('suspend')}
+                      disabled={Boolean(selected.actionAlreadyApplied) || selected.status === 'Suspended'}
                     >
                       Suspend account
                     </Button>
@@ -424,6 +545,7 @@ export function UsersPage() {
                           : 'border-dashed border-[#9e2b2b] text-[#8a2323]',
                       )}
                       onClick={() => setConfirm('ban')}
+                      disabled={selected.status === 'Banned'}
                     >
                       {isSuper ? 'Permanently ban — requires confirmation' : 'Recommend permanent ban'}
                     </Button>
@@ -431,7 +553,11 @@ export function UsersPage() {
                 ) : null}
               </div>
               <p className="mt-2.5 text-[10.5px] leading-relaxed text-[#8c7a73]">
-                Every action above is recorded with acting admin, timestamp and reason.
+                {isSupport
+                  ? 'Restriction, suspension and ban controls are hidden for this role rather than shown disabled.'
+                  : isTrust
+                    ? 'Permanent ban is executed by Super Admin. Trust & Safety records a recommendation with reason; no executable ban control is shown to this role.'
+                    : 'Every action above is recorded with acting admin, timestamp and reason.'}
               </p>
             </div>
           </>
@@ -449,6 +575,23 @@ export function UsersPage() {
           confirmLabel={confirmCopy[confirm].label}
           destructive={confirm === 'ban' || confirm === 'suspend'}
           requireCheckbox={confirm === 'ban' || confirm === 'suspend'}
+          checkboxLabel={
+            confirm === 'ban' && isSuper
+              ? 'I have reviewed the case history and confirm this ban.'
+              : undefined
+          }
+          reasonLabel={confirm === 'ban' ? 'Reason (recorded in audit log)' : undefined}
+          defaultReason={confirm === 'ban' && isSuper ? selected.banRecommendation?.reason ?? '' : ''}
+          metaRows={
+            confirm === 'ban' && isSuper && selected.banRecommendation
+              ? [
+                  {
+                    label: 'Recommended by',
+                    value: `${selected.banRecommendation.by} · ${selected.banRecommendation.role}`,
+                  },
+                ]
+              : undefined
+          }
           onConfirm={(reason) => {
             show(`${confirmCopy[confirm].label} recorded for @${selected.username} · ${reason.slice(0, 40)}`);
             setConfirm(null);

@@ -25,6 +25,12 @@ export type MockUser = {
   relatedReports: string[];
   relatedDisputes: string[];
   history: { at: string; text: string }[];
+  /** Pending permanent-ban recommendation from Trust & Safety (Super Admin executes). */
+  banRecommendation?: { by: string; role: string; reason: string; at: string };
+  /** Another admin changed this record while it was open (concurrency demo). */
+  recordStale?: { by: string; action: string; at: string };
+  /** Enforcement already applied — no further action taken. */
+  actionAlreadyApplied?: { action: string; by: string; at: string };
 };
 
 export type MockListing = {
@@ -95,16 +101,42 @@ export type MockOrder = {
 export type MockDispute = {
   id: string;
   orderId: string;
+  listingId?: string;
+  paymentId?: string;
   reason: string;
   status: 'Open' | 'With T&S' | 'Approved for refund' | 'Denied' | 'Closed';
+  /** Queue chip the case belongs to in the Disputes Hi-Fi. */
+  queue: 'open' | 'decision_ready' | 'evidence_incomplete' | 'awaiting_buyer';
   openedAt: string;
+  openLabel: string;
   buyer: string;
   seller: string;
   amount: number;
   priority: 'P1' | 'P2' | 'P3';
+  aiPriority: 'High' | 'Med' | 'Low';
+  payoutOnHold: boolean;
+  evidenceComplete: boolean;
+  decisionReady: boolean;
+  aiSummary: string;
   aiRecommendation: string;
+  aiConfidence: 'high' | 'medium' | 'low';
+  suggestedOutcome: string;
+  statements: { party: 'buyer' | 'seller'; handle: string; at: string; text: string }[];
+  evidenceThumbs: { id: string; label: string; missing?: boolean }[];
+  evidenceLinks: { id: string; label: string; disabled?: boolean }[];
   evidence: { id: string; label: string; restricted?: boolean }[];
-  decision?: 'Refund buyer' | 'Release to seller' | 'Partial refund';
+  timeline: { id: string; at: string; title: string; detail?: string; tone?: 'default' | 'warn' | 'danger' | 'ok' }[];
+  history: { at: string; text: string; by: string }[];
+  decision?: 'Refund buyer' | 'Release to seller' | 'Partial refund' | 'Close';
+  defaultReason?: string;
+  /** Unassigned / new case in queue. */
+  unassigned?: boolean;
+  evidenceBlockReason?: string;
+  awaitingBuyerSince?: string;
+  recordStale?: { by: string; action: string; at: string };
+  actionAlreadyApplied?: { action: string; by: string; at: string };
+  decidedBy?: string;
+  decidedAt?: string;
 };
 
 export type MockPayment = {
@@ -204,6 +236,11 @@ export const mockUsers: MockUser[] = [
       { at: '2026-08-12 09:20', text: 'Warning issued — listing accuracy — by O. Bello (Trust & Safety)' },
       { at: '2026-04-02 10:00', text: 'Payout verification approved' },
     ],
+    recordStale: {
+      by: 'O. Bello',
+      action: 'suspended this account',
+      at: 'moments ago',
+    },
   },
   {
     id: 'USR-1044',
@@ -315,11 +352,23 @@ export const mockUsers: MockUser[] = [
     aiPriority: 'High',
     aiSummary: 'Suspended 7 days for repeated counterfeit signals. KYC rejected. Recommend permanent ban review if pattern continues.',
     relatedReports: ['RPT-902', 'RPT-904', 'RPT-911'],
-    relatedDisputes: [],
+    relatedDisputes: ['DSP-4402', 'DSP-4410'],
     history: [
-      { at: '2026-08-26 10:00', text: 'Suspended 7 days — to 2 Sep' },
+      { at: '2026-08-26 10:00', text: 'Suspended 7 days — to 2 Sep — by O. Bello (Trust & Safety)' },
       { at: '2026-08-24 16:02', text: 'Listings hidden after counterfeit cluster' },
+      { at: '2026-08-22 09:40', text: 'Permanent ban recommended — by O. Bello (Trust & Safety)' },
     ],
+    banRecommendation: {
+      by: 'O. Bello',
+      role: 'Trust & Safety',
+      reason: 'Repeated counterfeit listings after warning — 4 upheld reports.',
+      at: '2026-08-22 09:40',
+    },
+    actionAlreadyApplied: {
+      action: 'Suspension',
+      by: 'O. Bello',
+      at: '18:20 yesterday',
+    },
   },
   {
     id: 'USR-1304',
@@ -646,50 +695,442 @@ export const mockOrders: MockOrder[] = [
 
 export const mockDisputes: MockDispute[] = [
   {
-    id: 'DSP-44',
-    orderId: 'ORD1048',
+    id: 'DSP-4471',
+    orderId: 'ORD-88213',
+    listingId: 'LST-51244',
+    paymentId: 'PAY-9911',
+    reason: 'Item never arrived',
+    status: 'With T&S',
+    queue: 'decision_ready',
+    openedAt: '2026-08-25',
+    openLabel: '41h open',
+    buyer: 'ada_e',
+    seller: 'lagos_luxe',
+    amount: 34000,
+    priority: 'P1',
+    aiPriority: 'High',
+    payoutOnHold: true,
+    evidenceComplete: true,
+    decisionReady: true,
+    aiSummary:
+      'Buyer reported non-delivery. Tracking shows a recorded delivery location that does not match the order delivery details. Seller provided no supporting delivery document. Evidence noted as missing: seller proof of delivery.',
+    aiRecommendation:
+      'Suggested outcome: refund buyer. Confidence: medium. AI cannot finalise — Trust & Safety or Super Admin must authorise.',
+    aiConfidence: 'medium',
+    suggestedOutcome: 'refund buyer',
+    statements: [
+      {
+        party: 'buyer',
+        handle: 'ada_e',
+        at: '25 Aug 16:12',
+        text: 'Tracking says delivered but nothing arrived at my address. I did not agree to any delivery change.',
+      },
+      {
+        party: 'seller',
+        handle: 'lagos_luxe',
+        at: '25 Aug 21:40',
+        text: 'Item was handed to delivery the same day. Tracking confirms delivery on my side.',
+      },
+    ],
+    evidenceThumbs: [
+      { id: 't1', label: 'Listing photo 1' },
+      { id: 't2', label: 'Listing photo 2' },
+      { id: 't3', label: 'Buyer screenshot — tracking' },
+      { id: 't4', label: 'No seller file', missing: true },
+    ],
+    evidenceLinks: [
+      { id: 'l1', label: 'Original listing LST-51244' },
+      { id: 'l2', label: 'Throve chat — 14 messages' },
+      { id: 'l3', label: 'Tracking record' },
+      { id: 'l4', label: 'No related Live record', disabled: true },
+    ],
+    evidence: [
+      { id: 'e1', label: 'Listing photos (2)' },
+      { id: 'e2', label: 'Buyer screenshot — tracking' },
+      { id: 'e3', label: 'Chat transcript', restricted: true },
+    ],
+    timeline: [
+      { id: 'tl1', at: '22 Aug', title: 'Payment received', detail: 'Order placed · PAY-9911', tone: 'ok' },
+      { id: 'tl2', at: '22 Aug', title: 'Seller dispatched item', detail: 'Courier booked same day' },
+      {
+        id: 'tl3',
+        at: '24 Aug',
+        title: 'Marked Delivered',
+        detail: 'Location does not match order delivery details',
+        tone: 'warn',
+      },
+      {
+        id: 'tl4',
+        at: '25 Aug',
+        title: 'Dispute opened',
+        detail: '48-hour completion clock paused · payout held',
+        tone: 'danger',
+      },
+      { id: 'tl5', at: '26 Aug', title: 'Case assigned', detail: 'F. Adeyemi · Trust & Safety' },
+    ],
+    history: [
+      { at: '26 Aug', text: 'Payout hold placed', by: 'System' },
+      { at: '26 Aug', text: 'Seller information requested', by: 'F. Adeyemi' },
+      { at: '26 Aug', text: 'Internal note added', by: 'A. Nwosu (Customer Support)' },
+    ],
+    defaultReason:
+      'Delivery scan location does not match the order address and the seller has not provided a delivery document.',
+    recordStale: {
+      by: 'O. Bello',
+      action: 'updated evidence notes',
+      at: 'moments ago',
+    },
+  },
+  {
+    id: 'DSP-4468',
+    orderId: 'ORD-88190',
+    listingId: 'LST-51002',
+    paymentId: 'PAY-9880',
     reason: 'Item not as described',
     status: 'With T&S',
-    openedAt: '2026-09-01',
-    buyer: 'tunde.buys',
-    seller: 'kemi.closet',
-    amount: 44500,
+    queue: 'decision_ready',
+    openedAt: '2026-08-26',
+    openLabel: '28h open',
+    buyer: 'funke_b',
+    seller: 'vintage_ng',
+    amount: 18500,
     priority: 'P1',
-    aiRecommendation:
-      'Buyer photos show sole wear inconsistent with “Like new”. Recommend full refund including delivery.',
+    aiPriority: 'High',
+    payoutOnHold: true,
+    evidenceComplete: true,
+    decisionReady: true,
+    aiSummary: 'Buyer photos show condition below listing grade. Seller contesting wear as normal.',
+    aiRecommendation: 'Suggested outcome: refund buyer. Confidence: high.',
+    aiConfidence: 'high',
+    suggestedOutcome: 'refund buyer',
+    statements: [
+      {
+        party: 'buyer',
+        handle: 'funke_b',
+        at: '26 Aug 10:02',
+        text: 'Listed as Like new but soles are heavily worn.',
+      },
+      {
+        party: 'seller',
+        handle: 'vintage_ng',
+        at: '26 Aug 14:20',
+        text: 'Wear is consistent with Like new for this brand.',
+      },
+    ],
+    evidenceThumbs: [
+      { id: 't1', label: 'Buyer unboxing 1' },
+      { id: 't2', label: 'Buyer unboxing 2' },
+      { id: 't3', label: 'Listing photo' },
+    ],
+    evidenceLinks: [
+      { id: 'l1', label: 'Original listing LST-51002' },
+      { id: 'l2', label: 'Throve chat — 6 messages' },
+    ],
     evidence: [
       { id: 'e1', label: 'Buyer unboxing photos (4)' },
       { id: 'e2', label: 'Listing photos (3)' },
-      { id: 'e3', label: 'Chat transcript', restricted: true },
     ],
+    timeline: [
+      { id: 'tl1', at: '24 Aug', title: 'Payment received', tone: 'ok' },
+      { id: 'tl2', at: '25 Aug', title: 'Marked Delivered' },
+      { id: 'tl3', at: '26 Aug', title: 'Dispute opened', tone: 'danger' },
+    ],
+    history: [
+      { at: '26 Aug', text: 'Payout hold placed', by: 'System' },
+      { at: '26 Aug', text: 'Case assigned', by: 'F. Adeyemi' },
+    ],
+    defaultReason: 'Buyer evidence shows condition below the stated listing grade.',
+  },
+  {
+    id: 'DSP-4455',
+    orderId: 'ORD-88011',
+    paymentId: 'PAY-9701',
+    reason: 'Wrong item shipped',
+    status: 'Open',
+    queue: 'evidence_incomplete',
+    openedAt: '2026-08-27',
+    openLabel: '18h open',
+    buyer: 'chidinma.o',
+    seller: 'kemi_curates',
+    amount: 22000,
+    priority: 'P2',
+    aiPriority: 'Med',
+    payoutOnHold: true,
+    evidenceComplete: false,
+    decisionReady: false,
+    aiSummary: 'Buyer alleges wrong SKU. Seller has not uploaded dispatch photos yet.',
+    aiRecommendation: 'Hold decision until seller evidence arrives. Confidence: low.',
+    aiConfidence: 'low',
+    suggestedOutcome: 'await evidence',
+    statements: [
+      {
+        party: 'buyer',
+        handle: 'chidinma.o',
+        at: '27 Aug 09:10',
+        text: 'Received a different colour than the listing.',
+      },
+    ],
+    evidenceThumbs: [
+      { id: 't1', label: 'Buyer photo' },
+      { id: 't2', label: 'No seller file', missing: true },
+    ],
+    evidenceLinks: [
+      { id: 'l1', label: 'Original listing' },
+      { id: 'l2', label: 'Throve chat — 3 messages' },
+    ],
+    evidence: [
+      { id: 'e1', label: 'Buyer photo' },
+      { id: 'e2', label: 'Seller delivery document', restricted: true },
+    ],
+    timeline: [
+      { id: 'tl1', at: '25 Aug', title: 'Payment received', tone: 'ok' },
+      { id: 'tl2', at: '27 Aug', title: 'Dispute opened', tone: 'danger' },
+    ],
+    history: [{ at: '27 Aug', text: 'Seller information requested', by: 'System' }],
+    evidenceBlockReason: 'Buyer photographs and seller response are outstanding. Request information before deciding.',
+  },
+  {
+    id: 'DSP-4440',
+    orderId: 'ORD-87902',
+    paymentId: 'PAY-9600',
+    reason: 'Non-delivery',
+    status: 'Open',
+    queue: 'awaiting_buyer',
+    openedAt: '2026-08-28',
+    openLabel: '9h open',
+    buyer: 'ijeoma.a',
+    seller: 'sneakerspot.ng',
+    amount: 41000,
+    priority: 'P2',
+    aiPriority: 'Med',
+    payoutOnHold: true,
+    evidenceComplete: false,
+    decisionReady: false,
+    aiSummary: 'Awaiting buyer response to clarification on delivery window.',
+    aiRecommendation: 'Do not decide until buyer replies. Confidence: low.',
+    aiConfidence: 'low',
+    suggestedOutcome: 'await buyer',
+    statements: [
+      {
+        party: 'seller',
+        handle: 'sneakerspot.ng',
+        at: '28 Aug 11:00',
+        text: 'Courier attempted delivery twice. Buyer unreachable.',
+      },
+    ],
+    evidenceThumbs: [{ id: 't1', label: 'Tracking export' }],
+    evidenceLinks: [
+      { id: 'l1', label: 'Tracking record' },
+      { id: 'l2', label: 'Throve chat — 2 messages' },
+    ],
+    evidence: [{ id: 'e1', label: 'Carrier tracking export' }],
+    timeline: [
+      { id: 'tl1', at: '26 Aug', title: 'Payment received', tone: 'ok' },
+      { id: 'tl2', at: '28 Aug', title: 'Dispute opened', tone: 'danger' },
+      { id: 'tl3', at: '28 Aug', title: 'Buyer clarification requested', tone: 'warn' },
+    ],
+    history: [{ at: '28 Aug', text: 'Buyer information requested', by: 'System' }],
+    awaitingBuyerSince: '28 Aug 11:40',
+  },
+  {
+    id: 'DSP-4410',
+    orderId: 'ORD-87820',
+    paymentId: 'PAY-9555',
+    reason: 'Counterfeit claim',
+    status: 'With T&S',
+    queue: 'decision_ready',
+    openedAt: '2026-08-24',
+    openLabel: '3d open',
+    buyer: 'ken.eze',
+    seller: 'fastdeals_ng',
+    amount: 52000,
+    priority: 'P1',
+    aiPriority: 'High',
+    payoutOnHold: true,
+    evidenceComplete: true,
+    decisionReady: true,
+    aiSummary: 'Authentication markers inconsistent with brand norms. Seller has prior counterfeit flags.',
+    aiRecommendation: 'Suggested outcome: refund buyer. Confidence: high.',
+    aiConfidence: 'high',
+    suggestedOutcome: 'refund buyer',
+    statements: [
+      {
+        party: 'buyer',
+        handle: 'ken.eze',
+        at: '24 Aug 15:00',
+        text: 'Stitching and label do not match authentic product.',
+      },
+      {
+        party: 'seller',
+        handle: 'fastdeals_ng',
+        at: '24 Aug 19:22',
+        text: 'Item is authentic. Buyer is mistaken.',
+      },
+    ],
+    evidenceThumbs: [
+      { id: 't1', label: 'Buyer label photo' },
+      { id: 't2', label: 'Listing photo' },
+      { id: 't3', label: 'Auth reference' },
+    ],
+    evidenceLinks: [
+      { id: 'l1', label: 'Original listing' },
+      { id: 'l2', label: 'Linked report RPT-911' },
+    ],
+    evidence: [
+      { id: 'e1', label: 'Buyer authenticity photos' },
+      { id: 'e2', label: 'Listing photos' },
+    ],
+    timeline: [
+      { id: 'tl1', at: '22 Aug', title: 'Payment received', tone: 'ok' },
+      { id: 'tl2', at: '24 Aug', title: 'Dispute opened', tone: 'danger' },
+    ],
+    history: [
+      { at: '24 Aug', text: 'Payout hold placed', by: 'System' },
+      { at: '25 Aug', text: 'Linked to report cluster', by: 'O. Bello' },
+    ],
+    defaultReason: 'Authenticity evidence and prior seller flags support a buyer refund.',
   },
   {
     id: 'DSP-41',
-    orderId: 'ORD1033',
+    orderId: 'ORD-1033',
+    paymentId: 'PAY-8200',
     reason: 'Non-delivery',
     status: 'Approved for refund',
+    queue: 'open',
     openedAt: '2026-08-22',
+    openLabel: 'Closed path',
     buyer: 'tunde.buys',
     seller: 'shade.vintage',
     amount: 16000,
     priority: 'P2',
-    aiRecommendation: 'Carrier confirms no scan after 14 days. Outcome: refund buyer — Finance execute.',
+    aiPriority: 'Med',
+    payoutOnHold: false,
+    evidenceComplete: true,
+    decisionReady: false,
+    aiSummary: 'Carrier confirms no scan after 14 days.',
+    aiRecommendation: 'Outcome already decided: refund buyer — Finance execute.',
+    aiConfidence: 'high',
+    suggestedOutcome: 'refund buyer',
+    statements: [],
+    evidenceThumbs: [{ id: 't1', label: 'Carrier tracking export' }],
+    evidenceLinks: [{ id: 'l1', label: 'Tracking record' }],
     evidence: [{ id: 'e1', label: 'Carrier tracking export' }],
+    timeline: [
+      { id: 'tl1', at: '8 Aug', title: 'Payment received', tone: 'ok' },
+      { id: 'tl2', at: '22 Aug', title: 'Decision recorded — refund buyer', tone: 'ok' },
+    ],
+    history: [{ at: '22 Aug', text: 'Decision recorded — refund buyer', by: 'O. Bello (T&S)' }],
     decision: 'Refund buyer',
+    decidedBy: 'O. Adeyemi · Trust & Safety',
+    decidedAt: '22 Aug 08:47',
+    actionAlreadyApplied: {
+      action: 'Decision',
+      by: 'O. Adeyemi',
+      at: '08:47',
+    },
   },
   {
-    id: 'DSP-39',
-    orderId: 'ORD1020',
-    reason: 'Wrong size shipped',
+    id: 'DSP-6679',
+    orderId: 'ORD-89001',
+    paymentId: 'PAY-10002',
+    reason: 'Item never arrived',
+    status: 'Open',
+    queue: 'open',
+    openedAt: '2026-09-02',
+    openLabel: '2h open',
+    buyer: 'maya.k',
+    seller: 'tolu.styles',
+    amount: 12500,
+    priority: 'P3',
+    aiPriority: 'Low',
+    payoutOnHold: true,
+    evidenceComplete: false,
+    decisionReady: false,
+    unassigned: true,
+    aiSummary: 'New case. No reviewer assigned yet.',
+    aiRecommendation: 'Assign to Trust & Safety before requesting evidence.',
+    aiConfidence: 'low',
+    suggestedOutcome: 'assign reviewer',
+    statements: [],
+    evidenceThumbs: [],
+    evidenceLinks: [{ id: 'l1', label: 'Original listing' }],
+    evidence: [],
+    timeline: [{ id: 'tl1', at: '2 Sep', title: 'Dispute opened', tone: 'danger' }],
+    history: [{ at: '2 Sep', text: 'Case created', by: 'System' }],
+  },
+  {
+    id: 'DSP-4390',
+    orderId: 'ORD-87710',
+    paymentId: 'PAY-9444',
+    reason: 'Fit / preference',
     status: 'Closed',
-    openedAt: '2026-08-10',
-    buyer: 'ada.thrifts',
-    seller: 'kemi.closet',
+    queue: 'open',
+    openedAt: '2026-08-18',
+    openLabel: 'Closed',
+    buyer: 'femi.k',
+    seller: 'lagos_luxe',
     amount: 9800,
     priority: 'P3',
-    aiRecommendation: 'Partial refund already applied. Case closed.',
-    evidence: [{ id: 'e1', label: 'Size label photo' }],
-    decision: 'Partial refund',
+    aiPriority: 'Low',
+    payoutOnHold: false,
+    evidenceComplete: true,
+    decisionReady: false,
+    aiSummary: 'Claim falls outside Buyer Protection (change of mind / fit).',
+    aiRecommendation: 'Close with no financial change.',
+    aiConfidence: 'high',
+    suggestedOutcome: 'close',
+    statements: [],
+    evidenceThumbs: [{ id: 't1', label: 'Buyer photo' }],
+    evidenceLinks: [{ id: 'l1', label: 'Original listing' }],
+    evidence: [{ id: 'e1', label: 'Buyer photo' }],
+    timeline: [
+      { id: 'tl1', at: '16 Aug', title: 'Payment received', tone: 'ok' },
+      { id: 'tl2', at: '18 Aug', title: 'Closed — outside protection', tone: 'ok' },
+    ],
+    history: [{ at: '18 Aug', text: 'Closed with no financial change', by: 'F. Adeyemi' }],
+    decision: 'Close',
+    decidedBy: 'F. Adeyemi · Trust & Safety',
+    decidedAt: '18 Aug',
+  },
+  {
+    id: 'DSP-4388',
+    orderId: 'ORD-87600',
+    paymentId: 'PAY-9333',
+    reason: 'Non-delivery',
+    status: 'Denied',
+    queue: 'open',
+    openedAt: '2026-08-15',
+    openLabel: 'Closed',
+    buyer: 'ada_e',
+    seller: 'vintage_ng',
+    amount: 21000,
+    priority: 'P2',
+    aiPriority: 'Med',
+    payoutOnHold: false,
+    evidenceComplete: true,
+    decisionReady: false,
+    aiSummary: 'Tracking and seller proof supported delivery. Seller payout released.',
+    aiRecommendation: 'Release / continue seller payout.',
+    aiConfidence: 'high',
+    suggestedOutcome: 'release to seller',
+    statements: [],
+    evidenceThumbs: [
+      { id: 't1', label: 'Tracking export' },
+      { id: 't2', label: 'Seller POD' },
+    ],
+    evidenceLinks: [{ id: 'l1', label: 'Tracking record' }],
+    evidence: [
+      { id: 'e1', label: 'Tracking export' },
+      { id: 'e2', label: 'Seller proof of delivery' },
+    ],
+    timeline: [
+      { id: 'tl1', at: '12 Aug', title: 'Payment received', tone: 'ok' },
+      { id: 'tl2', at: '15 Aug', title: 'Seller wins — payout released', tone: 'ok' },
+    ],
+    history: [{ at: '15 Aug', text: 'Release / continue seller payout', by: 'O. Bello' }],
+    decision: 'Release to seller',
+    decidedBy: 'O. Bello · Trust & Safety',
+    decidedAt: '15 Aug',
   },
 ];
 
