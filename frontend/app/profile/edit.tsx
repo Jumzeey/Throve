@@ -9,6 +9,7 @@ import { useAuth } from '@/context/auth-context';
 import { getSellerAvatar } from '@/data/images';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { AppImage } from '@/components/ui/app-image';
+import { ensureMediaLibraryPermission } from '@/lib/listing-photos';
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
@@ -32,8 +33,8 @@ export default function EditProfileScreen() {
   }
 
   async function onPickPhoto() {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) return;
+    const allowed = await ensureMediaLibraryPermission();
+    if (!allowed) return;
     setUploading(true);
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],

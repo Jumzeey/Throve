@@ -20,7 +20,20 @@ export function isLocalListingPhotoUri(uri: string) {
   return !isRemoteUri(uri);
 }
 
+/**
+ * iOS still needs library permission. On Android 13+ the system photo picker
+ * works without READ_MEDIA_* — we never declare those (Play policy).
+ */
 export async function ensureMediaLibraryPermission(): Promise<boolean> {
+  if (Platform.OS === 'android') {
+    const current = await ImagePicker.getMediaLibraryPermissionsAsync();
+    if (current.granted) return true;
+    await ImagePicker.requestMediaLibraryPermissionsAsync();
+    // Even if legacy storage permission is denied, launchImageLibraryAsync can
+    // still use the OS photo picker on modern Android.
+    return true;
+  }
+
   const current = await ImagePicker.getMediaLibraryPermissionsAsync();
   if (current.granted) return true;
 
@@ -29,9 +42,7 @@ export async function ensureMediaLibraryPermission(): Promise<boolean> {
 
   Alert.alert(
     'Photos access needed',
-    Platform.OS === 'ios'
-      ? 'Allow photo library access in Settings so you can add listing photos.'
-      : 'Allow photos access in Settings so you can add listing photos.',
+    'Allow photo library access in Settings so you can add listing photos.',
   );
   return false;
 }

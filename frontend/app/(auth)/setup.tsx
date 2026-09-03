@@ -7,6 +7,7 @@ import { TextField } from '@/components/ui/text-field';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { ensureMediaLibraryPermission } from '@/lib/listing-photos';
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
@@ -29,8 +30,8 @@ export default function SetupScreen() {
   if (session.setupComplete && !saved) return <Redirect href="/(tabs)" />;
 
   async function onPickPhoto() {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) return;
+    const allowed = await ensureMediaLibraryPermission();
+    if (!allowed) return;
     setUploading(true);
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
