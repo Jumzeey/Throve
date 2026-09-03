@@ -48,7 +48,7 @@ export default function ListingPreviewScreen() {
     <View style={styles.screen}>
       <ScreenHeader title="Preview" onBack={goEdit} />
       <ScrollView>
-        <PhotoPager count={form.photoCount} />
+        <PhotoPager count={form.photoCount} uris={form.photoUris} />
         <View style={styles.body}>
           <Text style={styles.title}>{form.title.trim()}</Text>
           <Text style={styles.price}>{formatNaira(price)}</Text>

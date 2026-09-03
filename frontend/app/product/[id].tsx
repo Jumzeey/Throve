@@ -71,7 +71,7 @@ export default function ProductScreen() {
     <View style={styles.screen}>
       <ScrollView>
         <View>
-          <PhotoPager count={listing.photoCount} listingId={listing.id} />
+          <PhotoPager count={listing.photoCount} listingId={listing.id} uris={listing.photoUrls} />
           <View style={styles.heroActions} pointerEvents="box-none">
             <Pressable
               onPress={() => router.back()}

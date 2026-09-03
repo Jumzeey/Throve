@@ -14,7 +14,7 @@ import {
 import { SimulatedStage } from '@/components/ui/simulated-stage';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import type { LiveConnection, LiveComment, LiveKitCredentials } from '@/data/types';
-import Constants from 'expo-constants';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -33,7 +33,10 @@ const LIVE_IVORY_62 = 'rgba(255,247,240,0.62)';
 const LIVE_IVORY_16 = 'rgba(255,247,240,0.16)';
 
 function canLoadNativeLiveKit() {
-  return Constants.appOwnership !== 'expo';
+  // Expo Go has no LiveKit / WebRTC native modules — never dynamic-import them there.
+  if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) return false;
+  if (Constants.appOwnership === 'expo') return false;
+  return true;
 }
 
 /**

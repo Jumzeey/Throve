@@ -105,7 +105,7 @@ export default function SellerListingScreen() {
     <View style={styles.screen}>
       <ScrollView>
         <View>
-          <PhotoPager count={item.photoCount} listingId={item.id} />
+          <PhotoPager count={item.photoCount} listingId={item.id} uris={item.photoUrls} />
           <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/sell'))} style={[styles.backBtn, { top: insets.top + 8 }]}>
             <ChevronBackIcon />
           </Pressable>

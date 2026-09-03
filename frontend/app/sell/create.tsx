@@ -1,6 +1,6 @@
 import { AlertBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
-import { CheckIcon, ImagePlaceholderIcon, PlusIcon } from '@/components/ui/icons';
+import { ImagePlaceholderIcon, PlusIcon } from '@/components/ui/icons';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
@@ -8,9 +8,10 @@ import { useAuth } from '@/context/auth-context';
 import { isListingFormPublishable, PREVIEW_ERROR, useListings } from '@/context/listings-context';
 import { CONDITIONS, DEPARTMENTS, getCategoriesForDepartment } from '@/data/seed';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { MAX_LISTING_PHOTOS, pickListingPhotos } from '@/lib/listing-photos';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export default function CreateListingScreen() {
   const router = useRouter();
@@ -19,6 +20,9 @@ export default function CreateListingScreen() {
   const { form, setForm, getListing, loadFormFromListing, saveDraft } = useListings();
   const { isConnected } = useNetworkStatus();
   const [error, setError] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+
+  const photoUris = form.photoUris ?? [];
 
   useEffect(() => {
     if (!id) return;
@@ -50,40 +54,88 @@ export default function CreateListingScreen() {
   }
 
   async function draft() {
-    await saveDraft(username);
-    router.replace('/(tabs)/sell?tab=draft');
+    try {
+      await saveDraft(username);
+      router.replace('/(tabs)/sell?tab=draft');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Could not save draft.';
+      setError(msg);
+    }
+  }
+
+  async function onAddPhotos() {
+    const remaining = MAX_LISTING_PHOTOS - photoUris.length;
+    if (remaining <= 0) return;
+
+    setPicking(true);
+    setError(null);
+    try {
+      const { uris, rejected } = await pickListingPhotos(remaining);
+      if (uris.length) {
+        const next = [...photoUris, ...uris].slice(0, MAX_LISTING_PHOTOS);
+        setForm({ photoUris: next, photoCount: next.length });
+      }
+      if (rejected.length) {
+        Alert.alert('Some photos were skipped', rejected[0]);
+      }
+    } finally {
+      setPicking(false);
+    }
+  }
+
+  function onRemovePhoto(index: number) {
+    const next = photoUris.filter((_, i) => i !== index);
+    setForm({ photoUris: next, photoCount: next.length });
+    setError(null);
   }
 
   return (
     <View style={styles.screen}>
       <ScreenHeader title="New listing" onBack={() => router.replace('/(tabs)/sell')} />
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-        {!isConnected ? <AlertBanner variant="warning" title="No connection" message="Reconnect to save or publish your listing." style={styles.banner} /> : null}
+        {!isConnected ? (
+          <AlertBanner variant="warning" title="No connection" message="Reconnect to save or publish your listing." style={styles.banner} />
+        ) : null}
+
+        <Text style={styles.photoHint}>
+          Add clear, high-quality photos (min 1080px on the short side, under 8MB each). Up to {MAX_LISTING_PHOTOS} photos.
+        </Text>
 
         <View style={styles.photoGrid}>
-          {Array.from({ length: 8 }).map((_, index) => {
-            const filled = index < form.photoCount;
-            const isNext = index === form.photoCount;
-            return (
-              <View key={index} style={styles.photoCell}>
+          {photoUris.map((uri, index) => (
+            <View key={`${uri}-${index}`} style={styles.photoCell}>
+              <View style={[styles.photoSlot, styles.photoFilled]}>
+                <Image source={{ uri }} style={styles.photoThumb} />
                 <Pressable
-                  onPress={() => {
-                    if (filled || form.photoCount >= 8 || !isNext) return;
-                    setForm({ photoCount: form.photoCount + 1 });
-                    setError(null);
-                  }}
-                  style={[styles.photoSlot, filled ? styles.photoFilled : null]}>
-                  {filled ? (
-                    <CheckIcon size={20} color={Palette.successText} />
-                  ) : isNext ? (
-                    <PlusIcon size={20} color={Palette.plum} />
-                  ) : (
-                    <ImagePlaceholderIcon size={18} />
-                  )}
+                  accessibilityLabel="Remove photo"
+                  onPress={() => onRemovePhoto(index)}
+                  style={styles.removeBadge}
+                  hitSlop={8}>
+                  <Text style={styles.removeBadgeText}>×</Text>
                 </Pressable>
               </View>
-            );
-          })}
+            </View>
+          ))}
+
+          {photoUris.length < MAX_LISTING_PHOTOS ? (
+            <View style={styles.photoCell}>
+              <Pressable
+                onPress={onAddPhotos}
+                disabled={picking}
+                style={[styles.photoSlot, styles.photoAdd]}
+                accessibilityLabel="Add photos from library">
+                {picking ? <ActivityIndicator color={Palette.plum} /> : <PlusIcon size={20} color={Palette.plum} />}
+              </Pressable>
+            </View>
+          ) : null}
+
+          {Array.from({ length: Math.max(0, MAX_LISTING_PHOTOS - photoUris.length - 1) }).map((_, index) => (
+            <View key={`empty-${index}`} style={styles.photoCell}>
+              <View style={styles.photoSlot}>
+                <ImagePlaceholderIcon size={18} />
+              </View>
+            </View>
+          ))}
         </View>
 
         <FieldLabel text="Title" />
@@ -197,6 +249,13 @@ const styles = StyleSheet.create({
   banner: {
     marginBottom: Spacing.lg,
   },
+  photoHint: {
+    marginBottom: Spacing.sm,
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: Typography.body,
+    color: Palette.muted,
+  },
   photoGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -216,11 +275,38 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Palette.sand,
+    overflow: 'hidden',
+  },
+  photoAdd: {
+    borderColor: Palette.plum,
+    borderStyle: 'dashed',
+    backgroundColor: Palette.ivoryElevated,
   },
   photoFilled: {
-    backgroundColor: Palette.successBg,
     borderStyle: 'solid',
-    borderColor: Palette.successBorder,
+    borderColor: Palette.border,
+    backgroundColor: Palette.sand,
+  },
+  photoThumb: {
+    width: '100%',
+    height: '100%',
+  },
+  removeBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(43,33,31,0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removeBadgeText: {
+    color: Palette.ivory,
+    fontSize: 16,
+    lineHeight: 18,
+    fontFamily: Typography.bodySemiBold,
   },
   label: {
     marginTop: Spacing.lg,

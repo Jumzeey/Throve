@@ -1,9 +1,11 @@
-import { apiFetch } from '@/lib/api';
+import { apiFetch, apiUpload } from '@/lib/api';
+import { isLocalListingPhotoUri, listingPhotoFormPart } from '@/lib/listing-photos';
 import type { Department, Listing, ListingForm, ListingStatus } from '@/data/types';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 export const EMPTY_LISTING_FORM: ListingForm = {
   photoCount: 0,
+  photoUris: [],
   title: '',
   department: '',
   category: '',
@@ -53,7 +55,7 @@ export function parseListingPrice(value: string) {
 }
 
 export function isListingFormPublishable(form: ListingForm) {
-  if (form.photoCount < 1) return false;
+  if ((form.photoUris?.length ?? form.photoCount) < 1) return false;
   if (!form.title.trim()) return false;
   if (!isDepartment(form.department)) return false;
   if (!form.category.trim()) return false;
@@ -98,9 +100,11 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadFormFromListing = useCallback((listing: Listing) => {
+    const photoUris = listing.photoUrls?.length ? [...listing.photoUrls] : [];
     setFormState({
       id: listing.id,
-      photoCount: listing.photoCount,
+      photoCount: photoUris.length || listing.photoCount,
+      photoUris,
       title: listing.title === 'Untitled draft' ? '' : listing.title,
       department: listing.department,
       category: listing.category,
@@ -112,8 +116,25 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const resolvePhotoUrls = useCallback(async (uris: string[]) => {
+    if (!uris.length) return [] as string[];
+
+    const remote = uris.filter((uri) => !isLocalListingPhotoUri(uri));
+    const local = uris.filter((uri) => isLocalListingPhotoUri(uri));
+    if (!local.length) return remote;
+
+    const formData = new FormData();
+    local.forEach((uri, index) => {
+      formData.append('files', listingPhotoFormPart(uri, index) as unknown as Blob);
+    });
+
+    const uploaded = await apiUpload<{ urls: string[] }>('/media/listing-photos', formData);
+    return [...remote, ...(uploaded.urls ?? [])];
+  }, []);
+
   const saveDraft = useCallback(
     async (_seller: string) => {
+      const photoUrls = await resolvePhotoUrls(form.photoUris ?? []);
       const body = {
         title: form.title,
         brand: form.brand,
@@ -123,7 +144,7 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
         department: isDepartment(form.department) ? form.department : 'Women',
         category: form.category,
         description: form.description,
-        photoUrls: form.photoCount > 0 ? [] : [],
+        photoUrls,
       };
 
       const listing = form.id
@@ -137,10 +158,15 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
         copy[index] = listing;
         return copy;
       });
-      setFormState((current) => ({ ...current, id: listing.id }));
+      setFormState((current) => ({
+        ...current,
+        id: listing.id,
+        photoUris: listing.photoUrls?.length ? [...listing.photoUrls] : photoUrls,
+        photoCount: listing.photoCount || photoUrls.length,
+      }));
       return listing;
     },
-    [form],
+    [form, resolvePhotoUrls],
   );
 
   const publish = useCallback(

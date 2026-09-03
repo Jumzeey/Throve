@@ -27,6 +27,8 @@ export type Listing = {
 export type ListingForm = {
   id?: string;
   photoCount: number;
+  /** Local file URIs and/or remote https URLs for listing photos. */
+  photoUris: string[];
   title: string;
   department: string;
   category: string;
