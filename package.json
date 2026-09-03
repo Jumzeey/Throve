@@ -3,12 +3,14 @@
   "private": true,
   "workspaces": [
     "frontend",
-    "backend"
+    "backend",
+    "admin"
   ],
   "scripts": {
     "start": "npm run start --workspace frontend",
     "start:frontend": "npm run start --workspace frontend",
     "start:backend": "npm run dev --workspace backend",
+    "start:admin": "npm run dev --workspace admin",
     "dev": "npm run dev --workspace backend",
     "typecheck": "npm run typecheck --workspace backend && npm run typecheck --workspace frontend",
     "db:push": "bash scripts/push-migrations.sh",

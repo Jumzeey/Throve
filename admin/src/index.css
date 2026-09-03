@@ -1,0 +1,140 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@custom-variant dark (&:is(.dark *));
+
+/* Throve Premium Editorial tokens */
+@theme {
+  --color-ground: #efe7df;
+  --color-panel: #fff7f0;
+  --color-panel-elevated: #fbf5ef;
+  --color-sidebar: #241c1a;
+  --color-espresso: #2b211f;
+  --color-body: #5c4b45;
+  --color-muted: #7a6a64;
+  --color-muted-2: #8c7a73;
+  --color-border-soft: #e7dcd2;
+  --color-divider: #f0e7de;
+  --color-plum: #5a1f45;
+  --color-plum-soft: #f4ecf1;
+  --color-plum-border: #dfc9d7;
+  --color-gold: #b68235;
+  --color-clear: #4f6b4c;
+  --color-clear-bg: #edf1ec;
+  --color-clear-border: #c7d5c4;
+  --color-hold: #8a5a15;
+  --color-hold-bg: #fbf1e2;
+  --color-hold-border: #e4cfa6;
+  --color-risk: #8a2323;
+  --color-risk-bg: #f7ecec;
+  --color-risk-border: #e3c7c7;
+  --color-neutral-badge-bg: #f3ede6;
+  --color-neutral-badge-border: #e2d7cc;
+  --font-display: 'Playfair Display', Georgia, serif;
+  --font-sans: Inter, system-ui, sans-serif;
+}
+
+@theme inline {
+  --font-heading: var(--font-display);
+  --font-sans: Inter, system-ui, sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --background: #efe7df;
+  --foreground: #2b211f;
+  --card: #fff7f0;
+  --card-foreground: #2b211f;
+  --popover: #fff7f0;
+  --popover-foreground: #2b211f;
+  --primary: #5a1f45;
+  --primary-foreground: #fff7f0;
+  --secondary: #fffcf8;
+  --secondary-foreground: #2b211f;
+  --muted: #f4ecf1;
+  --muted-foreground: #7a6a64;
+  --accent: #f4ecf1;
+  --accent-foreground: #5a1f45;
+  --destructive: #8a2323;
+  --border: #dccfc4;
+  --input: #dccfc4;
+  --ring: #5a1f45;
+  --chart-1: #5a1f45;
+  --chart-2: #b68235;
+  --chart-3: #4f6b4c;
+  --chart-4: #b4762a;
+  --chart-5: #9e2b2b;
+  --radius: 0.4rem;
+  --sidebar: #241c1a;
+  --sidebar-foreground: #fff7f0;
+  --sidebar-primary: #b68235;
+  --sidebar-primary-foreground: #241c1a;
+  --sidebar-accent: rgba(255, 247, 240, 0.09);
+  --sidebar-accent-foreground: #fff7f0;
+  --sidebar-border: rgba(255, 247, 240, 0.1);
+  --sidebar-ring: #b68235;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    box-sizing: border-box;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+  body {
+    @apply bg-sidebar text-foreground antialiased;
+    font-family: var(--font-sans);
+  }
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+}
