@@ -1,29 +1,68 @@
+import { OtpInput } from '@/components/auth/otp-input';
+import { PasswordField } from '@/components/auth/password-field';
+import { PasswordRequirements } from '@/components/auth/password-requirements';
+import { PasswordStrengthMeter } from '@/components/auth/password-strength-meter';
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
 import { DateField } from '@/components/ui/date-field';
 import { MailIcon } from '@/components/ui/icons';
+import { PhoneField } from '@/components/ui/phone-field';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
+import { DEFAULT_COUNTRY_ISO } from '@/data/country-codes';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { validatePassword } from '@/lib/password';
+import { formatPhoneE164, isValidPhone } from '@/lib/phone';
+import { OTP_LENGTH } from '@/lib/otp';
 import { isValidDob, isValidEmail } from '@/lib/validation';
 import { Redirect, useRouter } from 'expo-router';
-import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+
+const RESEND_COOLDOWN_SEC = 30;
 
 export default function SignupScreen() {
   const router = useRouter();
-  const { session, signup, completeVerification } = useAuth();
+  const { session, signup, verifySignupOtp, completeVerification, sendPasswordOtp } = useAuth();
   const { isConnected } = useNetworkStatus();
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [dob, setDob] = useState('');
+  const [countryIso, setCountryIso] = useState(DEFAULT_COUNTRY_ISO);
+  const [nationalNumber, setNationalNumber] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [otp, setOtp] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState<'form' | 'verify'>('form');
+  const [cooldown, setCooldown] = useState(0);
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (cooldownRef.current) clearInterval(cooldownRef.current);
+    };
+  }, []);
+
+  function startCooldown() {
+    setCooldown(RESEND_COOLDOWN_SEC);
+    if (cooldownRef.current) clearInterval(cooldownRef.current);
+    cooldownRef.current = setInterval(() => {
+      setCooldown((prev) => {
+        if (prev <= 1) {
+          if (cooldownRef.current) clearInterval(cooldownRef.current);
+          cooldownRef.current = null;
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }
 
   if (session?.setupComplete) return <Redirect href="/(tabs)" />;
   if (session) return <Redirect href="/(auth)/setup" />;
@@ -31,10 +70,14 @@ export default function SignupScreen() {
   function validate() {
     const next: Record<string, string> = {};
     if (!name.trim()) next.name = 'Enter your name to continue.';
-    if (!isValidEmail(email)) next.email = 'Enter a valid email address so we can send your verification link.';
+    if (!isValidEmail(email)) next.email = 'Enter a valid email address.';
     if (!username.trim()) next.username = 'Choose a username.';
     if (!dob.trim()) next.dob = 'Select your date of birth.';
     else if (!isValidDob(dob)) next.dob = 'Select a valid date of birth.';
+    if (!isValidPhone(countryIso, nationalNumber)) next.phone = 'Enter a valid phone number.';
+    const passwordError = validatePassword(password);
+    if (passwordError) next.password = passwordError;
+    if (password !== confirm) next.confirm = 'Passwords do not match.';
     setFieldErrors(next);
     return Object.keys(next).length === 0;
   }
@@ -45,8 +88,10 @@ export default function SignupScreen() {
     if (!validate()) return;
     setLoading(true);
     try {
-      await signup({ email, name, username, dob });
+      const phone = formatPhoneE164(countryIso, nationalNumber);
+      await signup({ email, name, username, dob, password, phone });
       setStage('verify');
+      startCooldown();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Please try again in a moment.';
       if (msg.toLowerCase().includes('username')) {
@@ -60,6 +105,38 @@ export default function SignupScreen() {
   }
 
   async function onVerify() {
+    if (!isConnected) return;
+    setError('');
+    if (otp.trim().length < OTP_LENGTH) {
+      setError(`Enter the ${OTP_LENGTH}-digit code from your email.`);
+      return;
+    }
+    setLoading(true);
+    try {
+      await verifySignupOtp({ email, otp });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Please try again in a moment.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onResend() {
+    if (!isConnected || cooldown > 0) return;
+    setError('');
+    setLoading(true);
+    try {
+      await sendPasswordOtp(email, 'signup');
+      setOtp('');
+      startCooldown();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Please try again in a moment.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onDevSimulate() {
     setError('');
     setLoading(true);
     try {
@@ -87,43 +164,90 @@ export default function SignupScreen() {
         {stage === 'form' ? (
           <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
             <Text style={styles.heading}>Create your{'\n'}account</Text>
-            <Text style={styles.lead}>Throve uses email sign-in links — no passwords to remember.</Text>
+            <Text style={styles.lead}>Sign up with email and password. We’ll send a code to verify your email.</Text>
             {!isConnected ? (
               <OfflineBanner message="You'll need an internet connection to create your account. Reconnect and try again." />
             ) : null}
             <View style={styles.fields}>
-              <TextField label="Email address" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} error={fieldErrors.email} />
+              <TextField
+                label="Email address"
+                autoCapitalize="none"
+                keyboardType="email-address"
+                value={email}
+                onChangeText={setEmail}
+                error={fieldErrors.email}
+              />
               <TextField label="Name" value={name} onChangeText={setName} error={fieldErrors.name} placeholder="Your name" />
-              <TextField label="Username" autoCapitalize="none" value={username} onChangeText={setUsername} error={fieldErrors.username} />
+              <TextField
+                label="Username"
+                autoCapitalize="none"
+                value={username}
+                onChangeText={setUsername}
+                error={fieldErrors.username}
+              />
               <DateField label="Date of birth" value={dob} onChange={setDob} error={fieldErrors.dob} />
+              <PhoneField
+                countryIso={countryIso}
+                nationalNumber={nationalNumber}
+                onCountryChange={setCountryIso}
+                onNumberChange={setNationalNumber}
+                error={fieldErrors.phone}
+              />
+              <PasswordField label="Password" value={password} onChangeText={setPassword} error={fieldErrors.password} />
+              <PasswordStrengthMeter password={password} />
+              <PasswordRequirements password={password} />
+              <PasswordField label="Confirm password" value={confirm} onChangeText={setConfirm} error={fieldErrors.confirm} />
             </View>
             <View style={styles.notice}>
               <MailIcon size={18} />
               <View style={styles.noticeText}>
                 <Text style={styles.noticeTitle}>Email verification is required</Text>
-                <Text style={styles.noticeBody}>We'll send a verification link to your email. Your account is created once you open it.</Text>
+                <Text style={styles.noticeBody}>
+                  We’ll send a one-time code to your email. Your account is ready once you enter it.
+                </Text>
               </View>
             </View>
             {error ? <AlertBanner variant="error" title="We couldn't complete that" message={error} style={styles.banner} /> : null}
             <Button label="Create account" loading={loading} onPress={onSubmit} disabled={!isConnected} style={styles.submit} />
             <Text style={styles.footer}>
               Already have an account?{' '}
-              <Text style={styles.link} onPress={() => router.replace('/(auth)/login')}>Log in</Text>
+              <Text style={styles.link} onPress={() => router.replace('/(auth)/login')}>
+                Log in
+              </Text>
             </Text>
           </ScrollView>
         ) : (
-          <View style={styles.verify}>
+          <ScrollView contentContainerStyle={styles.verify} keyboardShouldPersistTaps="handled">
             <View style={styles.verifyCard}>
               <MailIcon size={26} />
               <Text style={styles.verifyTitle}>Check your email</Text>
-              <Text style={styles.verifyCopy}>We sent a verification link to {email.trim()}. Open it to finish creating your account.</Text>
-              <Button label="Resend link" variant="secondary" onPress={onSubmit} style={styles.resend} />
+              <Text style={styles.verifyCopy}>
+                We sent a verification code to {email.trim()}. Enter it below to finish creating your account.
+              </Text>
+              <OtpInput value={otp} onChange={setOtp} error={Boolean(error)} />
+              <Button
+                label="Verify email"
+                loading={loading}
+                onPress={onVerify}
+                disabled={!isConnected || otp.trim().length < OTP_LENGTH}
+                style={styles.resend}
+              />
+              <Pressable
+                onPress={onResend}
+                disabled={!isConnected || loading || cooldown > 0}
+                style={styles.resendLink}
+                accessibilityRole="button"
+              >
+                <Text style={[styles.resendLinkText, cooldown > 0 ? styles.resendLinkDisabled : null]}>
+                  {cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend code'}
+                </Text>
+              </Pressable>
               {__DEV__ ? (
-                <Button label="Simulate: I clicked the link" loading={loading} onPress={onVerify} style={styles.simulate} />
+                <Button label="Simulate: I verified" loading={loading} onPress={onDevSimulate} style={styles.simulate} />
               ) : null}
             </View>
             {error ? <AlertBanner variant="error" title="We couldn't complete that" message={error} /> : null}
-          </View>
+          </ScrollView>
         )}
       </KeyboardAvoidingView>
     </View>
@@ -184,10 +308,11 @@ const styles = StyleSheet.create({
   },
   link: { color: Palette.plum, fontFamily: Typography.bodySemiBold },
   verify: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: 24,
     justifyContent: 'center',
     gap: 16,
+    paddingBottom: 30,
   },
   verifyCard: {
     borderWidth: 1,
@@ -196,7 +321,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     padding: 18,
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
   },
   verifyTitle: {
     fontSize: 20,
@@ -212,5 +337,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   resend: { alignSelf: 'stretch', marginTop: 8 },
+  resendLink: { paddingVertical: 12, alignItems: 'center' },
+  resendLinkText: {
+    fontSize: 14,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.plum,
+  },
+  resendLinkDisabled: { color: Palette.muted3 },
   simulate: { alignSelf: 'stretch' },
 });

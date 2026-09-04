@@ -189,6 +189,8 @@ export type ChatMessage = {
   createdAt: number;
 };
 
+export type PreferredLoginMethod = 'password' | 'magic_link';
+
 export type UserProfile = {
   userId: string;
   email: string;
@@ -204,4 +206,6 @@ export type UserProfile = {
   deactivated?: boolean;
   notifOffers?: boolean;
   notifMessages?: boolean;
+  preferredLoginMethod?: PreferredLoginMethod;
+  hasPassword?: boolean;
 };

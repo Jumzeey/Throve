@@ -21,10 +21,14 @@ import {
   Inter_700Bold,
 } from '@expo-google-fonts/inter';
 import { useFonts } from 'expo-font';
+import * as NativeSplash from 'expo-splash-screen';
 import * as SystemUI from 'expo-system-ui';
 import { Platform } from 'react-native';
 import { useEffect } from 'react';
 import 'react-native-reanimated';
+
+// Keep the native Throve splash up until we explicitly hide it.
+void NativeSplash.preventAutoHideAsync();
 
 const ThroveTheme = {
   ...DefaultTheme,
@@ -40,6 +44,12 @@ const ThroveTheme = {
 
 function RootNavigator() {
   const { isReady, isAuthenticatingLink } = useAuth();
+
+  useEffect(() => {
+    if (isReady && !isAuthenticatingLink) {
+      void NativeSplash.hideAsync();
+    }
+  }, [isReady, isAuthenticatingLink]);
 
   if (!isReady || isAuthenticatingLink) {
     return <SplashScreen />;
@@ -78,12 +88,13 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (Platform.OS === 'android') {
-      void SystemUI.setBackgroundColorAsync(Palette.ivoryElevated);
+      void SystemUI.setBackgroundColorAsync(Palette.ivory);
     }
   }, []);
 
+  // Keep native splash visible until fonts are ready; then show matching in-app splash.
   if (!fontsLoaded) {
-    return <SplashScreen />;
+    return null;
   }
 
   return (

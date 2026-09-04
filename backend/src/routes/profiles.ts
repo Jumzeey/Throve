@@ -28,6 +28,7 @@ router.put('/me', requireAuth, async (req, res) => {
       location: z.string().optional(),
       photoUri: z.string().optional(),
       dob: z.string().optional(),
+      phone: z.string().optional(),
     })
     .safeParse(req.body);
 
@@ -54,6 +55,7 @@ router.put('/me', requireAuth, async (req, res) => {
       location: parsed.data.location?.trim() ?? '',
       photo_url: parsed.data.photoUri ?? null,
       dob: parsed.data.dob ?? null,
+      phone: parsed.data.phone?.trim() || null,
     })
     .eq('id', userId)
     .select('*')
@@ -111,6 +113,7 @@ router.patch('/me/settings', requireAuth, async (req, res) => {
     .object({
       notifOffers: z.boolean().optional(),
       notifMessages: z.boolean().optional(),
+      preferredLoginMethod: z.enum(['password', 'magic_link']).optional(),
     })
     .safeParse(req.body);
 
@@ -118,9 +121,12 @@ router.patch('/me/settings', requireAuth, async (req, res) => {
     return sendError(res, 400, 'Invalid input');
   }
 
-  const patch: Record<string, boolean> = {};
+  const patch: Record<string, boolean | string> = {};
   if (parsed.data.notifOffers !== undefined) patch.notif_offers = parsed.data.notifOffers;
   if (parsed.data.notifMessages !== undefined) patch.notif_messages = parsed.data.notifMessages;
+  if (parsed.data.preferredLoginMethod !== undefined) {
+    patch.preferred_login_method = parsed.data.preferredLoginMethod;
+  }
 
   const { data, error } = await supabase.from('profiles').update(patch).eq('id', userId).select('*').single();
   if (error) return handleSupabaseError(res, error);

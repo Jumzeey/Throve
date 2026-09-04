@@ -38,3 +38,37 @@ export function buildAuthEmail(kind: AuthEmailKind, actionLink: string, email: s
     actionLink,
   });
 }
+
+export type PasswordOtpPurpose = 'setup' | 'change' | 'signup';
+
+export function buildPasswordOtpEmail(purpose: PasswordOtpPurpose, otp: string, email: string): EmailContent {
+  const codeBlock = `<div style="margin:20px 0;padding:18px 20px;border-radius:12px;background:#FFFCF8;border:1px solid #E2D7CC;text-align:center;font-family:Georgia,'Times New Roman',serif;font-size:32px;letter-spacing:8px;color:#5A1F45;font-weight:600;">${escapeHtml(otp)}</div>`;
+
+  if (purpose === 'signup') {
+    return buildEmail({
+      subject: 'Your Throve verification code',
+      title: 'Verify your email',
+      bodyHtml: `Enter this code in the Throve app to finish creating your account for <strong style="color:#2B211F;">${escapeHtml(email)}</strong>.${codeBlock}`,
+      bodyText: `Your Throve verification code is ${otp}. Enter it in the app to finish creating your account.`,
+      footnote: 'This code expires shortly. If you did not create a Throve account, you can ignore this email.',
+    });
+  }
+
+  if (purpose === 'change') {
+    return buildEmail({
+      subject: 'Your Throve password change code',
+      title: 'Confirm password change',
+      bodyHtml: `Use this code to confirm changing the password for <strong style="color:#2B211F;">${escapeHtml(email)}</strong>.${codeBlock}`,
+      bodyText: `Your Throve password change code is ${otp}.`,
+      footnote: 'This code expires shortly. If you did not request a password change, you can ignore this email.',
+    });
+  }
+
+  return buildEmail({
+    subject: 'Your Throve password setup code',
+    title: 'Set up your password',
+    bodyHtml: `Use this code to verify your email and create a password for <strong style="color:#2B211F;">${escapeHtml(email)}</strong>.${codeBlock}`,
+    bodyText: `Your Throve password setup code is ${otp}. Enter it in the app to create your password.`,
+    footnote: 'This code expires shortly. If you did not request this, you can ignore this email.',
+  });
+}

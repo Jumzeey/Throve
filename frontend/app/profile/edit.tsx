@@ -2,14 +2,17 @@ import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
 import { UserIcon } from '@/components/ui/icons';
 import { ProgressBar } from '@/components/ui/loading-skeleton';
+import { PhoneField } from '@/components/ui/phone-field';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
+import { DEFAULT_COUNTRY_ISO } from '@/data/country-codes';
 import { getSellerAvatar } from '@/data/images';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { AppImage } from '@/components/ui/app-image';
 import { ensureMediaLibraryPermission } from '@/lib/listing-photos';
+import { formatPhoneE164, isValidPhone, parseStoredPhone } from '@/lib/phone';
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
@@ -19,12 +22,16 @@ export default function EditProfileScreen() {
   const router = useRouter();
   const { session, updateProfile } = useAuth();
   const { isConnected } = useNetworkStatus();
+  const initialPhone = parseStoredPhone(session?.phone);
   const [name, setName] = useState(session?.name ?? '');
   const [username, setUsername] = useState(session?.username ?? '');
   const [bio, setBio] = useState(session?.bio ?? '');
   const [location, setLocation] = useState(session?.location ?? '');
+  const [countryIso, setCountryIso] = useState(initialPhone.countryIso || DEFAULT_COUNTRY_ISO);
+  const [nationalNumber, setNationalNumber] = useState(initialPhone.nationalNumber);
   const [photoUri, setPhotoUri] = useState(session?.photoUri);
   const [error, setError] = useState('');
+  const [phoneError, setPhoneError] = useState('');
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
 
@@ -51,9 +58,21 @@ export default function EditProfileScreen() {
   async function onSave() {
     if (!isConnected) return;
     setError('');
+    setPhoneError('');
+    if (!isValidPhone(countryIso, nationalNumber)) {
+      setPhoneError('Enter a valid phone number.');
+      return;
+    }
     setLoading(true);
     try {
-      await updateProfile({ name, username, bio, location, photoUri });
+      await updateProfile({
+        name,
+        username,
+        bio,
+        location,
+        photoUri,
+        phone: formatPhoneE164(countryIso, nationalNumber),
+      });
       router.back();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Please try again in a moment.';
@@ -89,6 +108,13 @@ export default function EditProfileScreen() {
           <View style={styles.fields}>
             <TextField label="Display name" value={name} onChangeText={setName} />
             <TextField label="Username" autoCapitalize="none" value={username} onChangeText={setUsername} />
+            <PhoneField
+              countryIso={countryIso}
+              nationalNumber={nationalNumber}
+              onCountryChange={setCountryIso}
+              onNumberChange={setNationalNumber}
+              error={phoneError}
+            />
             <TextField
               label="Bio"
               placeholder="A line about your style"

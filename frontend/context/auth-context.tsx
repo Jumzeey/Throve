@@ -1,7 +1,9 @@
 import { apiFetch, API_URL, ApiError } from '@/lib/api';
 import { completeAuthFromRedirectUrl } from '@/lib/auth-redirect';
+import { setDeviceLoginPreference } from '@/lib/login-preference';
+import { validatePassword } from '@/lib/password';
 import { supabase } from '@/lib/supabase';
-import type { UserProfile } from '@/data/types';
+import type { PreferredLoginMethod, UserProfile } from '@/data/types';
 import { isValidDob, isValidEmail } from '@/lib/validation';
 import * as Linking from 'expo-linking';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -14,11 +16,13 @@ type ProfilePatch = {
   bio: string;
   location: string;
   photoUri?: string;
+  phone?: string;
 };
 
 type SettingsPatch = {
   notifOffers?: boolean;
   notifMessages?: boolean;
+  preferredLoginMethod?: PreferredLoginMethod;
 };
 
 type PendingSignup = {
@@ -28,16 +32,42 @@ type PendingSignup = {
   dob: string;
 };
 
+type LoginOptions = {
+  exists: boolean;
+  hasPassword: boolean;
+  preferredLoginMethod: PreferredLoginMethod;
+};
+
+type PasswordOtpPurpose = 'setup' | 'change' | 'signup';
+
 type AuthContextValue = {
   isReady: boolean;
   /** True while a magic-link / deep-link sign-in is in progress. */
   isAuthenticatingLink: boolean;
   session: UserProfile | null;
-  signup: (input: { email: string; name: string; username: string; dob: string }) => Promise<void>;
+  signup: (input: {
+    email: string;
+    name: string;
+    username: string;
+    dob: string;
+    password: string;
+    phone: string;
+  }) => Promise<void>;
+  verifySignupOtp: (input: { email: string; otp: string }) => Promise<void>;
   completeVerification: (input?: PendingSignup) => Promise<void>;
   requestMagicLink: (email: string) => Promise<void>;
   completeMagicLink: (email?: string) => Promise<void>;
   requestRecovery: (email: string) => Promise<void>;
+  getLoginOptions: (email: string) => Promise<LoginOptions>;
+  signInWithPassword: (email: string, password: string) => Promise<void>;
+  sendPasswordOtp: (email: string, purpose?: PasswordOtpPurpose) => Promise<void>;
+  setPasswordWithOtp: (input: {
+    email: string;
+    otp: string;
+    password: string;
+    purpose?: PasswordOtpPurpose;
+  }) => Promise<void>;
+  updatePreferredLoginMethod: (method: PreferredLoginMethod) => Promise<void>;
   finishAuthFromUrl: (url: string) => Promise<UserProfile | null>;
   completeSetup: (input: { username: string; bio: string; location: string; photoUri?: string }) => Promise<void>;
   updateProfile: (input: ProfilePatch) => Promise<void>;
@@ -62,12 +92,20 @@ async function fetchProfile(): Promise<UserProfile | null> {
   }
 }
 
-async function postAuthJson(path: string, body: Record<string, unknown>) {
+async function postAuthJson(path: string, body: Record<string, unknown>, authed = false) {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (authed) {
+    const { data } = await supabase.auth.getSession();
+    if (data.session?.access_token) {
+      headers.Authorization = `Bearer ${data.session.access_token}`;
+    }
+  }
+
   let response: Response;
   try {
     response = await fetch(`${API_URL}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(body),
     });
   } catch {
@@ -166,8 +204,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
-        // Finish magic-link auth before marking the app ready, so index never
-        // flashes the welcome screen while the profile is still loading.
         const initialUrl = await Linking.getInitialURL();
         if (cancelled) return;
         if (initialUrl?.includes('auth/callback')) {
@@ -204,41 +240,83 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [hydrateProfile, finishAuthFromUrl]);
 
-  const signup = useCallback(async (input: { email: string; name: string; username: string; dob: string }) => {
-    const email = input.email.trim().toLowerCase();
-    const name = input.name.trim();
-    const username = input.username.trim();
-    const dob = input.dob.trim();
+  const signup = useCallback(
+    async (input: {
+      email: string;
+      name: string;
+      username: string;
+      dob: string;
+      password: string;
+      phone: string;
+    }) => {
+      const email = input.email.trim().toLowerCase();
+      const name = input.name.trim();
+      const username = input.username.trim();
+      const dob = input.dob.trim();
+      const password = input.password;
+      const phone = input.phone.trim();
 
-    if (!email || !name || !username || !dob) throw new Error('All fields are required.');
-    if (!isValidEmail(email)) throw new Error('Enter a valid email address.');
-    if (!isValidDob(dob)) throw new Error('Select a valid date of birth.');
+      if (!email || !name || !username || !dob || !password || !phone) throw new Error('All fields are required.');
+      if (!isValidEmail(email)) throw new Error('Enter a valid email address.');
+      if (!isValidDob(dob)) throw new Error('Select a valid date of birth.');
+      const passwordError = validatePassword(password);
+      if (passwordError) throw new Error(passwordError);
 
-    await requestAuthEmail({ email, type: 'signup', name, username, dob });
-    setPendingSignup({ email, name, username, dob });
-    setPendingEmail(email);
-  }, []);
+      await postAuthJson('/auth/signup', { email, password, name, username, dob, phone });
+      setPendingSignup({ email, name, username, dob });
+      setPendingEmail(email);
+    },
+    [],
+  );
 
-  const completeVerification = useCallback(async (input?: PendingSignup) => {
-    const { data } = await supabase.auth.getSession();
-    if (data.session) {
+  const verifySignupOtp = useCallback(
+    async (input: { email: string; otp: string }) => {
+      const email = input.email.trim().toLowerCase();
+      const otp = input.otp.trim();
+      if (!email || !otp) throw new Error('Enter the verification code from your email.');
+
+      const payload = (await postAuthJson('/auth/signup/verify-otp', { email, otp })) as {
+        access_token: string;
+        refresh_token: string;
+      };
+
+      const { error } = await supabase.auth.setSession({
+        access_token: payload.access_token,
+        refresh_token: payload.refresh_token,
+      });
+      if (error) throw new Error(error.message);
+
       await hydrateProfile();
       setPendingEmail(null);
       setPendingSignup(null);
-      return;
-    }
+      await setDeviceLoginPreference('password');
+    },
+    [hydrateProfile],
+  );
 
-    const pending = input ?? pendingSignup;
-    if (__DEV__ && pending) {
-      await simulateDevLink(pending);
-      await hydrateProfile();
-      setPendingEmail(null);
-      setPendingSignup(null);
-      return;
-    }
+  const completeVerification = useCallback(
+    async (input?: PendingSignup) => {
+      const { data } = await supabase.auth.getSession();
+      if (data.session) {
+        await hydrateProfile();
+        setPendingEmail(null);
+        setPendingSignup(null);
+        return;
+      }
 
-    throw new Error('Verification expired. Please sign up again.');
-  }, [hydrateProfile, pendingSignup]);
+      const pending = input ?? pendingSignup;
+      if (__DEV__ && pending) {
+        await simulateDevLink(pending);
+        await hydrateProfile();
+        setPendingEmail(null);
+        setPendingSignup(null);
+        return;
+      }
+
+      throw new Error('Verification expired. Please sign up again.');
+    },
+    [hydrateProfile, pendingSignup],
+  );
 
   const requestMagicLink = useCallback(async (email: string) => {
     const trimmed = email.trim().toLowerCase();
@@ -249,24 +327,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPendingEmail(trimmed);
   }, []);
 
-  const completeMagicLink = useCallback(async (email?: string) => {
-    const { data } = await supabase.auth.getSession();
-    if (data.session) {
-      await hydrateProfile();
-      setPendingEmail(null);
-      return;
-    }
+  const completeMagicLink = useCallback(
+    async (email?: string) => {
+      const { data } = await supabase.auth.getSession();
+      if (data.session) {
+        await hydrateProfile();
+        setPendingEmail(null);
+        return;
+      }
 
-    const targetEmail = email?.trim().toLowerCase() ?? pendingEmail;
-    if (__DEV__ && targetEmail) {
-      await simulateDevLink({ email: targetEmail });
-      await hydrateProfile();
-      setPendingEmail(null);
-      return;
-    }
+      const targetEmail = email?.trim().toLowerCase() ?? pendingEmail;
+      if (__DEV__ && targetEmail) {
+        await simulateDevLink({ email: targetEmail });
+        await hydrateProfile();
+        setPendingEmail(null);
+        return;
+      }
 
-    throw new Error('This magic link is invalid or has expired.');
-  }, [hydrateProfile, pendingEmail]);
+      throw new Error('This magic link is invalid or has expired.');
+    },
+    [hydrateProfile, pendingEmail],
+  );
 
   const requestRecovery = useCallback(async (email: string) => {
     const trimmed = email.trim().toLowerCase();
@@ -274,6 +355,84 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!isValidEmail(trimmed)) throw new Error('Enter a valid email address.');
 
     await requestAuthEmail({ email: trimmed, type: 'recovery' });
+  }, []);
+
+  const getLoginOptions = useCallback(async (email: string): Promise<LoginOptions> => {
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed || !isValidEmail(trimmed)) throw new Error('Enter a valid email address.');
+    return (await postAuthJson('/auth/login-options', { email: trimmed })) as LoginOptions;
+  }, []);
+
+  const signInWithPassword = useCallback(
+    async (email: string, password: string) => {
+      const trimmed = email.trim().toLowerCase();
+      if (!trimmed) throw new Error('Enter your email address.');
+      if (!isValidEmail(trimmed)) throw new Error('Enter a valid email address.');
+      if (!password) throw new Error('Enter your password.');
+
+      const { error } = await supabase.auth.signInWithPassword({ email: trimmed, password });
+      if (error) throw new Error(error.message);
+
+      await hydrateProfile();
+      setPendingEmail(null);
+    },
+    [hydrateProfile],
+  );
+
+  const sendPasswordOtp = useCallback(async (email: string, purpose: PasswordOtpPurpose = 'setup') => {
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed) throw new Error('Enter your email address.');
+    if (!isValidEmail(trimmed)) throw new Error('Enter a valid email address.');
+
+    await postAuthJson('/auth/password/send-otp', { email: trimmed, purpose }, purpose === 'change');
+    setPendingEmail(trimmed);
+  }, []);
+
+  const setPasswordWithOtp = useCallback(
+    async (input: { email: string; otp: string; password: string; purpose?: PasswordOtpPurpose }) => {
+      const email = input.email.trim().toLowerCase();
+      const otp = input.otp.trim();
+      const password = input.password;
+      const purpose = input.purpose ?? 'setup';
+
+      if (!email || !otp) throw new Error('Enter the verification code from your email.');
+      const passwordError = validatePassword(password);
+      if (passwordError) throw new Error(passwordError);
+
+      const payload = (await postAuthJson(
+        '/auth/password/set',
+        { email, otp, password, purpose },
+        purpose === 'change',
+      )) as {
+        access_token: string | null;
+        refresh_token: string | null;
+      };
+
+      if (payload.access_token && payload.refresh_token) {
+        const { error } = await supabase.auth.setSession({
+          access_token: payload.access_token,
+          refresh_token: payload.refresh_token,
+        });
+        if (error) throw new Error(error.message);
+      }
+
+      await hydrateProfile();
+      setPendingEmail(null);
+      if (purpose === 'setup' || purpose === 'signup') {
+        await setDeviceLoginPreference('password');
+      }
+    },
+    [hydrateProfile],
+  );
+
+  const updatePreferredLoginMethod = useCallback(async (method: PreferredLoginMethod) => {
+    // Persist to server + this device so login UI matches next cold start.
+    const profile = await apiFetch<UserProfile>('/profiles/me/settings', {
+      method: 'PATCH',
+      body: JSON.stringify({ preferredLoginMethod: method }),
+    });
+    await setDeviceLoginPreference(method);
+    setSession(profile);
   }, []);
 
   const completeSetup = useCallback(
@@ -308,6 +467,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         bio: input.bio.trim(),
         location: input.location.trim(),
         photoUri: input.photoUri,
+        phone: input.phone?.trim() || undefined,
       }),
     });
     setSession(profile);
@@ -340,10 +500,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticatingLink,
       session,
       signup,
+      verifySignupOtp,
       completeVerification,
       requestMagicLink,
       completeMagicLink,
       requestRecovery,
+      getLoginOptions,
+      signInWithPassword,
+      sendPasswordOtp,
+      setPasswordWithOtp,
+      updatePreferredLoginMethod,
       finishAuthFromUrl,
       completeSetup,
       updateProfile,
@@ -357,15 +523,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       completeVerification,
       deactivateAccount,
       finishAuthFromUrl,
+      getLoginOptions,
       isAuthenticatingLink,
       isReady,
       logout,
       requestMagicLink,
       requestRecovery,
+      sendPasswordOtp,
       session,
+      setPasswordWithOtp,
+      signInWithPassword,
       signup,
+      updatePreferredLoginMethod,
       updateProfile,
       updateSettings,
+      verifySignupOtp,
     ],
   );
 

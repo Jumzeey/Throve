@@ -400,6 +400,8 @@ export const DEMO_USER: UserProfile = {
   canHostLive: true,
   notifOffers: true,
   notifMessages: true,
+  preferredLoginMethod: 'password',
+  hasPassword: true,
 };
 
 export function sellerRatingInfo(username: string, reviews: Record<string, Review[]> = REVIEWS) {

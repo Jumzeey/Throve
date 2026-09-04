@@ -1,12 +1,19 @@
-import { ProgressBar } from '@/components/ui/loading-skeleton';
-import { Palette, Typography } from '@/constants/theme';
-import { StyleSheet, Text, View } from 'react-native';
+import { Palette } from '@/constants/theme';
+import { Image, StyleSheet, View } from 'react-native';
 
+/**
+ * In-app splash that matches the native launch screen (ivory + throve wordmark).
+ * Shown while fonts/auth finish loading after the native splash hides.
+ */
 export function SplashScreen() {
   return (
-    <View style={styles.wrap}>
-      <Text style={styles.wordmark}>throve</Text>
-      <ProgressBar progress={0.43} width={120} />
+    <View style={styles.wrap} accessibilityLabel="Loading Throve">
+      <Image
+        source={require('@/assets/images/splash-icon.png')}
+        style={styles.logo}
+        resizeMode="contain"
+        accessibilityIgnoresInvertColors
+      />
     </View>
   );
 }
@@ -17,12 +24,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Palette.ivory,
-    gap: 14,
   },
-  wordmark: {
-    fontFamily: Typography.display,
-    fontSize: 30,
-    lineHeight: 30,
-    color: Palette.plum,
+  logo: {
+    width: 220,
+    height: 88,
   },
 });
