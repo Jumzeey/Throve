@@ -274,23 +274,35 @@ router.post('/password/set', optionalAuth, async (req, res) => {
   const passwordError = validatePassword(password);
   if (passwordError) return sendError(res, 400, passwordError, 'WEAK_PASSWORD');
 
-  // verifyOtp must use the anon client — the service-role client sends a
-  // non-user Authorization JWT and GoTrue maps that to "Auth session missing!".
+  // Anon client for verify/sign-in — service-role Authorization breaks verifyOtp.
   const authClient = createSupabaseClient();
   const admin = createServiceClient();
-  const otpType = purpose === 'change' ? 'recovery' : 'magiclink';
 
-  const verifyResult = await authClient.auth.verifyOtp({
-    email,
-    token: otp,
-    type: otpType,
-  });
+  const otpTypes =
+    purpose === 'signup'
+      ? (['email', 'magiclink'] as const)
+      : (['recovery', 'email', 'magiclink'] as const);
 
-  if (verifyResult.error || !verifyResult.data.user) {
-    return sendError(res, 400, verifyResult.error?.message ?? 'Invalid or expired code', 'OTP_INVALID');
+  let userId: string | null = null;
+  let lastOtpError: string | null = null;
+
+  for (const otpType of otpTypes) {
+    const verifyResult = await authClient.auth.verifyOtp({
+      email,
+      token: otp,
+      type: otpType,
+    });
+    if (!verifyResult.error && verifyResult.data.user) {
+      userId = verifyResult.data.user.id;
+      break;
+    }
+    lastOtpError = verifyResult.error?.message ?? 'Invalid or expired code';
   }
 
-  const userId = verifyResult.data.user.id;
+  if (!userId) {
+    return sendError(res, 400, lastOtpError ?? 'Invalid or expired code', 'OTP_INVALID');
+  }
+
   const updateResult = await admin.auth.admin.updateUserById(userId, {
     password,
     email_confirm: true,
@@ -308,12 +320,22 @@ router.post('/password/set', optionalAuth, async (req, res) => {
     })
     .eq('id', userId);
 
-  const session = verifyResult.data.session;
+  // Updating the password can invalidate the OTP session. Mint a fresh one.
+  const signIn = await authClient.auth.signInWithPassword({ email, password });
+  if (signIn.error || !signIn.data.session) {
+    return sendError(
+      res,
+      400,
+      signIn.error?.message ?? 'Password saved, but sign-in failed. Try logging in.',
+      'AUTH_ERROR',
+    );
+  }
+
   return res.json({
     ok: true,
     email,
-    access_token: session?.access_token ?? null,
-    refresh_token: session?.refresh_token ?? null,
+    access_token: signIn.data.session.access_token,
+    refresh_token: signIn.data.session.refresh_token,
   });
 });
 
@@ -442,7 +464,8 @@ async function sendOtpEmail(
   purpose: 'setup' | 'change' | 'signup',
 ): Promise<{ ok: true } | { ok: false; status: number; message: string; code: string }> {
   const linkResult = await admin.auth.admin.generateLink({
-    type: purpose === 'change' ? 'recovery' : 'magiclink',
+    // recovery OTPs are the right type for set/change password; signup stays magiclink elsewhere
+    type: purpose === 'signup' ? 'magiclink' : 'recovery',
     email,
     options: { redirectTo: authRedirectUrl() },
   });

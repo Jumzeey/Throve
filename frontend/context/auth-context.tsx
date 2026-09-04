@@ -413,7 +413,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           access_token: payload.access_token,
           refresh_token: payload.refresh_token,
         });
-        if (error) throw new Error(error.message);
+        if (error) {
+          // Tokens from the API can race with password rotation — fall back to password login.
+          const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+          if (signInError) throw new Error(signInError.message);
+        }
+      } else {
+        const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+        if (signInError) throw new Error(signInError.message);
       }
 
       await hydrateProfile();
