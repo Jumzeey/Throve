@@ -1,3 +1,4 @@
+import 'react-native-gesture-handler';
 import { AuthProvider, useAuth } from '@/context/auth-context';
 import { CheckoutProvider } from '@/context/checkout-context';
 import { InboxProvider } from '@/context/inbox-context';
@@ -25,6 +26,7 @@ import * as NativeSplash from 'expo-splash-screen';
 import * as SystemUI from 'expo-system-ui';
 import { Platform } from 'react-native';
 import { useEffect } from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
 // Keep the native Throve splash up until we explicitly hide it.
@@ -98,21 +100,23 @@ export default function RootLayout() {
   }
 
   return (
-    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-      <AuthProvider>
-        <ListingsProvider>
-          <InboxProvider>
-            <LiveProvider>
-              <CheckoutProvider>
-                <ThemeProvider value={ThroveTheme}>
-                  <RootNavigator />
-                  <StatusBar style="dark" />
-                </ThemeProvider>
-              </CheckoutProvider>
-            </LiveProvider>
-          </InboxProvider>
-        </ListingsProvider>
-      </AuthProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+        <AuthProvider>
+          <ListingsProvider>
+            <InboxProvider>
+              <LiveProvider>
+                <CheckoutProvider>
+                  <ThemeProvider value={ThroveTheme}>
+                    <RootNavigator />
+                    <StatusBar style="dark" />
+                  </ThemeProvider>
+                </CheckoutProvider>
+              </LiveProvider>
+            </InboxProvider>
+          </ListingsProvider>
+        </AuthProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

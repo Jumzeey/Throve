@@ -11,8 +11,10 @@ import { useNetworkStatus } from '@/hooks/use-network-status';
 import { getDeviceLoginPreference } from '@/lib/login-preference';
 import { isValidEmail } from '@/lib/validation';
 import { Redirect, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
+
+const RESEND_COOLDOWN_SEC = 30;
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -27,6 +29,8 @@ export default function LoginScreen() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState<'form' | 'sent'>('form');
+  const [cooldown, setCooldown] = useState(0);
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -41,6 +45,27 @@ export default function LoginScreen() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (cooldownRef.current) clearInterval(cooldownRef.current);
+    };
+  }, []);
+
+  function startCooldown() {
+    setCooldown(RESEND_COOLDOWN_SEC);
+    if (cooldownRef.current) clearInterval(cooldownRef.current);
+    cooldownRef.current = setInterval(() => {
+      setCooldown((prev) => {
+        if (prev <= 1) {
+          if (cooldownRef.current) clearInterval(cooldownRef.current);
+          cooldownRef.current = null;
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }
 
   if (session?.setupComplete) return <Redirect href="/(tabs)" />;
   if (session) return <Redirect href="/(auth)/setup" />;
@@ -77,8 +102,9 @@ export default function LoginScreen() {
     }
   }
 
-  async function onSendMagic() {
+  async function onSendMagic(isResend = false) {
     if (!isConnected) return;
+    if (isResend && cooldown > 0) return;
     setError('');
     if (!isValidEmail(email)) {
       setEmailError('Enter a valid email address.');
@@ -89,6 +115,7 @@ export default function LoginScreen() {
     try {
       await requestMagicLink(email);
       setStage('sent');
+      startCooldown();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Please try again in a moment.');
     } finally {
@@ -118,6 +145,9 @@ export default function LoginScreen() {
   }
 
   const isMagic = method === 'magic_link';
+  const resendDisabled = !isConnected || loading || cooldown > 0;
+  const resendLabel = cooldown > 0 ? `Resend link in ${cooldown}s` : 'Resend link';
+  const trimmedEmail = email.trim().toLowerCase();
 
   return (
     <View style={styles.screen}>
@@ -165,7 +195,7 @@ export default function LoginScreen() {
             <Button
               label={ready && isMagic ? 'Send magic link' : 'Log in'}
               loading={loading || !ready}
-              onPress={ready && isMagic ? onSendMagic : onPasswordLogin}
+              onPress={ready && isMagic ? () => onSendMagic(false) : onPasswordLogin}
               disabled={!isConnected || !ready}
               style={styles.submit}
             />
@@ -186,8 +216,15 @@ export default function LoginScreen() {
             <View style={styles.sentCard}>
               <MailIcon size={26} />
               <Text style={styles.title}>Check your email</Text>
-              <Text style={styles.copy}>If an account is associated with this email, we've sent a sign-in link.</Text>
-              <Button label="Resend link" variant="secondary" onPress={onSendMagic} style={styles.resend} />
+              <Text style={styles.copy}>We sent a sign-in link to {trimmedEmail}. Open it to continue.</Text>
+              <Button
+                label={resendLabel}
+                variant="secondary"
+                loading={loading}
+                onPress={() => onSendMagic(true)}
+                disabled={resendDisabled}
+                style={styles.resend}
+              />
               {__DEV__ ? <Button label="Simulate: I clicked the link" loading={loading} onPress={onUseLink} /> : null}
             </View>
             {error ? <AlertBanner variant="error" title="We couldn't send that link" message={error} /> : null}

@@ -186,6 +186,7 @@ export type ChatMessage = {
   id: string;
   from: string;
   text: string;
+  imageUrl?: string | null;
   createdAt: number;
 };
 

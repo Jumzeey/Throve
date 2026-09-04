@@ -2,6 +2,7 @@ import { OfflineBanner } from '@/components/ui/alert-banner';
 import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
+import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
 import { LoadingSkeleton } from '@/components/ui/loading-skeleton';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { StatusChip } from '@/components/ui/status-chip';
@@ -13,46 +14,42 @@ import type { Order } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { formatNaira } from '@/lib/format';
 import { Redirect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 export default function OrdersScreen() {
   const router = useRouter();
   const { session } = useAuth();
-  const checkout = useCheckout();
+  const { orders, loading, refresh } = useCheckout();
   const { isConnected } = useNetworkStatus();
-  const [refreshing, setRefreshing] = useState(false);
 
-  const myOrders = checkout.orders.filter(
+  const myOrders = orders.filter(
     (order) => order.buyer === session?.username || order.seller === session?.username,
   );
 
-  const load = useCallback(async () => {
-    await checkout.refresh();
-  }, [checkout]);
+  const pullTask = useCallback(async () => {
+    await refresh({ silent: true });
+  }, [refresh]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  async function onRefresh() {
-    setRefreshing(true);
-    await load();
-    setRefreshing(false);
-  }
+  const { refreshing, onRefresh } = usePullRefresh(pullTask);
 
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
   }
 
+  const showSkeleton = loading && myOrders.length === 0 && !refreshing;
+
   return (
     <View style={styles.screen}>
       <ScreenHeader title="Orders" onBack={() => router.back()} />
-      <ScrollView
+      <LiquidRefreshScrollView
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        disabled={!isConnected}
         contentContainerStyle={styles.body}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Palette.plum} />}>
+      >
         {!isConnected ? <OfflineBanner message="Reconnect to view and manage orders." /> : null}
-        {checkout.loading && myOrders.length === 0 ? (
+        {showSkeleton ? (
           <LoadingSkeleton rows={4} />
         ) : myOrders.length === 0 ? (
           <EmptyState
@@ -64,14 +61,19 @@ export default function OrdersScreen() {
         ) : (
           <View style={styles.list}>
             {myOrders.map((order) => (
-              <OrderRow key={order.id} order={order} username={session.username} onPress={() => router.push(`/checkout/order?id=${order.id}`)} />
+              <OrderRow
+                key={order.id}
+                order={order}
+                username={session.username}
+                onPress={() => router.push(`/checkout/order?id=${order.id}`)}
+              />
             ))}
           </View>
         )}
-        {!checkout.loading && myOrders.length > 0 ? (
-          <Button label="Refresh" variant="ghost" onPress={onRefresh} disabled={!isConnected} />
+        {!showSkeleton && myOrders.length > 0 ? (
+          <Button label="Refresh" variant="ghost" onPress={onRefresh} disabled={!isConnected || refreshing} />
         ) : null}
-      </ScrollView>
+      </LiquidRefreshScrollView>
     </View>
   );
 }

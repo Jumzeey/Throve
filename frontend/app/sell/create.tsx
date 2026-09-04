@@ -1,5 +1,6 @@
 import { AlertBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
+import { Dialog } from '@/components/ui/dialog';
 import { ImagePlaceholderIcon, PlusIcon } from '@/components/ui/icons';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
@@ -8,10 +9,10 @@ import { useAuth } from '@/context/auth-context';
 import { isListingFormPublishable, PREVIEW_ERROR, useListings } from '@/context/listings-context';
 import { CONDITIONS, DEPARTMENTS, getCategoriesForDepartment } from '@/data/seed';
 import { useNetworkStatus } from '@/hooks/use-network-status';
-import { MAX_LISTING_PHOTOS, pickListingPhotos } from '@/lib/listing-photos';
+import { MAX_LISTING_PHOTOS, MIN_LISTING_PHOTO_SIDE, pickListingPhotos } from '@/lib/listing-photos';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export default function CreateListingScreen() {
   const router = useRouter();
@@ -21,6 +22,7 @@ export default function CreateListingScreen() {
   const { isConnected } = useNetworkStatus();
   const [error, setError] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
+  const [skipDialog, setSkipDialog] = useState<{ title: string; body: string } | null>(null);
 
   const photoUris = form.photoUris ?? [];
 
@@ -76,7 +78,10 @@ export default function CreateListingScreen() {
         setForm({ photoUris: next, photoCount: next.length });
       }
       if (rejected.length) {
-        Alert.alert('Some photos were skipped', rejected[0]);
+        setSkipDialog({
+          title: rejected.length > 1 ? 'Some photos were skipped' : 'Photo was skipped',
+          body: rejected[0],
+        });
       }
     } finally {
       setPicking(false);
@@ -98,7 +103,8 @@ export default function CreateListingScreen() {
         ) : null}
 
         <Text style={styles.photoHint}>
-          Add clear, high-quality photos (min 1080px on the short side, under 8MB each). Up to {MAX_LISTING_PHOTOS} photos.
+          Add clear, high-quality photos (min {MIN_LISTING_PHOTO_SIDE}px on the short side, under 8MB each). Up to{' '}
+          {MAX_LISTING_PHOTOS} photos.
         </Text>
 
         <View style={styles.photoGrid}>
@@ -214,6 +220,14 @@ export default function CreateListingScreen() {
         <Button label="Preview listing" onPress={preview} style={styles.preview} />
         <Button label="Save as draft" variant="ghost" onPress={draft} />
       </ScrollView>
+
+      <Dialog
+        visible={Boolean(skipDialog)}
+        title={skipDialog?.title ?? ''}
+        body={skipDialog?.body}
+        onClose={() => setSkipDialog(null)}
+        actions={[{ label: 'OK', variant: 'primary', onPress: () => setSkipDialog(null) }]}
+      />
     </View>
   );
 }

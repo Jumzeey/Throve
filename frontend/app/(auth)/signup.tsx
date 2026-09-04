@@ -19,7 +19,7 @@ import { OTP_LENGTH } from '@/lib/otp';
 import { isValidDob, isValidEmail } from '@/lib/validation';
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 const RESEND_COOLDOWN_SEC = 30;
 
@@ -230,18 +230,15 @@ export default function SignupScreen() {
                 loading={loading}
                 onPress={onVerify}
                 disabled={!isConnected || otp.trim().length < OTP_LENGTH}
-                style={styles.resend}
+                style={styles.verifyBtn}
               />
-              <Pressable
+              <Button
+                label={cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend code'}
+                variant="secondary"
                 onPress={onResend}
                 disabled={!isConnected || loading || cooldown > 0}
-                style={styles.resendLink}
-                accessibilityRole="button"
-              >
-                <Text style={[styles.resendLinkText, cooldown > 0 ? styles.resendLinkDisabled : null]}>
-                  {cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend code'}
-                </Text>
-              </Pressable>
+                style={styles.resend}
+              />
               {__DEV__ ? (
                 <Button label="Simulate: I verified" loading={loading} onPress={onDevSimulate} style={styles.simulate} />
               ) : null}
@@ -336,13 +333,7 @@ const styles = StyleSheet.create({
     color: Palette.body,
     textAlign: 'center',
   },
-  resend: { alignSelf: 'stretch', marginTop: 8 },
-  resendLink: { paddingVertical: 12, alignItems: 'center' },
-  resendLinkText: {
-    fontSize: 14,
-    fontFamily: Typography.bodySemiBold,
-    color: Palette.plum,
-  },
-  resendLinkDisabled: { color: Palette.muted3 },
+  verifyBtn: { alignSelf: 'stretch', marginTop: 4 },
+  resend: { alignSelf: 'stretch' },
   simulate: { alignSelf: 'stretch' },
 });

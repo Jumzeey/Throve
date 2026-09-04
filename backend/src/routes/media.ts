@@ -45,4 +45,19 @@ router.post('/listing-photos', requireAuth, upload.array('files', 8), async (req
   return res.json({ urls });
 });
 
+router.post('/chat-image', requireAuth, upload.single('file'), async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  if (!req.file) return sendError(res, 400, 'File required');
+
+  const path = `${userId}/${randomUUID()}.jpg`;
+  const { error: uploadError } = await supabase.storage.from('chat-images').upload(path, req.file.buffer, {
+    contentType: req.file.mimetype || 'image/jpeg',
+    upsert: true,
+  });
+  if (uploadError) return handleSupabaseError(res, uploadError);
+
+  const { data } = supabase.storage.from('chat-images').getPublicUrl(path);
+  return res.json({ url: data.publicUrl });
+});
+
 export default router;

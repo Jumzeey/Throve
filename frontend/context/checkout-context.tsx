@@ -11,7 +11,7 @@ type CheckoutContextValue = {
   loading: boolean;
   now: number;
   remaining: number;
-  refresh: () => Promise<void>;
+  refresh: (options?: { silent?: boolean }) => Promise<void>;
   startCheckout: (input: {
     listingId: string;
     buyer: string;
@@ -42,8 +42,8 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(Date.now());
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoading(true);
     try {
       const data = await apiFetch<Order[]>('/checkout/orders');
       setOrders(data);

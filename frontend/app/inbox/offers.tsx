@@ -1,4 +1,5 @@
 import { EmptyState } from '@/components/ui/empty-state';
+import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
 import { LoadingSkeleton } from '@/components/ui/loading-skeleton';
 import { OfflineBanner } from '@/components/ui/alert-banner';
 import { ScreenHeader } from '@/components/ui/screen-header';
@@ -11,22 +12,27 @@ import type { Offer } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { formatNaira, formatRelativeTime } from '@/lib/format';
 import { Redirect, useRouter } from 'expo-router';
-import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 export default function OffersCentreScreen() {
   const router = useRouter();
   const { session } = useAuth();
-  const inbox = useInbox();
+  const { offersFor, loading, refresh } = useInbox();
   const { getListing } = useListings();
   const { isConnected } = useNetworkStatus();
   const [tab, setTab] = useState<'received' | 'sent'>('received');
+
+  const pullTask = useCallback(async () => {
+    await refresh();
+  }, [refresh]);
+  const { refreshing, onRefresh } = usePullRefresh(pullTask);
 
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
   }
 
-  const { received, sent } = inbox.offersFor(session.username);
+  const { received, sent } = offersFor(session.username);
   const list = tab === 'received' ? received : sent;
 
   return (
@@ -40,14 +46,19 @@ export default function OffersCentreScreen() {
           <Text style={[styles.tabLabel, tab === 'sent' ? styles.tabLabelOn : null]}>Sent</Text>
         </Pressable>
       </View>
-      <ScrollView contentContainerStyle={styles.body}>
+      <LiquidRefreshScrollView
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        disabled={!isConnected}
+        contentContainerStyle={styles.body}
+      >
         {!isConnected ? (
           <View style={styles.offline}>
             <OfflineBanner message="Reconnect to view and respond to offers." />
           </View>
         ) : null}
 
-        {inbox.loading ? (
+        {loading && !refreshing ? (
           <LoadingSkeleton rows={4} />
         ) : list.length === 0 ? (
           <EmptyState
@@ -71,7 +82,7 @@ export default function OffersCentreScreen() {
             />
           ))
         )}
-      </ScrollView>
+      </LiquidRefreshScrollView>
     </View>
   );
 }

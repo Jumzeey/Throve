@@ -1,5 +1,6 @@
 import { AppImage } from '@/components/ui/app-image';
 import { EmptyState } from '@/components/ui/empty-state';
+import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
 import { LoadingSkeleton } from '@/components/ui/loading-skeleton';
 import { OfflineBanner } from '@/components/ui/alert-banner';
 import { Palette, Spacing, Typography } from '@/constants/theme';
@@ -9,17 +10,23 @@ import { useInbox } from '@/context/inbox-context';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { formatRelativeTime } from '@/lib/format';
 import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 
 export default function InboxScreen() {
   const { top, tabScrollBottom } = useScreenInsets();
   const router = useRouter();
   const { session } = useAuth();
-  const inbox = useInbox();
+  const { refresh, conversationsFor, loading, otherParticipant } = useInbox();
   const { isConnected } = useNetworkStatus();
   const me = session?.username ?? '';
-  const conversations = inbox.conversationsFor(me);
+  const conversations = conversationsFor(me);
+
+  const pullTask = useCallback(async () => {
+    await refresh();
+  }, [refresh]);
+  const { refreshing, onRefresh } = usePullRefresh(pullTask);
 
   return (
     <View style={[styles.screen, { paddingTop: top }]}>
@@ -32,14 +39,19 @@ export default function InboxScreen() {
           <Text style={styles.tabLabel}>Offers</Text>
         </Pressable>
       </View>
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: tabScrollBottom }]} showsVerticalScrollIndicator={false}>
+      <LiquidRefreshScrollView
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        disabled={!isConnected}
+        contentContainerStyle={[styles.body, { paddingBottom: tabScrollBottom }]}
+      >
         {!isConnected ? (
           <View style={styles.offline}>
             <OfflineBanner message="Reconnect to send and receive messages." />
           </View>
         ) : null}
 
-        {inbox.loading ? (
+        {loading && !refreshing ? (
           <LoadingSkeleton rows={5} style={styles.skeleton} />
         ) : conversations.length === 0 ? (
           <EmptyState
@@ -49,7 +61,7 @@ export default function InboxScreen() {
           />
         ) : (
           conversations.map((conv) => {
-            const other = inbox.otherParticipant(conv, me);
+            const other = otherParticipant(conv, me);
             const unread = conv.unreadBy.includes(me);
             return (
               <Pressable key={conv.id} onPress={() => router.push(`/inbox/chat/${conv.id}`)} style={styles.row}>
@@ -68,7 +80,7 @@ export default function InboxScreen() {
             );
           })
         )}
-      </ScrollView>
+      </LiquidRefreshScrollView>
     </View>
   );
 }

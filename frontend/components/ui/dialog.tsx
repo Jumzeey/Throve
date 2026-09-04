@@ -15,27 +15,38 @@ export function Dialog({ visible, title, body, actions, onClose }: Props) {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.overlay} onPress={onClose}>
-        <View style={styles.card} onStartShouldSetResponder={() => true}>
+        <Pressable style={styles.card} onPress={(e) => e.stopPropagation()}>
           <Text style={styles.title}>{title}</Text>
           {body ? <Text style={styles.body}>{body}</Text> : null}
           <View style={styles.actions}>
-            {actions.map((action) => (
-              <Pressable
-                key={action.label}
-                style={[styles.btn, action.variant === 'danger' && styles.btnDanger, action.variant === 'primary' && styles.btnPrimary]}
-                onPress={action.onPress}>
-                <Text
+            {actions.map((action) => {
+              const variant = action.variant ?? (actions.length === 1 ? 'primary' : 'secondary');
+              return (
+                <Pressable
+                  key={action.label}
                   style={[
-                    styles.btnLabel,
-                    action.variant === 'primary' && styles.btnLabelPrimary,
-                    action.variant === 'danger' && styles.btnLabelDanger,
-                  ]}>
-                  {action.label}
-                </Text>
-              </Pressable>
-            ))}
+                    styles.btn,
+                    variant === 'primary' && styles.btnPrimary,
+                    variant === 'danger' && styles.btnDanger,
+                    variant === 'secondary' && styles.btnSecondary,
+                  ]}
+                  onPress={action.onPress}
+                >
+                  <Text
+                    style={[
+                      styles.btnLabel,
+                      variant === 'primary' && styles.btnLabelPrimary,
+                      variant === 'danger' && styles.btnLabelDanger,
+                      variant === 'secondary' && styles.btnLabelSecondary,
+                    ]}
+                  >
+                    {action.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
-        </View>
+        </Pressable>
       </Pressable>
     </Modal>
   );
@@ -44,62 +55,76 @@ export function Dialog({ visible, title, body, actions, onClose }: Props) {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(23,23,23,0.3)',
+    backgroundColor: 'rgba(43,33,31,0.42)',
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 28,
   },
   card: {
-    width: 290,
-    backgroundColor: Palette.surface,
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: Palette.ivoryElevated,
     borderRadius: Radius.lg,
-    padding: 24,
-    gap: 12,
+    borderWidth: 1,
+    borderColor: Palette.border,
+    paddingHorizontal: 22,
+    paddingTop: 22,
+    paddingBottom: 18,
+    gap: 10,
   },
   title: {
-    fontSize: 18,
-    fontFamily: Typography.heading,
-    color: Palette.text,
+    fontSize: 20,
+    lineHeight: 26,
+    fontFamily: Typography.display,
+    color: Palette.espresso,
     textAlign: 'center',
   },
   body: {
-    fontSize: 14,
+    fontSize: 13.5,
     fontFamily: Typography.body,
-    color: Palette.muted,
+    color: Palette.body,
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 21,
   },
   actions: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 4,
+    marginTop: 10,
   },
   btn: {
     flex: 1,
-    minHeight: 42,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: Palette.border,
+    minHeight: 44,
+    paddingVertical: 11,
+    paddingHorizontal: 10,
+    borderRadius: Radius.button,
     alignItems: 'center',
     justifyContent: 'center',
   },
   btnPrimary: {
-    borderColor: Palette.accent700,
+    backgroundColor: Palette.plum,
+  },
+  btnSecondary: {
+    borderWidth: 1,
+    borderColor: Palette.border,
+    backgroundColor: Palette.ivory,
   },
   btnDanger: {
-    borderColor: Palette.live,
+    backgroundColor: Palette.errorBg,
+    borderWidth: 1,
+    borderColor: Palette.errorBorder,
   },
   btnLabel: {
-    fontSize: 13,
+    fontSize: 13.5,
     fontFamily: Typography.bodySemiBold,
-    color: Palette.text,
     textAlign: 'center',
   },
   btnLabelPrimary: {
-    color: Palette.accent800,
+    color: Palette.ivory,
+  },
+  btnLabelSecondary: {
+    color: Palette.espresso,
   },
   btnLabelDanger: {
-    color: Palette.live,
+    color: Palette.errorText,
   },
 });

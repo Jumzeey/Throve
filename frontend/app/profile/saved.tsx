@@ -1,5 +1,6 @@
 import { EmptyState } from '@/components/ui/empty-state';
 import { HeartIcon } from '@/components/ui/icons';
+import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
 import { ListingGridSkeleton } from '@/components/ui/loading-skeleton';
 import { OfflineBanner } from '@/components/ui/alert-banner';
 import { ScreenHeader } from '@/components/ui/screen-header';
@@ -13,8 +14,8 @@ import type { Listing } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { formatNaira } from '@/lib/format';
 import { Redirect, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 export default function SavedItemsScreen() {
   const router = useRouter();
@@ -24,27 +25,47 @@ export default function SavedItemsScreen() {
   const [saved, setSaved] = useState<Listing[]>([]);
   const [fetching, setFetching] = useState(true);
 
-  useEffect(() => {
+  const loadSaved = useCallback(async () => {
     if (!session?.username) {
+      setSaved([]);
       setFetching(false);
       return;
     }
     setFetching(true);
-    savedListingsFor(session.username)
-      .then(setSaved)
-      .finally(() => setFetching(false));
+    try {
+      const next = await savedListingsFor(session.username);
+      setSaved(next);
+    } finally {
+      setFetching(false);
+    }
   }, [savedListingsFor, session?.username]);
+
+  useEffect(() => {
+    void loadSaved();
+  }, [loadSaved]);
+
+  const pullTask = useCallback(async () => {
+    if (!session?.username) return;
+    const next = await savedListingsFor(session.username);
+    setSaved(next);
+  }, [savedListingsFor, session?.username]);
+  const { refreshing, onRefresh } = usePullRefresh(pullTask);
 
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
   }
 
-  const isLoading = loading || fetching;
+  const isLoading = (loading || fetching) && !refreshing;
 
   return (
     <View style={styles.screen}>
       <ScreenHeader title="Saved" onBack={() => router.back()} />
-      <ScrollView contentContainerStyle={styles.body}>
+      <LiquidRefreshScrollView
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        disabled={!isConnected}
+        contentContainerStyle={styles.body}
+      >
         {!isConnected ? (
           <View style={styles.offline}>
             <OfflineBanner message="Reconnect to refresh your saved items." />
@@ -95,7 +116,7 @@ export default function SavedItemsScreen() {
             })}
           </View>
         )}
-      </ScrollView>
+      </LiquidRefreshScrollView>
     </View>
   );
 }

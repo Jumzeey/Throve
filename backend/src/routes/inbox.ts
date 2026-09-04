@@ -141,7 +141,8 @@ router.get('/conversations/:id/messages', requireAuth, async (req, res) => {
       return {
         id: row.id,
         from: sender?.username ?? 'unknown',
-        text: row.text,
+        text: row.text ?? '',
+        imageUrl: row.image_url ?? null,
         createdAt: new Date(row.created_at).getTime(),
       };
     }),
@@ -154,26 +155,37 @@ router.get('/conversations/:id/messages', requireAuth, async (req, res) => {
 
 router.post('/conversations/:id/messages', requireAuth, async (req, res) => {
   const { supabase, userId } = req as AuthedRequest;
-  const parsed = z.object({ text: z.string().min(1) }).safeParse(req.body);
-  if (!parsed.success) return sendError(res, 400, 'Message required');
+  const parsed = z
+    .object({
+      text: z.string().optional().default(''),
+      imageUrl: z.string().url().optional().nullable(),
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, 'Invalid message');
+
+  const text = parsed.data.text.trim();
+  const imageUrl = parsed.data.imageUrl?.trim() || null;
+  if (!text && !imageUrl) return sendError(res, 400, 'Message required');
 
   const { data: message, error } = await supabase
     .from('messages')
     .insert({
       conversation_id: req.params.id,
       sender_id: userId,
-      text: parsed.data.text.trim(),
+      text,
+      image_url: imageUrl,
     })
     .select('*')
     .single();
 
   if (error) return handleSupabaseError(res, error);
 
+  const preview = text || 'Sent a photo';
   const { data: conv } = await supabase.from('conversations').select('*').eq('id', req.params.id).single();
   if (conv) {
     await supabase
       .from('conversations')
-      .update({ last_message: parsed.data.text.trim(), updated_at: new Date().toISOString() })
+      .update({ last_message: preview, updated_at: new Date().toISOString() })
       .eq('id', req.params.id);
 
     const otherId = conv.participant_a === userId ? conv.participant_b : conv.participant_a;
@@ -184,7 +196,7 @@ router.post('/conversations/:id/messages', requireAuth, async (req, res) => {
       conversationId: String(req.params.id),
       toUserId: otherId,
       fromUsername: senderProfile?.username ?? 'someone',
-      preview: parsed.data.text.trim(),
+      preview,
     });
   }
 
@@ -192,7 +204,8 @@ router.post('/conversations/:id/messages', requireAuth, async (req, res) => {
   return res.status(201).json({
     id: message.id,
     from: sender?.username ?? 'unknown',
-    text: message.text,
+    text: message.text ?? '',
+    imageUrl: message.image_url ?? null,
     createdAt: new Date(message.created_at).getTime(),
   });
 });

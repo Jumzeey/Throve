@@ -2,7 +2,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Alert, Platform } from 'react-native';
 
 /** Shortest side must be at least this many pixels (listing quality bar). */
-export const MIN_LISTING_PHOTO_SIDE = 1080;
+export const MIN_LISTING_PHOTO_SIDE = 600;
 /** Reject uploads larger than backend /media limit. */
 export const MAX_LISTING_PHOTO_BYTES = 8 * 1024 * 1024;
 export const MAX_LISTING_PHOTOS = 8;

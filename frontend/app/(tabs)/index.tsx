@@ -2,6 +2,7 @@ import { OfflineBanner } from '@/components/ui/alert-banner';
 import { AppImage } from '@/components/ui/app-image';
 import { EmptyState } from '@/components/ui/empty-state';
 import { BellIcon, ImagePlaceholderIcon, SearchIcon } from '@/components/ui/icons';
+import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
 import { ListingCard } from '@/components/ui/listing-card';
 import { ListingGrid } from '@/components/ui/listing-grid';
 import { Palette, Radius, Typography } from '@/constants/theme';
@@ -14,8 +15,8 @@ import { DEPARTMENTS } from '@/data/seed';
 import { useLive } from '@/context/live-context';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useRouter } from 'expo-router';
-import { useMemo } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useMemo } from 'react';
+import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 
 const DEPARTMENT_IMAGES = {
@@ -128,12 +129,17 @@ export default function HomeScreen() {
   const { top, tabScrollBottom } = useScreenInsets();
   const router = useRouter();
   const { session } = useAuth();
-  const { listings: catalog, toggleSave } = useListings();
+  const { listings: catalog, toggleSave, refresh: refreshListings } = useListings();
   const { isConnected } = useNetworkStatus();
   const listings = useMemo(() => filterListings(catalog).slice(0, 4), [catalog]);
-  const { liveNow, upcoming } = useLive();
+  const { liveNow, upcoming, refresh: refreshLive } = useLive();
 
   const sellers = useMemo(() => Array.from(new Set(catalog.map((l) => l.seller))).slice(0, 3), [catalog]);
+
+  const pullTask = useCallback(async () => {
+    await Promise.all([refreshListings(), refreshLive()]);
+  }, [refreshListings, refreshLive]);
+  const { refreshing, onRefresh } = usePullRefresh(pullTask);
 
   return (
     <View style={[styles.screen, { paddingTop: top }]}>
@@ -149,23 +155,36 @@ export default function HomeScreen() {
         <Text style={styles.searchPlaceholder}>Search items, brands or sellers</Text>
       </Pressable>
 
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: tabScrollBottom }]} showsVerticalScrollIndicator={false}>
+      <LiquidRefreshScrollView
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        disabled={!isConnected}
+        contentContainerStyle={[styles.content, { paddingBottom: tabScrollBottom }]}
+      >
         {!isConnected ? (
           <View style={styles.offline}>
             <OfflineBanner message="Reconnect to see the latest listings and live sessions." />
           </View>
         ) : null}
 
-        <View style={styles.hero}>
-          <View style={styles.heroOverlay} />
-          <View style={styles.heroContent}>
-            <Text style={styles.heroTitle}>Curated finds.{'\n'}Loved again.</Text>
-            <Text style={styles.heroSub}>Timeless style, from closets across Nigeria.</Text>
-            <Pressable onPress={() => router.push('/category-browse')} style={styles.heroCta}>
-              <Text style={styles.heroCtaText}>Shop now</Text>
-            </Pressable>
+        <Pressable
+          onPress={() => router.push('/category-browse')}
+          style={styles.hero}
+          accessibilityRole="button"
+          accessibilityLabel="Shop now"
+        >
+          <Text style={styles.heroTitle} maxFontSizeMultiplier={1.15} allowFontScaling>
+            Curated finds.{'\n'}Loved again.
+          </Text>
+          <Text style={styles.heroSub} maxFontSizeMultiplier={1.15}>
+            Timeless style, from closets across Nigeria.
+          </Text>
+          <View style={styles.heroCta}>
+            <Text style={styles.heroCtaText} maxFontSizeMultiplier={1.1}>
+              Shop now
+            </Text>
           </View>
-        </View>
+        </Pressable>
 
         <View style={styles.section}>
           <SectionHeading title="Shop by department" onSeeAll={() => router.push('/category-browse')} />
@@ -256,7 +275,7 @@ export default function HomeScreen() {
             </ScrollView>
           </View>
         ) : null}
-      </ScrollView>
+      </LiquidRefreshScrollView>
     </View>
   );
 }
@@ -308,35 +327,31 @@ const styles = StyleSheet.create({
   hero: {
     marginHorizontal: 20,
     marginBottom: 26,
-    height: 210,
+    minHeight: 210,
     borderRadius: Radius.sm,
     overflow: 'hidden',
-    backgroundColor: Palette.espresso,
-  },
-  heroOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(90,31,69,0.88)',
-  },
-  heroContent: {
-    flex: 1,
-    justifyContent: 'center',
+    backgroundColor: Palette.plum,
     paddingHorizontal: 24,
-    paddingVertical: 26,
+    paddingTop: 28,
+    paddingBottom: 28,
+    justifyContent: 'center',
     gap: 12,
   },
   heroTitle: {
     fontFamily: Typography.display,
     fontSize: 29,
-    lineHeight: 33,
+    lineHeight: 34,
     color: Palette.ivory,
-    maxWidth: 190,
+    maxWidth: 200,
+    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
   },
   heroSub: {
     fontSize: 12,
     lineHeight: 18,
     fontFamily: Typography.body,
     color: 'rgba(255,247,240,0.82)',
-    maxWidth: 170,
+    maxWidth: 180,
+    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
   },
   heroCta: {
     alignSelf: 'flex-start',
@@ -350,6 +365,7 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     fontFamily: Typography.bodySemiBold,
     color: Palette.plum,
+    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
   },
   section: { marginBottom: 26 },
   listingsBody: { paddingHorizontal: 20 },

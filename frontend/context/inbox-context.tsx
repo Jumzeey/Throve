@@ -10,7 +10,12 @@ type InboxContextValue = {
   getConversation: (id: string) => Conversation | undefined;
   openOrCreateConversation: (withUsername: string, listingId: string, me: string) => Promise<Conversation>;
   messages: (convId: string) => ChatMessage[];
-  sendMessage: (convId: string, from: string, text: string) => Promise<boolean>;
+  sendMessage: (
+    convId: string,
+    from: string,
+    text: string,
+    imageUrl?: string | null,
+  ) => Promise<boolean>;
   markRead: (convId: string, username: string) => Promise<void>;
   otherParticipant: (conv: Conversation, me: string) => string;
   offersFor: (username: string) => { received: Offer[]; sent: Offer[] };
@@ -120,18 +125,25 @@ export function InboxProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const sendMessage = useCallback(
-    async (convId: string, from: string, text: string) => {
+    async (convId: string, from: string, text: string, imageUrl?: string | null) => {
       const trimmed = text.trim();
-      if (!trimmed) return false;
+      const image = imageUrl?.trim() || null;
+      if (!trimmed && !image) return false;
       const message = await apiFetch<ChatMessage>(`/inbox/conversations/${convId}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ text: trimmed }),
+        body: JSON.stringify({ text: trimmed, imageUrl: image }),
       });
+      const preview = trimmed || 'Sent a photo';
       setMessagesByConv((current) => ({ ...current, [convId]: [...(current[convId] ?? []), message] }));
       setConversations((current) =>
         current.map((item) =>
           item.id === convId
-            ? { ...item, lastMessage: trimmed, updatedAt: message.createdAt, unreadBy: item.participants.filter((u) => u !== from) }
+            ? {
+                ...item,
+                lastMessage: preview,
+                updatedAt: message.createdAt,
+                unreadBy: item.participants.filter((u) => u !== from),
+              }
             : item,
         ),
       );

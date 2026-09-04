@@ -9,19 +9,21 @@ import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { DEFAULT_COUNTRY_ISO } from '@/data/country-codes';
 import { getSellerAvatar } from '@/data/images';
+import { useKeyboardBottomInset } from '@/hooks/use-keyboard-bottom-inset';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { AppImage } from '@/components/ui/app-image';
 import { ensureMediaLibraryPermission } from '@/lib/listing-photos';
 import { formatPhoneE164, isValidPhone, parseStoredPhone } from '@/lib/phone';
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useRouter } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function EditProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const keyboardBottom = useKeyboardBottomInset();
   const scrollRef = useRef<ScrollView>(null);
   const { session, updateProfile } = useAuth();
   const { isConnected } = useNetworkStatus();
@@ -38,10 +40,21 @@ export default function EditProfileScreen() {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
 
+  useEffect(() => {
+    if (keyboardBottom <= 0) return;
+    const timer = setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [keyboardBottom]);
+
   function scrollFieldIntoView() {
     setTimeout(() => {
       scrollRef.current?.scrollToEnd({ animated: true });
-    }, 100);
+    }, 50);
+    setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 280);
   }
 
   if (!session) {
@@ -97,10 +110,14 @@ export default function EditProfileScreen() {
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
           ref={scrollRef}
-          contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl + insets.bottom }]}
+          contentContainerStyle={[
+            styles.body,
+            { paddingBottom: Spacing.xxxl + insets.bottom + (keyboardBottom > 0 ? keyboardBottom : 0) },
+          ]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           showsVerticalScrollIndicator={false}
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
         >
           {!isConnected ? <OfflineBanner message="Reconnect to save your profile." /> : null}
           <Text style={styles.lead}>Update your photo and details so buyers and sellers know who you are.</Text>

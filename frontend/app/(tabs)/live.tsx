@@ -2,12 +2,13 @@ import { AppImage } from '@/components/ui/app-image';
 import { AlertBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
 import { CalendarIcon, EyeIcon, ImagePlaceholderIcon, UserIcon, VideoIcon } from '@/components/ui/icons';
+import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { getLiveImage } from '@/data/images';
 import { useLive } from '@/context/live-context';
 import type { LiveSession } from '@/data/types';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 
@@ -21,14 +22,15 @@ export default function LiveDiscoveryScreen() {
   const { liveNow, upcoming, loading, refresh } = useLive();
   const [error, setError] = useState<string | null>(null);
 
-  async function handleRefresh() {
+  const pullTask = useCallback(async () => {
     setError(null);
     try {
       await refresh();
     } catch {
       setError("We couldn't load live sessions");
     }
-  }
+  }, [refresh]);
+  const { refreshing, onRefresh } = usePullRefresh(pullTask);
 
   const featured = liveNow[0];
   const moreLive = liveNow.slice(1);
@@ -40,12 +42,16 @@ export default function LiveDiscoveryScreen() {
         <Text style={styles.subtitle}>Shop in real time with Throve sellers</Text>
       </View>
 
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: tabScrollBottom }]} showsVerticalScrollIndicator={false}>
+      <LiquidRefreshScrollView
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        contentContainerStyle={[styles.body, { paddingBottom: tabScrollBottom }]}
+      >
         {error ? (
           <AlertBanner variant="error" title={error} message="Please try again in a moment." style={styles.banner} />
         ) : null}
 
-        {loading ? (
+        {loading && !refreshing ? (
           <View style={styles.loadingCard}>
             <ActivityIndicator color={Palette.blush} />
             <View style={styles.loadingHero} />
@@ -107,9 +113,9 @@ export default function LiveDiscoveryScreen() {
         )}
 
         {error ? (
-          <Button label="Try again" variant="secondary" onPress={handleRefresh} style={styles.retryBtn} />
+          <Button label="Try again" variant="secondary" onPress={onRefresh} style={styles.retryBtn} />
         ) : null}
-      </ScrollView>
+      </LiquidRefreshScrollView>
     </View>
   );
 }
