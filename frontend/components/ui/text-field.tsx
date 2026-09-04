@@ -21,6 +21,7 @@ export function TextField({ label, error, hint, success, style, containerStyle, 
       <View style={styles.inputRow}>
         <TextInput
           placeholderTextColor={Palette.disabled}
+          {...props}
           style={[
             styles.input,
             focused && !hasError ? styles.focused : null,
@@ -35,7 +36,6 @@ export function TextField({ label, error, hint, success, style, containerStyle, 
             setFocused(false);
             props.onBlur?.(e);
           }}
-          {...props}
         />
         {success ? <CheckIcon /> : null}
       </View>

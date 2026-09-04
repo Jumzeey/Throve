@@ -5,7 +5,7 @@ import { deepLinks } from '../lib/email/deep-links.js';
 import { sendError } from '../lib/errors.js';
 import { sendMailjetEmail } from '../lib/mailjet.js';
 import { validatePassword } from '../lib/password.js';
-import { createServiceClient } from '../lib/supabase.js';
+import { createServiceClient, createSupabaseClient } from '../lib/supabase.js';
 import { type AuthedRequest, optionalAuth } from '../middleware/auth.js';
 
 const router = Router();
@@ -274,12 +274,16 @@ router.post('/password/set', optionalAuth, async (req, res) => {
   const passwordError = validatePassword(password);
   if (passwordError) return sendError(res, 400, passwordError, 'WEAK_PASSWORD');
 
+  // verifyOtp must use the anon client — the service-role client sends a
+  // non-user Authorization JWT and GoTrue maps that to "Auth session missing!".
+  const authClient = createSupabaseClient();
   const admin = createServiceClient();
+  const otpType = purpose === 'change' ? 'recovery' : 'magiclink';
 
-  const verifyResult = await admin.auth.verifyOtp({
+  const verifyResult = await authClient.auth.verifyOtp({
     email,
     token: otp,
-    type: purpose === 'change' ? 'recovery' : 'email',
+    type: otpType,
   });
 
   if (verifyResult.error || !verifyResult.data.user) {
@@ -326,9 +330,10 @@ router.post('/signup/verify-otp', async (req, res) => {
 
   const email = parsed.data.email.trim().toLowerCase();
   const otp = parsed.data.otp.trim();
+  const authClient = createSupabaseClient();
   const admin = createServiceClient();
 
-  const verifyResult = await admin.auth.verifyOtp({
+  const verifyResult = await authClient.auth.verifyOtp({
     email,
     token: otp,
     type: 'email',

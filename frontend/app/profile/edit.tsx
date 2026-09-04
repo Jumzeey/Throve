@@ -15,11 +15,14 @@ import { ensureMediaLibraryPermission } from '@/lib/listing-photos';
 import { formatPhoneE164, isValidPhone, parseStoredPhone } from '@/lib/phone';
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function EditProfileScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
   const { session, updateProfile } = useAuth();
   const { isConnected } = useNetworkStatus();
   const initialPhone = parseStoredPhone(session?.phone);
@@ -34,6 +37,12 @@ export default function EditProfileScreen() {
   const [phoneError, setPhoneError] = useState('');
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+
+  function scrollFieldIntoView() {
+    setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  }
 
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
@@ -86,7 +95,13 @@ export default function EditProfileScreen() {
     <View style={styles.screen}>
       <ScreenHeader title="Edit profile" onBack={() => router.back()} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl + insets.bottom }]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          showsVerticalScrollIndicator={false}
+        >
           {!isConnected ? <OfflineBanner message="Reconnect to save your profile." /> : null}
           <Text style={styles.lead}>Update your photo and details so buyers and sellers know who you are.</Text>
           <Pressable onPress={onPickPhoto} style={styles.avatarWrap}>
@@ -106,8 +121,14 @@ export default function EditProfileScreen() {
             </View>
           ) : null}
           <View style={styles.fields}>
-            <TextField label="Display name" value={name} onChangeText={setName} />
-            <TextField label="Username" autoCapitalize="none" value={username} onChangeText={setUsername} />
+            <TextField label="Display name" value={name} onChangeText={setName} onFocus={scrollFieldIntoView} />
+            <TextField
+              label="Username"
+              autoCapitalize="none"
+              value={username}
+              onChangeText={setUsername}
+              onFocus={scrollFieldIntoView}
+            />
             <PhoneField
               countryIso={countryIso}
               nationalNumber={nationalNumber}
@@ -122,8 +143,15 @@ export default function EditProfileScreen() {
               onChangeText={setBio}
               multiline
               style={styles.bio}
+              onFocus={scrollFieldIntoView}
             />
-            <TextField label="Location" placeholder="Lagos, NG" value={location} onChangeText={setLocation} />
+            <TextField
+              label="Location"
+              placeholder="Lagos, NG"
+              value={location}
+              onChangeText={setLocation}
+              onFocus={scrollFieldIntoView}
+            />
           </View>
           {error ? <AlertBanner variant="error" title="We couldn't save that" message={error} /> : null}
           <Button label="Save changes" loading={loading} onPress={onSave} disabled={!isConnected} />

@@ -4,19 +4,31 @@ import { CheckIcon, UserIcon } from '@/components/ui/icons';
 import { ProgressBar } from '@/components/ui/loading-skeleton';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
-import { Palette, Radius, Typography } from '@/constants/theme';
+import { Palette, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { ensureMediaLibraryPermission } from '@/lib/listing-photos';
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useRouter } from 'expo-router';
-import { useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useRef, useState } from 'react';
+import {
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function SetupScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { session, completeSetup, logout } = useAuth();
   const { isConnected } = useNetworkStatus();
+  const scrollRef = useRef<ScrollView>(null);
   const [username, setUsername] = useState(session?.username ?? '');
   const [bio, setBio] = useState(session?.bio ?? '');
   const [location, setLocation] = useState(session?.location ?? '');
@@ -65,12 +77,29 @@ export default function SetupScreen() {
     router.replace('/(auth)/welcome');
   }
 
+  function scrollFieldIntoView() {
+    // Wait for the keyboard to open, then keep the focused field (and Continue) visible.
+    setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  }
+
   return (
     <View style={styles.screen}>
       <ScreenHeader title="" onBack={onBack} />
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+      >
         {!saved ? (
-          <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            ref={scrollRef}
+            contentContainerStyle={[styles.form, { paddingBottom: 40 + insets.bottom }]}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            showsVerticalScrollIndicator={false}
+          >
             <Text style={styles.heading}>Set up your{'\n'}profile</Text>
             <Text style={styles.lead}>Add a photo and a few details so buyers and sellers know who you are.</Text>
             {!isConnected ? <OfflineBanner message="Reconnect to save your profile." /> : null}
@@ -90,9 +119,29 @@ export default function SetupScreen() {
               </View>
             ) : null}
             <View style={styles.fields}>
-              <TextField label="Username" autoCapitalize="none" value={username} onChangeText={setUsername} />
-              <TextField label="Bio" placeholder="A line about your style" value={bio} onChangeText={setBio} multiline style={styles.bio} />
-              <TextField label="Location" placeholder="Lagos, NG" value={location} onChangeText={setLocation} />
+              <TextField
+                label="Username"
+                autoCapitalize="none"
+                value={username}
+                onChangeText={setUsername}
+                onFocus={scrollFieldIntoView}
+              />
+              <TextField
+                label="Bio"
+                placeholder="A line about your style"
+                value={bio}
+                onChangeText={setBio}
+                multiline
+                style={styles.bio}
+                onFocus={scrollFieldIntoView}
+              />
+              <TextField
+                label="Location"
+                placeholder="Lagos, NG"
+                value={location}
+                onChangeText={setLocation}
+                onFocus={scrollFieldIntoView}
+              />
             </View>
             {error ? <AlertBanner variant="error" title="We couldn't save that" message={error} style={styles.banner} /> : null}
             <Button label="Continue" loading={loading} onPress={onSubmit} disabled={!isConnected} style={styles.submit} />
@@ -115,7 +164,7 @@ export default function SetupScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Palette.ivory },
   flex: { flex: 1 },
-  form: { paddingHorizontal: 24, paddingBottom: 30 },
+  form: { paddingHorizontal: 24, flexGrow: 1 },
   heading: {
     fontFamily: Typography.display,
     fontSize: 32,
