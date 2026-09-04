@@ -82,7 +82,10 @@ export default function SettingsScreen() {
             <Text style={styles.rowValue}>{session.email}</Text>
           </View>
           <SettingsRow label="Login & security" onPress={() => router.push('/profile/login-security')} />
-          <SettingsRow label={`Blocked users${blockedCount > 0 ? ` (${blockedCount})` : ''}`} />
+          <SettingsRow
+            label={`Blocked users${blockedCount > 0 ? ` (${blockedCount})` : ''}`}
+            onPress={() => router.push('/profile/blocked')}
+          />
         </View>
         <Text style={styles.sectionTitle}>Email notifications</Text>
         <View style={styles.group}>
