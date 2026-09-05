@@ -38,7 +38,7 @@ router.get('/', optionalAuth, async (req, res) => {
   const supabase = (req as AuthedRequest).supabase ?? (await import('../lib/supabase.js')).createSupabaseClient();
   const userId = (req as AuthedRequest).userId;
 
-  let query = supabase.from('listings').select('*').neq('status', 'draft').neq('status', 'hidden');
+  let query = supabase.from('listings').select('*').neq('status', 'draft').neq('status', 'hidden').neq('status', 'removed');
 
   const { department, category, brand, condition, sort } = req.query;
   if (department) query = query.eq('department', String(department));
@@ -167,7 +167,11 @@ router.get('/search', optionalAuth, async (req, res) => {
 
 router.get('/saved/me', requireAuth, async (req, res) => {
   const { supabase, userId } = req as AuthedRequest;
-  const { data: saves, error: saveError } = await supabase.from('saved_listings').select('listing_id').eq('user_id', userId);
+  const { data: saves, error: saveError } = await supabase
+    .from('saved_listings')
+    .select('listing_id, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
   if (saveError) return handleSupabaseError(res, saveError);
 
   const ids = (saves ?? []).map((row: DbRow) => row.listing_id as string);
@@ -177,7 +181,9 @@ router.get('/saved/me', requireAuth, async (req, res) => {
   if (error) return handleSupabaseError(res, error);
 
   const listings = await enrichListings(supabase, data ?? [], userId);
-  return res.json(listings);
+  const byId = new Map(listings.map((listing) => [listing.id, listing]));
+  const ordered = ids.map((id) => byId.get(id)).filter(Boolean);
+  return res.json(ordered);
 });
 
 router.get('/mine', requireAuth, async (req, res) => {
@@ -186,6 +192,7 @@ router.get('/mine', requireAuth, async (req, res) => {
     .from('listings')
     .select('*')
     .eq('seller_id', userId)
+    .neq('status', 'removed')
     .order('created_at', { ascending: false });
   if (error) return handleSupabaseError(res, error);
 
@@ -206,7 +213,12 @@ router.get('/seller/:username', optionalAuth, async (req, res) => {
   if (sellerError) return handleSupabaseError(res, sellerError);
   if (!seller) return sendError(res, 404, 'Seller not found');
 
-  const { data, error } = await supabase.from('listings').select('*').eq('seller_id', seller.id).neq('status', 'draft');
+  const { data, error } = await supabase
+    .from('listings')
+    .select('*')
+    .eq('seller_id', seller.id)
+    .neq('status', 'draft')
+    .neq('status', 'removed');
   if (error) return handleSupabaseError(res, error);
 
   const listings = await enrichListings(supabase, data ?? [], userId);
@@ -387,10 +399,17 @@ router.delete('/:id', requireAuth, async (req, res) => {
 
   if (!existing) return sendError(res, 404, 'Listing not found');
   if (existing.status === 'reserved') return sendError(res, 400, 'Cannot delete a reserved listing');
+  if (existing.status === 'sold') return sendError(res, 400, 'Cannot delete a sold listing');
+  if (existing.status === 'removed') return sendError(res, 400, 'Listing already removed');
 
-  const { error } = await supabase.from('listings').delete().eq('id', req.params.id).eq('seller_id', userId);
+  // Soft-delete so buyers who saved it still see a "removed" row.
+  const { error } = await supabase
+    .from('listings')
+    .update({ status: 'removed' })
+    .eq('id', req.params.id)
+    .eq('seller_id', userId);
   if (error) return handleSupabaseError(res, error);
-  return res.json({ ok: true });
+  return res.json({ ok: true, status: 'removed' });
 });
 
 router.post('/:id/reserve', requireAuth, async (req, res) => {

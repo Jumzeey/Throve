@@ -25,6 +25,7 @@ export const PREVIEW_ERROR = 'Add a photo, then fill in title, department, categ
 
 type ListingsContextValue = {
   listings: Listing[];
+  savedListings: Listing[];
   loading: boolean;
   form: ListingForm;
   refresh: () => Promise<boolean>;
@@ -73,6 +74,7 @@ export function isListingFormPublishable(form: ListingForm) {
 export function ListingsProvider({ children }: { children: ReactNode }) {
   const { isReady, session } = useAuth();
   const [listings, setListings] = useState<Listing[]>([]);
+  const [savedListings, setSavedListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setFormState] = useState<ListingForm>(EMPTY_LISTING_FORM);
 
@@ -81,16 +83,23 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
     try {
       const catalog = await apiFetch<Listing[]>('/listings');
       let mine: Listing[] = [];
+      let saved: Listing[] = [];
       if (session) {
         try {
           mine = await apiFetch<Listing[]>('/listings/mine');
         } catch {
           mine = [];
         }
+        try {
+          saved = await apiFetch<Listing[]>('/listings/saved/me');
+        } catch {
+          saved = [];
+        }
       }
       const username = session?.username;
       const others = username ? catalog.filter((item) => item.seller !== username) : catalog;
       setListings(username ? [...mine, ...others] : catalog);
+      setSavedListings(saved);
       void fetchListingCatalog().catch(() => undefined);
       return true;
     } catch {
@@ -229,6 +238,7 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
       await apiFetch(`/listings/${id}/sold`, { method: 'POST' });
     }
     setListings((current) => current.map((item) => (item.id === id ? { ...item, status } : item)));
+    setSavedListings((current) => current.map((item) => (item.id === id ? { ...item, status } : item)));
   }, []);
 
   const clearReservation = useCallback(async (id: string) => {
@@ -241,22 +251,26 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
   const canDelete = useCallback(
     (id: string) => {
       const listing = listings.find((item) => item.id === id);
-      return Boolean(listing && listing.status !== 'reserved');
+      return Boolean(listing && listing.status !== 'reserved' && listing.status !== 'sold' && listing.status !== 'removed');
     },
     [listings],
   );
 
   const removeListing = useCallback(async (id: string) => {
     const listing = listings.find((item) => item.id === id);
-    if (!listing || listing.status === 'reserved') return false;
+    if (!listing || listing.status === 'reserved' || listing.status === 'sold') return false;
     await apiFetch(`/listings/${id}`, { method: 'DELETE' });
     setListings((current) => current.filter((item) => item.id !== id));
+    setSavedListings((current) =>
+      current.map((item) => (item.id === id ? { ...item, status: 'removed' as const } : item)),
+    );
     return true;
   }, [listings]);
 
   const toggleSave = useCallback(async (listingId: string, username: string) => {
-    const listing = listings.find((item) => item.id === listingId);
-    const currentlySaved = listing?.savedBy.includes(username) ?? false;
+    const listing = listings.find((item) => item.id === listingId) ?? savedListings.find((item) => item.id === listingId);
+    const currentlySaved =
+      listing?.savedBy.includes(username) || savedListings.some((item) => item.id === listingId) || false;
 
     setListings((current) =>
       current.map((item) => {
@@ -269,6 +283,12 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
         return { ...item, savedBy: nextSaved };
       }),
     );
+    setSavedListings((current) => {
+      if (currentlySaved) return current.filter((item) => item.id !== listingId);
+      if (!listing) return current;
+      if (current.some((item) => item.id === listingId)) return current;
+      return [{ ...listing, savedBy: [...new Set([...listing.savedBy, username])] }, ...current];
+    });
 
     try {
       if (currentlySaved) {
@@ -277,28 +297,18 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
         await apiFetch(`/listings/${listingId}/save`, { method: 'POST' });
       }
     } catch {
-      setListings((current) =>
-        current.map((item) => {
-          if (item.id !== listingId) return item;
-          const nextSaved = currentlySaved
-            ? item.savedBy.includes(username)
-              ? item.savedBy
-              : [...item.savedBy, username]
-            : item.savedBy.filter((user) => user !== username);
-          return { ...item, savedBy: nextSaved };
-        }),
-      );
+      await refresh();
       throw new Error('Could not update saved items.');
     }
-  }, [listings]);
+  }, [listings, refresh, savedListings]);
 
   const hideActiveForSeller = useCallback(async (_username: string) => {
     await refresh();
   }, [refresh]);
 
   const savedListingsFor = useCallback(
-    (username: string) => listings.filter((listing) => listing.savedBy.includes(username)),
-    [listings],
+    (_username: string) => savedListings,
+    [savedListings],
   );
 
   const listingsForSellerSync = useCallback(
@@ -309,6 +319,7 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       listings,
+      savedListings,
       loading,
       form,
       refresh,
@@ -343,6 +354,7 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
       removeListing,
       resetForm,
       saveDraft,
+      savedListings,
       savedListingsFor,
       setForm,
       setStatus,

@@ -1,7 +1,7 @@
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { StyleSheet, Text, View } from 'react-native';
 
-export type ListingChipVariant = 'draft' | 'available' | 'reserved' | 'sold' | 'hidden';
+export type ListingChipVariant = 'draft' | 'available' | 'reserved' | 'sold' | 'hidden' | 'removed';
 export type OfferChipVariant = 'sent' | 'received' | 'pending' | 'accepted' | 'rejected' | 'countered' | 'withdrawn' | 'expired';
 export type LiveChipVariant = 'available' | 'reserved' | 'your_claim' | 'sold' | 'pinned';
 export type OrderChipVariant = 'paid' | 'dispatched' | 'in_transit' | 'completed' | 'cancelled';
@@ -14,6 +14,7 @@ const LISTING: Record<ListingChipVariant, ChipConfig> = {
   reserved: { label: 'RESERVED', color: Palette.warningText, border: '#E9CFA6', bg: Palette.warningBg },
   sold: { label: 'SOLD', color: Palette.ivory, border: Palette.espresso, bg: Palette.espresso },
   hidden: { label: 'HIDDEN', color: Palette.muted, border: '#D4C7BE' },
+  removed: { label: 'NO LONGER AVAILABLE', color: Palette.muted, border: '#D4C7BE' },
 };
 
 const OFFER: Record<OfferChipVariant, ChipConfig> = {

@@ -1,5 +1,5 @@
 export type Department = 'Women' | 'Men' | 'Kids';
-export type ListingStatus = 'available' | 'reserved' | 'sold' | 'draft' | 'hidden';
+export type ListingStatus = 'available' | 'reserved' | 'sold' | 'draft' | 'hidden' | 'removed';
 export type LiveStatus = 'live' | 'upcoming' | 'ended';
 export type SortOption = 'Newest' | 'Lowest price' | 'Highest price';
 

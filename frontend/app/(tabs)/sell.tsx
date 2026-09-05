@@ -2,7 +2,6 @@ import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { PlusIcon } from '@/components/ui/icons';
 import { StatusChip, type ListingChipVariant } from '@/components/ui/status-chip';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
@@ -16,11 +15,10 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-const FILTERS = ['all', 'draft', 'available', 'reserved', 'sold', 'hidden'] as const;
-type Filter = (typeof FILTERS)[number];
+const TABS = ['draft', 'available', 'reserved', 'sold', 'hidden'] as const;
+type Tab = (typeof TABS)[number];
 
-const FILTER_LABEL: Record<Filter, string> = {
-  all: 'All',
+const TAB_LABEL: Record<Tab, string> = {
   draft: 'Draft',
   available: 'Available',
   reserved: 'Reserved',
@@ -28,13 +26,12 @@ const FILTER_LABEL: Record<Filter, string> = {
   hidden: 'Hidden',
 };
 
-function isFilter(value?: string): value is Filter {
-  return FILTERS.includes(value as Filter);
+function isTab(value?: string): value is Tab {
+  return TABS.includes(value as Tab);
 }
 
-function matchesFilter(listing: Listing, filter: Filter) {
-  if (filter === 'all') return true;
-  return listing.status === filter;
+function matchesTab(listing: Listing, tab: Tab) {
+  return listing.status === tab;
 }
 
 export default function SellScreen() {
@@ -44,13 +41,12 @@ export default function SellScreen() {
   const { session } = useAuth();
   const { listingsForSeller, resetForm, loadFormFromListing, loading, refresh } = useListings();
   const { isConnected } = useNetworkStatus();
-  const initial = params.tab === 'available' || !params.tab ? 'all' : isFilter(params.tab) ? params.tab : 'all';
-  const [filter, setFilter] = useState<Filter>(initial);
+  const [tab, setTab] = useState<Tab>(isTab(params.tab) ? params.tab : 'available');
   const [loadError, setLoadError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    if (isFilter(params.tab)) setFilter(params.tab === 'available' ? 'all' : params.tab);
+    if (isTab(params.tab)) setTab(params.tab);
   }, [params.tab]);
 
   const mine = useMemo(() => {
@@ -59,14 +55,14 @@ export default function SellScreen() {
   }, [listingsForSeller, session]);
 
   const counts = useMemo(() => {
-    const next = { all: mine.length, draft: 0, available: 0, reserved: 0, sold: 0, hidden: 0 };
+    const next = { draft: 0, available: 0, reserved: 0, sold: 0, hidden: 0 };
     for (const listing of mine) {
-      if (listing.status in next) next[listing.status as Exclude<Filter, 'all'>] += 1;
+      if (listing.status in next) next[listing.status as Tab] += 1;
     }
     return next;
   }, [mine]);
 
-  const visible = mine.filter((listing) => matchesFilter(listing, filter));
+  const visible = mine.filter((listing) => matchesTab(listing, tab));
 
   const reload = useCallback(async () => {
     setRefreshing(true);
@@ -75,6 +71,10 @@ export default function SellScreen() {
     if (!ok) setLoadError(true);
     setRefreshing(false);
   }, [refresh]);
+
+  function goLive() {
+    router.push(session?.canHostLive ? '/live/prepare' : '/live/host-access');
+  }
 
   function openNew() {
     resetForm();
@@ -90,48 +90,17 @@ export default function SellScreen() {
     router.push(`/sell/${listing.id}`);
   }
 
-  const emptyTitle = filter === 'all' ? 'Nothing listed yet' : `No ${FILTER_LABEL[filter].toLowerCase()} listings`;
   const emptyMessage =
-    filter === 'all'
-      ? 'List your first piece to start selling on Throve.'
-      : filter === 'draft'
-        ? 'Drafts you save while creating a listing will appear here.'
-        : `You don't have any ${FILTER_LABEL[filter].toLowerCase()} listings right now.`;
+    tab === 'draft'
+      ? 'Drafts you save while creating a listing will appear here.'
+      : `You don't have any ${TAB_LABEL[tab].toLowerCase()} listings right now.`;
 
   return (
     <View style={[styles.screen, { paddingTop: top }]}>
       <View style={styles.header}>
-        <View style={styles.headerCopy}>
-          <Text style={styles.title}>My listings</Text>
-          <Text style={styles.subtitle}>
-            {counts.all} listing{counts.all === 1 ? '' : 's'}
-          </Text>
-        </View>
-        <Pressable onPress={openNew} style={styles.newBtn} accessibilityRole="button" accessibilityLabel="New listing">
-          <PlusIcon size={16} color={Palette.ivory} />
-          <Text style={styles.newLabel}>New</Text>
-        </Pressable>
+        <Text style={styles.title}>My listings</Text>
+        <Button label="+ New listing" onPress={openNew} style={styles.newBtn} />
       </View>
-
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.filters}
-        style={styles.filtersScroll}>
-        {FILTERS.map((item) => {
-          const active = filter === item;
-          const count = counts[item];
-          const label = item === 'all' ? 'All' : `${FILTER_LABEL[item]} · ${count}`;
-          return (
-            <Pressable
-              key={item}
-              onPress={() => setFilter(item)}
-              style={[styles.filterChip, active ? styles.filterChipOn : styles.filterChipOff]}>
-              <Text style={[styles.filterLabel, active ? styles.filterLabelOn : styles.filterLabelOff]}>{label}</Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
 
       <ScrollView
         contentContainerStyle={[styles.body, { paddingBottom: tabScrollBottom }]}
@@ -152,14 +121,35 @@ export default function SellScreen() {
           </View>
         ) : null}
 
+        <Pressable onPress={goLive} style={styles.goLive} accessibilityRole="button" accessibilityLabel="Go Live">
+          <Text style={styles.goLiveLabel}>● Go Live</Text>
+        </Pressable>
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.tabs}
+          style={styles.tabsScroll}>
+          {TABS.map((item) => {
+            const active = tab === item;
+            return (
+              <Pressable key={item} onPress={() => setTab(item)} style={[styles.tab, active ? styles.tabOn : null]}>
+                <Text style={[styles.tabLabel, active ? styles.tabLabelOn : null]}>
+                  {TAB_LABEL[item]} ({counts[item]})
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
         {loading && mine.length === 0 ? (
           <MyListingsSkeleton />
         ) : visible.length === 0 && !loadError ? (
           <EmptyState
-            title={emptyTitle}
+            title="Nothing here yet"
             message={emptyMessage}
-            actionLabel={filter === 'all' || filter === 'draft' ? 'Create listing' : undefined}
-            onAction={filter === 'all' || filter === 'draft' ? openNew : undefined}
+            actionLabel={tab === 'draft' ? 'Create listing' : undefined}
+            onAction={tab === 'draft' ? openNew : undefined}
             style={styles.empty}
           />
         ) : (
@@ -223,57 +213,67 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.lg,
     paddingBottom: Spacing.sm,
   },
-  headerCopy: { flex: 1, minWidth: 0, paddingRight: 12 },
   title: {
     fontSize: 28,
     fontFamily: Typography.display,
     color: Palette.espresso,
     letterSpacing: -0.3,
   },
-  subtitle: {
-    marginTop: 2,
-    fontSize: 13,
-    fontFamily: Typography.body,
-    color: Palette.muted,
-  },
   newBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    minHeight: 38,
+    minHeight: 36,
     paddingHorizontal: 14,
     borderRadius: Radius.pill,
-    backgroundColor: Palette.plum,
   },
-  newLabel: {
-    fontSize: 14,
-    fontFamily: Typography.bodySemiBold,
-    color: Palette.ivory,
-  },
-  filtersScroll: { flexGrow: 0 },
-  filters: {
+  body: {
     paddingHorizontal: Spacing.xl,
-    paddingVertical: 10,
-    gap: 8,
+    paddingBottom: Spacing.xxl,
   },
-  filterChip: {
-    height: 34,
-    paddingHorizontal: 14,
-    borderRadius: Radius.pill,
-    justifyContent: 'center',
-  },
-  filterChipOn: { backgroundColor: Palette.plum },
-  filterChipOff: {
-    backgroundColor: Palette.ivoryElevated,
-    borderWidth: 1,
-    borderColor: Palette.border,
-  },
-  filterLabel: { fontSize: 12.5, fontFamily: Typography.bodySemiBold },
-  filterLabelOn: { color: Palette.ivory },
-  filterLabelOff: { color: Palette.espresso },
-  body: { paddingHorizontal: Spacing.xl, paddingTop: 4 },
   banner: { marginBottom: Spacing.md },
   retry: { marginTop: 10 },
+  goLive: {
+    height: 46,
+    borderWidth: 1,
+    borderColor: Palette.liveRed,
+    borderRadius: Radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Palette.ivoryElevated,
+    marginBottom: Spacing.lg,
+  },
+  goLiveLabel: {
+    fontSize: 13,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.liveRed,
+  },
+  tabsScroll: {
+    flexGrow: 0,
+    marginBottom: Spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: Palette.divider,
+  },
+  tabs: {
+    flexDirection: 'row',
+    minWidth: '100%',
+  },
+  tab: {
+    flexGrow: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabOn: {
+    borderBottomColor: Palette.plum,
+  },
+  tabLabel: {
+    fontSize: 12,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.muted3,
+  },
+  tabLabelOn: {
+    color: Palette.plum,
+  },
   empty: { marginTop: Spacing.md },
   list: { gap: 12 },
   row: {

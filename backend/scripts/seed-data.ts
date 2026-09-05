@@ -95,7 +95,7 @@ export type SeedListing = {
   condition: string;
   department: 'Women' | 'Men' | 'Kids';
   category: string;
-  status: 'available' | 'reserved' | 'sold' | 'draft' | 'hidden';
+  status: 'available' | 'reserved' | 'sold' | 'draft' | 'hidden' | 'removed';
   description: string;
   colour?: string;
   photoCount: number;
