@@ -64,6 +64,11 @@ export function isUsableRemoteImageUri(value: string) {
   );
 }
 
+/** Seed placeholders (`seed://l3/1`) are not real files — RN cannot load that scheme. */
+export function isNativeImageUri(value: string) {
+  return Boolean(value) && !value.startsWith('seed://');
+}
+
 export function getListingImage(id: string): ImageSourcePropType | null {
   return listingImages[id] ?? listingImages[seedListingSlug(id) ?? ''] ?? null;
 }

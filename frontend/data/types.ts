@@ -34,8 +34,10 @@ export type ListingForm = {
   brand: string;
   condition: string;
   size: string;
+  colour: string;
   price: string;
   description: string;
+  shippingMethod: string;
 };
 
 export type ListingFilters = {

@@ -124,6 +124,15 @@ export function PinIcon({ size = 13, color = Palette.plum, strokeWidth = 1.8 }: 
   );
 }
 
+export function MapPinIcon({ size = 14, color = Palette.muted, strokeWidth = 1.7 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M12 21s7-6.2 7-11.2A7 7 0 1 0 5 9.8C5 14.8 12 21 12 21z" />
+      <Circle cx={12} cy={9.8} r={2.2} />
+    </Svg>
+  );
+}
+
 export function SendIcon({ size = 18, color = Palette.ivory, strokeWidth = 1.8 }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round">
@@ -208,6 +217,33 @@ export function ShieldIcon({ size = 16, color = Palette.ivory, strokeWidth = 1.7
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round">
       <Path d="M12 3l7 3v5.5c0 4.4-3 8-7 9.5-4-1.5-7-5.1-7-9.5V6z" />
+    </Svg>
+  );
+}
+
+export function ShieldCheckIcon({ size = 15, color = Palette.success, strokeWidth = 1.6 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M12 3l7 3v5.5c0 4.4-3 8-7 9.5-4-1.5-7-5.1-7-9.5V6z" />
+      <Path d="m9 12 2 2 4-4" />
+    </Svg>
+  );
+}
+
+export function ShareIcon({ size = 18, color = Palette.espresso, strokeWidth = 1.7 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round">
+      <Path d="M12 15V4" />
+      <Path d="m8 8 4-4 4 4" />
+      <Path d="M5 13v6h14v-6" />
+    </Svg>
+  );
+}
+
+export function ChatBubbleIcon({ size = 16, color = Palette.espresso, strokeWidth = 1.7 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round">
+      <Path d="M3.5 6.5h17v11h-11l-6 3.5z" />
     </Svg>
   );
 }

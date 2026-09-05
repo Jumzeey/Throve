@@ -1,5 +1,6 @@
 import { apiFetch, apiUpload } from '@/lib/api';
 import { isLocalListingPhotoUri, isUploadableLocalFileUri, listingPhotoFormPart } from '@/lib/listing-photos';
+import { getCachedListingCatalog, listingFormIssues, fetchListingCatalog } from '@/lib/listing-catalog';
 import { useAuth } from '@/context/auth-context';
 import type { Department, Listing, ListingForm, ListingStatus } from '@/data/types';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -13,8 +14,10 @@ export const EMPTY_LISTING_FORM: ListingForm = {
   brand: '',
   condition: '',
   size: '',
+  colour: '',
   price: '',
   description: '',
+  shippingMethod: '',
 };
 
 export const PREVIEW_ERROR = 'Add a photo, then fill in title, department, category, condition and price.';
@@ -56,6 +59,8 @@ export function parseListingPrice(value: string) {
 }
 
 export function isListingFormPublishable(form: ListingForm) {
+  const catalog = getCachedListingCatalog();
+  if (catalog) return listingFormIssues(form, catalog).length === 0;
   if ((form.photoUris?.length ?? form.photoCount) < 1) return false;
   if (!form.title.trim()) return false;
   if (!isDepartment(form.department)) return false;
@@ -75,6 +80,7 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
     try {
       const data = await apiFetch<Listing[]>('/listings');
       setListings(data);
+      void fetchListingCatalog().catch(() => undefined);
     } catch {
       // Backend offline or misconfigured — keep empty catalog; screens show offline/empty states
     } finally {
@@ -109,8 +115,10 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
       brand: listing.brand === 'Unbranded' ? '' : listing.brand,
       condition: listing.condition,
       size: listing.size === '—' ? '' : listing.size,
+      colour: listing.colour ?? '',
       price: listing.price > 0 ? String(listing.price) : '',
       description: listing.description === 'No description provided.' ? '' : listing.description,
+      shippingMethod: listing.shipping.toLowerCase().includes('express') ? 'Express' : 'Standard',
     });
   }, []);
 
@@ -138,11 +146,13 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
         brand: form.brand,
         price: parseListingPrice(form.price) ?? 0,
         size: form.size,
+        colour: form.colour,
         condition: form.condition,
         department: isDepartment(form.department) ? form.department : 'Women',
         category: form.category,
         description: form.description,
         photoUrls,
+        shippingMethod: form.shippingMethod || undefined,
       };
 
       const listing = form.id

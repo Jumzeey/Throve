@@ -56,6 +56,7 @@ export default function ListingPreviewScreen() {
             <MetaChip label={`${form.department} · ${form.category}`} />
             <MetaChip label={form.condition} />
             {size && size !== '—' ? <MetaChip label={`Size ${size}`} /> : null}
+            {form.colour.trim() ? <MetaChip label={form.colour.trim()} /> : null}
             {brand ? <MetaChip label={brand} /> : null}
           </View>
           <Text style={styles.description}>{form.description.trim() || 'No description provided.'}</Text>

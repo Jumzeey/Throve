@@ -11,9 +11,10 @@ type Props = {
   options: string[];
   placeholder?: string;
   onSelect: (value: string) => void;
+  error?: string | null;
 };
 
-export function PickerField({ value, options, placeholder, onSelect }: Props) {
+export function PickerField({ value, options, placeholder, onSelect, error }: Props) {
   const { sheetBottom } = useScreenInsets();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -27,10 +28,11 @@ export function PickerField({ value, options, placeholder, onSelect }: Props) {
 
   return (
     <>
-      <Pressable style={styles.field} onPress={() => setOpen(true)}>
+      <Pressable style={[styles.field, error ? styles.fieldError : null]} onPress={() => setOpen(true)}>
         <Text style={[styles.fieldText, !value && styles.placeholder]}>{value || placeholder || 'Select'}</Text>
         <ChevronDownIcon />
       </Pressable>
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
       <Modal visible={open} transparent animationType="slide" onRequestClose={close}>
         <Pressable style={styles.overlay} onPress={close}>
@@ -82,6 +84,17 @@ const styles = StyleSheet.create({
   },
   placeholder: {
     color: Palette.placeholder,
+  },
+  fieldError: {
+    borderColor: Palette.error,
+    borderWidth: 1.5,
+  },
+  errorText: {
+    marginTop: 6,
+    fontSize: 11.5,
+    lineHeight: 18,
+    color: Palette.error,
+    fontFamily: Typography.body,
   },
   overlay: {
     flex: 1,

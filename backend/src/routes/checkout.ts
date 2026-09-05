@@ -13,11 +13,10 @@ import {
 import { getProfileById, getProfileByUsername } from '../lib/mappers.js';
 import { createServiceClient } from '../lib/supabase.js';
 import { type AuthedRequest, requireAuth } from '../middleware/auth.js';
+import { shippingFee } from '../lib/listing-catalog.js';
 
 const router = Router();
 const RESERVE_MS = 10 * 60 * 1000;
-
-const DELIVERY_FEES: Record<string, number> = { Standard: 2500, Express: 4500 };
 
 router.get('/orders', requireAuth, async (req, res) => {
   const { supabase, userId } = req as AuthedRequest;
@@ -273,7 +272,7 @@ router.post('/complete', requireAuth, async (req, res) => {
     }
   }
 
-  const deliveryFee = DELIVERY_FEES[parsed.data.deliveryMethod] ?? 2500;
+  const deliveryFee = shippingFee(parsed.data.deliveryMethod);
   const total = itemPrice + deliveryFee;
 
   const { count } = await supabase.from('orders').select('*', { count: 'exact', head: true });

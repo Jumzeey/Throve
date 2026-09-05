@@ -5,6 +5,7 @@ import type { DbRow } from '../lib/db-types.js';
 import { queueEmail } from '../lib/email/send.js';
 import { listingPublishedEmail } from '../lib/email/templates/listings.js';
 import { getProfileById, getSellerCards, getSellerMap, mapListing, escapeIlike } from '../lib/mappers.js';
+import { LISTING_CATALOG, categoriesForDepartment, shippingSummary } from '../lib/listing-catalog.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
 
 const router = Router();
@@ -199,6 +200,10 @@ router.get('/seller/:username', optionalAuth, async (req, res) => {
   return res.json(listings);
 });
 
+router.get('/catalog', (_req, res) => {
+  return res.json(LISTING_CATALOG);
+});
+
 router.get('/:id', optionalAuth, async (req, res) => {
   const supabase = (req as AuthedRequest).supabase ?? (await import('../lib/supabase.js')).createSupabaseClient();
   const userId = (req as AuthedRequest).userId;
@@ -222,12 +227,18 @@ const listingBody = z.object({
   description: z.string().optional(),
   colour: z.string().optional(),
   photoUrls: z.array(z.string()).optional(),
+  shipping: z.string().optional(),
+  shippingMethod: z.enum(['Standard', 'Express']).optional(),
 });
 
 router.post('/draft', requireAuth, async (req, res) => {
   const { supabase, userId } = req as AuthedRequest;
   const parsed = listingBody.safeParse(req.body);
   if (!parsed.success) return sendError(res, 400, 'Invalid input');
+
+  const department = parsed.data.department ?? 'Women';
+  const allowed = categoriesForDepartment(department);
+  const category = parsed.data.category && allowed.includes(parsed.data.category) ? parsed.data.category : allowed[0];
 
   const payload = {
     seller_id: userId,
@@ -236,11 +247,12 @@ router.post('/draft', requireAuth, async (req, res) => {
     price: parsed.data.price ?? 0,
     size: parsed.data.size?.trim() || '—',
     condition: parsed.data.condition?.trim() || 'Good',
-    department: parsed.data.department ?? 'Women',
-    category: parsed.data.category ?? 'Clothing',
+    department,
+    category,
     description: parsed.data.description?.trim() || 'No description provided.',
     colour: parsed.data.colour ?? null,
     photo_urls: parsed.data.photoUrls ?? [],
+    shipping: parsed.data.shipping?.trim() || shippingSummary(parsed.data.shippingMethod),
     status: 'draft',
   };
 
@@ -267,6 +279,10 @@ router.put('/:id', requireAuth, async (req, res) => {
   if (parsed.data.description !== undefined) patch.description = parsed.data.description.trim();
   if (parsed.data.colour !== undefined) patch.colour = parsed.data.colour;
   if (parsed.data.photoUrls !== undefined) patch.photo_urls = parsed.data.photoUrls;
+  if (parsed.data.shipping !== undefined) patch.shipping = parsed.data.shipping.trim();
+  if (parsed.data.shippingMethod !== undefined && parsed.data.shipping === undefined) {
+    patch.shipping = shippingSummary(parsed.data.shippingMethod);
+  }
 
   const { data, error } = await supabase
     .from('listings')
@@ -298,6 +314,17 @@ router.post('/:id/publish', requireAuth, async (req, res) => {
   }
   if ((existing.photo_urls ?? []).length < 1) {
     return sendError(res, 400, 'Add at least one photo before publishing');
+  }
+  const allowed = categoriesForDepartment(String(existing.department));
+  if (!allowed.includes(String(existing.category))) {
+    return sendError(res, 400, 'Category is not valid for this department');
+  }
+  const size = String(existing.size ?? '').trim();
+  if (
+    (LISTING_CATALOG.sizeRequiredCategories as readonly string[]).includes(String(existing.category)) &&
+    (!size || size === '—')
+  ) {
+    return sendError(res, 400, 'Size is required for this category');
   }
 
   const { data, error } = await supabase

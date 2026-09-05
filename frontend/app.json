@@ -21,7 +21,15 @@
         "NSCameraUsageDescription": "Throve needs camera access so you can go live and sell items.",
         "NSMicrophoneUsageDescription": "Throve needs microphone access so viewers can hear you during live selling.",
         "NSPhotoLibraryUsageDescription": "Throve needs photo library access so you can add listing and profile photos.",
-        "NSPhotoLibraryAddUsageDescription": "Throve needs permission to save photos when you download or share them."
+        "NSPhotoLibraryAddUsageDescription": "Throve needs permission to save photos when you download or share them.",
+        "LSApplicationQueriesSchemes": [
+          "whatsapp",
+          "instagram",
+          "twitter",
+          "tg",
+          "fb",
+          "sms"
+        ]
       }
     },
     "android": {
@@ -57,7 +65,10 @@
               "host": "profile"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ],
       "permissions": [
@@ -109,10 +120,34 @@
       [
         "expo-notifications",
         {
-          color: "#5A1F45",
-          defaultChannel: "default"
+          "color": "#5A1F45",
+          "defaultChannel": "default"
         }
-      ]
+      ],
+      [
+        "react-native-share",
+        {
+          "ios": [
+            "whatsapp",
+            "instagram",
+            "instagram-stories",
+            "fb",
+            "twitter",
+            "tg",
+            "sms",
+            "mailto"
+          ],
+          "android": [
+            "com.whatsapp",
+            "com.instagram.android",
+            "com.facebook.katana",
+            "com.twitter.android",
+            "org.telegram.messenger",
+            "com.zhiliaoapp.musically"
+          ]
+        }
+      ],
+      "expo-build-properties"
     ],
     "experiments": {
       "typedRoutes": true,

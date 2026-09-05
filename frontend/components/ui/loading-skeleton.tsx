@@ -34,6 +34,24 @@ export function ListingGridSkeleton({ count = 4 }: { count?: number }) {
   );
 }
 
+export function SellerProfileSkeleton() {
+  return (
+    <View style={styles.sellerWrap}>
+      <View style={styles.sellerIdentity}>
+        <View style={styles.sellerAvatar} />
+        <View style={styles.sellerLines}>
+          <View style={[styles.line, { width: '72%', height: 12 }]} />
+          <View style={[styles.line, { width: '44%', marginTop: 10 }]} />
+        </View>
+      </View>
+      <View style={styles.sellerGrid}>
+        <View style={styles.sellerTile} />
+        <View style={styles.sellerTile} />
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   wrap: { gap: 14 },
   row: { flexDirection: 'row', gap: 13 },
@@ -59,6 +77,22 @@ const styles = StyleSheet.create({
   gridImage: {
     height: 212,
     borderRadius: 6,
+    backgroundColor: Palette.skeleton,
+  },
+  sellerWrap: { paddingHorizontal: 20, paddingTop: 8 },
+  sellerIdentity: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 22 },
+  sellerAvatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Palette.skeleton,
+  },
+  sellerLines: { flex: 1 },
+  sellerGrid: { flexDirection: 'row', gap: 12 },
+  sellerTile: {
+    flex: 1,
+    aspectRatio: 0.82,
+    borderRadius: Radius.sm,
     backgroundColor: Palette.skeleton,
   },
 });

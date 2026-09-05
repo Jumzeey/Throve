@@ -5,9 +5,10 @@ import { StyleSheet, View } from 'react-native';
 type Props = {
   rating: number;
   size?: number;
+  color?: string;
 };
 
-export function StarRating({ rating, size = 14 }: Props) {
+export function StarRating({ rating, size = 14, color = Palette.gold }: Props) {
   return (
     <View style={styles.row}>
       {[1, 2, 3, 4, 5].map((star) => (
@@ -15,7 +16,7 @@ export function StarRating({ rating, size = 14 }: Props) {
           key={star}
           name={rating >= star ? 'star' : rating >= star - 0.5 ? 'star-half' : 'star-outline'}
           size={size}
-          color={rating >= star - 0.5 ? Palette.accent : Palette.neutral300}
+          color={rating >= star - 0.5 ? color : Palette.neutral300}
         />
       ))}
     </View>
