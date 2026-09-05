@@ -106,12 +106,17 @@ router.get('/search', optionalAuth, async (req, res) => {
 
     namedUsernames = (namedSellers ?? []).map((row) => row.username as string);
     const sellerIds = (namedSellers ?? []).map((row) => row.id as string);
+    // department is a Postgres enum — ILIKE is invalid on it.
     const parts = [
       `title.ilike.%${escaped}%`,
       `brand.ilike.%${escaped}%`,
       `category.ilike.%${escaped}%`,
-      `department.ilike.%${escaped}%`,
+      `description.ilike.%${escaped}%`,
     ];
+    const departmentMatch = (['Women', 'Men', 'Kids'] as const).find((item) =>
+      item.toLowerCase().includes(q.toLowerCase()),
+    );
+    if (departmentMatch) parts.push(`department.eq.${departmentMatch}`);
     if (sellerIds.length) parts.push(`seller_id.in.(${sellerIds.join(',')})`);
     query = query.or(parts.join(','));
   }
