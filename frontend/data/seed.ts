@@ -16,6 +16,8 @@ export const CONDITIONS = [
   'Satisfactory',
 ];
 
+export const FILTER_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'One size'];
+
 export const DEFAULT_SHIPPING = 'Buyer pays shipping · 3–5 days within Nigeria';
 
 function listing(

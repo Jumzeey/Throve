@@ -1,7 +1,6 @@
 export type Department = 'Women' | 'Men' | 'Kids';
 export type ListingStatus = 'available' | 'reserved' | 'sold' | 'draft' | 'hidden';
 export type LiveStatus = 'live' | 'upcoming' | 'ended';
-export type PriceBand = 'Under 15k' | '15k-30k' | 'Over 30k';
 export type SortOption = 'Newest' | 'Lowest price' | 'Highest price';
 
 export type Listing = {
@@ -43,8 +42,10 @@ export type ListingFilters = {
   department: string;
   category: string;
   brand: string;
+  size: string;
   condition: string;
-  price: string;
+  priceMin: string;
+  priceMax: string;
   sort: SortOption;
 };
 

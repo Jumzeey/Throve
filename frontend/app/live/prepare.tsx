@@ -274,16 +274,21 @@ export default function PrepareLiveScreen() {
 
         <View style={styles.footer}>
           <Button
-            label={starting ? 'Starting your live…' : scheduleMode ? 'Schedule live' : 'Start live'}
+            label={
+              starting
+                ? 'Starting your live…'
+                : !canStart
+                  ? 'Start live · unavailable'
+                  : scheduleMode
+                    ? 'Schedule live'
+                    : 'Start live'
+            }
             variant="live"
             loading={starting}
             disabled={!canStart || starting}
             onPress={submit}
             style={styles.start}
           />
-          {!canStart ? (
-            <Button label="Start live · unavailable" disabled style={styles.startDisabled} />
-          ) : null}
           <Text style={styles.footerHint}>
             Viewers can claim a featured item for about 5 minutes while they check out.
           </Text>
@@ -553,9 +558,6 @@ const styles = StyleSheet.create({
   },
   start: {
     minHeight: 54,
-  },
-  startDisabled: {
-    minHeight: 46,
   },
   footerHint: {
     fontSize: 11,

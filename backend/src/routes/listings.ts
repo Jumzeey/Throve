@@ -4,7 +4,7 @@ import { handleSupabaseError, sendError } from '../lib/errors.js';
 import type { DbRow } from '../lib/db-types.js';
 import { queueEmail } from '../lib/email/send.js';
 import { listingPublishedEmail } from '../lib/email/templates/listings.js';
-import { getProfileById, getSellerMap, mapListing } from '../lib/mappers.js';
+import { getProfileById, getSellerCards, getSellerMap, mapListing, escapeIlike } from '../lib/mappers.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
 
 const router = Router();
@@ -60,6 +60,103 @@ router.get('/', optionalAuth, async (req, res) => {
 
   const listings = await enrichListings(supabase, rows, userId);
   return res.json(listings);
+});
+
+function matchesSize(listingSize: string, filterSize: string) {
+  const size = listingSize.trim();
+  if (filterSize === 'One size') {
+    return !size || size === '—' || size.toLowerCase() === 'one size';
+  }
+  return size.toLowerCase() === filterSize.toLowerCase();
+}
+
+router.get('/search', optionalAuth, async (req, res) => {
+  const supabase = (req as AuthedRequest).supabase ?? (await import('../lib/supabase.js')).createSupabaseClient();
+  const userId = (req as AuthedRequest).userId;
+  const q = String(req.query.q ?? '').trim();
+  const department = String(req.query.department ?? '').trim();
+  const category = String(req.query.category ?? '').trim();
+  const brand = String(req.query.brand ?? '').trim();
+  const size = String(req.query.size ?? '').trim();
+  const condition = String(req.query.condition ?? '').trim();
+  const priceMin = Number(String(req.query.priceMin ?? '').replace(/[^\d]/g, ''));
+  const priceMax = Number(String(req.query.priceMax ?? '').replace(/[^\d]/g, ''));
+  const sort = String(req.query.sort ?? 'Newest');
+
+  let query = supabase.from('listings').select('*').eq('status', 'available');
+  if (department) query = query.eq('department', department);
+  if (category) query = query.eq('category', category);
+  if (brand) query = query.eq('brand', brand);
+  if (condition) query = query.eq('condition', condition);
+  if (size && size !== 'One size') query = query.ilike('size', size);
+  if (Number.isFinite(priceMin) && priceMin > 0) query = query.gte('price', priceMin);
+  if (Number.isFinite(priceMax) && priceMax > 0) query = query.lte('price', priceMax);
+
+  let namedUsernames: string[] = [];
+  if (q) {
+    const escaped = escapeIlike(q);
+    const { data: namedSellers, error: namedError } = await supabase
+      .from('profiles')
+      .select('id, username')
+      .eq('deactivated', false)
+      .eq('setup_complete', true)
+      .or(`username.ilike.%${escaped}%,name.ilike.%${escaped}%`)
+      .limit(20);
+    if (namedError) return handleSupabaseError(res, namedError);
+
+    namedUsernames = (namedSellers ?? []).map((row) => row.username as string);
+    const sellerIds = (namedSellers ?? []).map((row) => row.id as string);
+    const parts = [
+      `title.ilike.%${escaped}%`,
+      `brand.ilike.%${escaped}%`,
+      `category.ilike.%${escaped}%`,
+      `department.ilike.%${escaped}%`,
+    ];
+    if (sellerIds.length) parts.push(`seller_id.in.(${sellerIds.join(',')})`);
+    query = query.or(parts.join(','));
+  }
+
+  if (sort === 'Lowest price') query = query.order('price', { ascending: true });
+  else if (sort === 'Highest price') query = query.order('price', { ascending: false });
+  else query = query.order('created_at', { ascending: false });
+
+  const { data, error } = await query;
+  if (error) return handleSupabaseError(res, error);
+
+  let rows = data ?? [];
+  if (size === 'One size') {
+    rows = rows.filter((row: DbRow) => matchesSize(String(row.size ?? ''), size));
+  }
+
+  try {
+    const items = await enrichListings(supabase, rows, userId);
+
+    const brandCounts = new Map<string, number>();
+    const sellerCounts = new Map<string, number>();
+    for (const listing of items) {
+      sellerCounts.set(listing.seller, (sellerCounts.get(listing.seller) ?? 0) + 1);
+      if (listing.brand && listing.brand !== 'Unbranded') {
+        brandCounts.set(listing.brand, (brandCounts.get(listing.brand) ?? 0) + 1);
+      }
+    }
+
+    const fromItems = Array.from(sellerCounts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([username]) => username);
+
+    const extraNames = namedUsernames.filter((username) => !fromItems.includes(username));
+    const sellerNames = [...fromItems, ...extraNames].slice(0, 4);
+    const sellers = await getSellerCards(supabase, sellerNames);
+    const brands = Array.from(brandCounts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 8)
+      .map(([name, count]) => ({ name, count }));
+
+    return res.json({ items, sellers, brands });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Search failed';
+    return handleSupabaseError(res, { message });
+  }
 });
 
 router.get('/saved/me', requireAuth, async (req, res) => {

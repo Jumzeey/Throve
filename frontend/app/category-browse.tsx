@@ -43,8 +43,10 @@ export default function CategoryBrowseScreen() {
       department,
       category,
       brand: filters.brand,
+      size: filters.size,
       condition: filters.condition,
-      price: filters.price,
+      priceMin: filters.priceMin,
+      priceMax: filters.priceMax,
       sort: filters.sort,
     });
   }, [catalog, category, department, filters]);

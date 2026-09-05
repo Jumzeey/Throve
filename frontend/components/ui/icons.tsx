@@ -229,3 +229,19 @@ export function CalendarIcon({ size = 17, color = Palette.muted, strokeWidth = 1
     </Svg>
   );
 }
+
+export function FilterSlidersIcon({ size = 13, color = Palette.ivory, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round">
+      <Path d="M4 7h16M7 12h10M10 17h4" />
+    </Svg>
+  );
+}
+
+export function SortArrowsIcon({ size = 13, color = Palette.body, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round">
+      <Path d="M7 4v16M7 20l-3-3M17 20V4M17 4l3 3" />
+    </Svg>
+  );
+}

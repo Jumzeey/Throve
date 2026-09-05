@@ -52,7 +52,8 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   let response: Response;
   try {
     response = await fetch(`${API_URL}${path}`, { ...init, headers });
-  } catch {
+  } catch (err) {
+    if (init.signal?.aborted) throw err;
     throw new ApiError(unreachableBackendMessage(), 'NETWORK_ERROR');
   }
   const payload = await response.json().catch(() => ({}));

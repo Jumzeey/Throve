@@ -1,27 +1,65 @@
 import { LISTINGS } from '@/data/seed';
-import type { Listing, ListingFilters, PriceBand, SortOption } from '@/data/types';
+import type { Listing, ListingFilters, SortOption } from '@/data/types';
+import { formatNaira } from '@/lib/format';
 
-export const PRICE_BANDS: PriceBand[] = ['Under 15k', '15k-30k', 'Over 30k'];
 export const SORT_OPTIONS: SortOption[] = ['Newest', 'Lowest price', 'Highest price'];
 
 export const DEFAULT_FILTERS: ListingFilters = {
   department: '',
   category: '',
   brand: '',
+  size: '',
   condition: '',
-  price: '',
+  priceMin: '',
+  priceMax: '',
   sort: 'Newest',
 };
 
-export function hasSearchCriteria(query: string, filters: ListingFilters) {
-  return Boolean(query.trim() || filters.department || filters.brand || filters.condition || filters.price);
+export function parseAmount(raw: string) {
+  const n = Number(String(raw).replace(/[^\d]/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-function matchesPrice(price: number, band: string) {
-  if (band === 'Under 15k') return price < 15000;
-  if (band === '15k-30k') return price >= 15000 && price <= 30000;
-  if (band === 'Over 30k') return price > 30000;
-  return true;
+export function priceFilterLabel(min: string, max: string) {
+  const lo = parseAmount(min);
+  const hi = parseAmount(max);
+  if (lo && hi) return `${formatNaira(lo)}–${formatNaira(hi)}`;
+  if (lo) return `From ${formatNaira(lo)}`;
+  if (hi) return `Up to ${formatNaira(hi)}`;
+  return '';
+}
+
+export function hasSearchCriteria(query: string, filters: ListingFilters) {
+  return Boolean(
+    query.trim() ||
+      filters.department ||
+      filters.category ||
+      filters.brand ||
+      filters.size ||
+      filters.condition ||
+      filters.priceMin ||
+      filters.priceMax,
+  );
+}
+
+export function appliedFilterCount(filters: ListingFilters) {
+  return [
+    filters.department,
+    filters.category,
+    filters.brand,
+    filters.size,
+    filters.condition,
+    filters.priceMin || filters.priceMax,
+  ].filter(Boolean).length;
+}
+
+function matchesSize(listingSize: string, filterSize: string) {
+  if (!filterSize) return true;
+  const size = listingSize.trim();
+  if (filterSize === 'One size') {
+    return !size || size === '—' || size.toLowerCase() === 'one size';
+  }
+  return size.toLowerCase() === filterSize.toLowerCase();
 }
 
 export function filterListings(
@@ -31,19 +69,25 @@ export function filterListings(
     department?: string;
     category?: string;
     brand?: string;
+    size?: string;
     condition?: string;
-    price?: string;
+    priceMin?: string;
+    priceMax?: string;
     sort?: SortOption;
   } = {},
 ) {
   const query = options.query?.trim().toLowerCase() ?? '';
+  const min = parseAmount(options.priceMin ?? '');
+  const max = parseAmount(options.priceMax ?? '');
   const matched = listings.filter((listing) => {
     if (listing.status !== 'available') return false;
     if (options.department && listing.department !== options.department) return false;
     if (options.category && listing.category !== options.category) return false;
     if (options.brand && listing.brand !== options.brand) return false;
+    if (options.size && !matchesSize(listing.size, options.size)) return false;
     if (options.condition && listing.condition !== options.condition) return false;
-    if (options.price && !matchesPrice(listing.price, options.price)) return false;
+    if (min && listing.price < min) return false;
+    if (max && listing.price > max) return false;
     if (query) {
       const haystack = [listing.title, listing.brand, listing.seller, listing.category, listing.department]
         .join(' ')

@@ -117,3 +117,58 @@ export async function getSellerMap(
   if (error) throw error;
   return new Map((data ?? []).map((row) => [row.id as string, row.username as string]));
 }
+
+export function escapeIlike(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
+export type SellerSearchCard = {
+  username: string;
+  photoUri?: string;
+  location: string;
+  avg: number;
+  count: number;
+};
+
+export async function getSellerCards(
+  supabase: ReturnType<typeof import('./supabase.js').createSupabaseClient>,
+  usernames: string[],
+): Promise<SellerSearchCard[]> {
+  if (!usernames.length) return [];
+
+  const { data: profiles, error: profileError } = await supabase
+    .from('profiles')
+    .select('id, username, location, photo_url, deactivated')
+    .in('username', usernames)
+    .eq('deactivated', false);
+  if (profileError) throw profileError;
+
+  const ids = (profiles ?? []).map((row) => row.id as string);
+  const stats = new Map<string, { sum: number; count: number }>();
+  if (ids.length) {
+    const { data: reviews, error: reviewError } = await supabase
+      .from('reviews')
+      .select('seller_id, rating')
+      .in('seller_id', ids);
+    if (reviewError) throw reviewError;
+    for (const row of reviews ?? []) {
+      const current = stats.get(row.seller_id as string) ?? { sum: 0, count: 0 };
+      current.sum += Number(row.rating);
+      current.count += 1;
+      stats.set(row.seller_id as string, current);
+    }
+  }
+
+  const byUsername = new Map((profiles ?? []).map((row) => [row.username as string, row]));
+  return usernames.map((username) => {
+    const profile = byUsername.get(username);
+    const rating = profile ? stats.get(profile.id as string) : undefined;
+    return {
+      username,
+      photoUri: publicPhotoUrl(profile?.photo_url as string | null | undefined),
+      location: String(profile?.location ?? ''),
+      avg: rating && rating.count ? rating.sum / rating.count : 0,
+      count: rating?.count ?? 0,
+    };
+  });
+}
