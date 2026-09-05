@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { CheckIcon, CloseIcon } from '@/components/ui/icons';
+import { KeyboardSafeSheet } from '@/components/ui/keyboard-safe';
 import { PickerField } from '@/components/ui/picker-field';
 import { Palette, Radius, Shadows, Typography } from '@/constants/theme';
 import { CONDITIONS, DEPARTMENTS, FILTER_BRANDS, FILTER_SIZES, getCategoriesForDepartment } from '@/data/seed';
@@ -7,17 +8,7 @@ import { DEFAULT_FILTERS, parseAmount, SORT_OPTIONS } from '@/data/filter-listin
 import type { ListingFilters, SortOption } from '@/data/types';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { useEffect, useState, type ReactNode } from 'react';
-import {
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 type Props = {
   visible: boolean;
@@ -33,7 +24,6 @@ function formatPriceDigits(digits: string) {
 }
 
 export function FiltersSheet({ visible, value, onClose, onApply, showDepartment = false }: Props) {
-  const { sheetBottom } = useScreenInsets();
   const [draft, setDraft] = useState(value);
 
   useEffect(() => {
@@ -69,11 +59,8 @@ export function FiltersSheet({ visible, value, onClose, onApply, showDepartment 
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={styles.overlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <Pressable style={styles.backdrop} onPress={onClose} />
-        <View style={[styles.sheet, { paddingBottom: sheetBottom }]}>
+      <View style={styles.overlay}>
+        <KeyboardSafeSheet onDismiss={onClose} style={styles.sheet}>
           <View style={styles.header}>
             <Text style={styles.title}>Filters</Text>
             <Pressable onPress={onClose} hitSlop={12}>
@@ -83,7 +70,8 @@ export function FiltersSheet({ visible, value, onClose, onApply, showDepartment 
           <ScrollView
             contentContainerStyle={styles.body}
             showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled">
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag">
             {showDepartment ? (
               <Section label="Department">
                 <ChipRow
@@ -145,8 +133,8 @@ export function FiltersSheet({ visible, value, onClose, onApply, showDepartment 
             <Button label="Clear filters" variant="secondary" onPress={clear} style={styles.clearBtn} />
             <Button label="Apply filters" onPress={() => onApply(draft)} style={styles.applyBtn} />
           </View>
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardSafeSheet>
+      </View>
     </Modal>
   );
 }
@@ -259,7 +247,6 @@ function PriceField({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    justifyContent: 'flex-end',
     backgroundColor: 'rgba(23,23,23,0.3)',
   },
   backdrop: {

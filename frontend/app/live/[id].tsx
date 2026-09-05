@@ -13,6 +13,7 @@ import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
 import { useLive, useLiveClock } from '@/context/live-context';
 import { formatCountdown, formatNaira } from '@/lib/format';
+import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -22,6 +23,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 export default function LiveViewerScreen() {
   const router = useRouter();
   const { top, sheetBottom } = useScreenInsets();
+  const keyboard = useKeyboardInset();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { session } = useAuth();
   const live = useLive();
@@ -213,7 +215,7 @@ export default function LiveViewerScreen() {
           </View>
         ) : null}
 
-        <View style={[styles.composerWrap, { paddingBottom: sheetBottom }]}>
+        <View style={[styles.composerWrap, { paddingBottom: keyboard.height > 0 ? keyboard.height : sheetBottom }]}>
           <LiveComposer value={draft} onChangeText={setDraft} onSend={send} />
         </View>
       </LiveStage>

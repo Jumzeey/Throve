@@ -16,6 +16,7 @@ import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
 import { MAX_LIVE_MODERATORS, useLive } from '@/context/live-context';
 import { formatNaira } from '@/lib/format';
+import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -25,6 +26,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 export default function LiveBroadcastScreen() {
   const router = useRouter();
   const { top, sheetBottom } = useScreenInsets();
+  const keyboard = useKeyboardInset();
   const { session } = useAuth();
   const { getListing } = useListings();
   const inbox = useInbox();
@@ -177,7 +179,7 @@ export default function LiveBroadcastScreen() {
 
         {live.roomNotice ? <Text style={styles.notice}>{live.roomNotice}</Text> : null}
 
-        <View style={[styles.composerWrap, { paddingBottom: sheetBottom }]}>
+        <View style={[styles.composerWrap, { paddingBottom: keyboard.height > 0 ? keyboard.height : sheetBottom }]}>
           <LiveComposer
             value={commentDraft}
             onChangeText={setCommentDraft}

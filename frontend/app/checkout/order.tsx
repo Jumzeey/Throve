@@ -16,10 +16,11 @@ import { getListingImage } from '@/data/images';
 import type { OrderStatus } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
+import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
 import { formatNaira } from '@/lib/format';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 const TIMELINE: { key: OrderStatus; label: string }[] = [
   { key: 'paid', label: 'Paid' },
@@ -39,6 +40,7 @@ function timelineIndex(status: OrderStatus) {
 export default function CheckoutOrderScreen() {
   const router = useRouter();
   const { bottom } = useScreenInsets();
+  const keyboard = useKeyboardInset();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { session } = useAuth();
   const checkout = useCheckout();
@@ -120,7 +122,20 @@ export default function CheckoutOrderScreen() {
   return (
     <View style={styles.screen}>
       <ScreenHeader title={`Order #${order.id}`} onBack={() => router.back()} />
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl + bottom }]}>
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          contentContainerStyle={[
+            styles.body,
+            {
+              paddingBottom:
+                Spacing.xxxl +
+                bottom +
+                (Platform.OS === 'android' && keyboard.height > 0 ? keyboard.height : 0),
+            },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}>
         {!isConnected ? <OfflineBanner message="Reconnect to update this order." /> : null}
         <AlertBanner variant="info" title="Prototype order" message="Simulated purchase — no real payment collected." />
         <View style={styles.itemCard}>
@@ -241,6 +256,7 @@ export default function CheckoutOrderScreen() {
           <Button label="Return to live" variant="live" onPress={() => router.replace(`/live/${order.fromLiveId}`)} />
         ) : null}
       </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -250,6 +266,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Palette.ivory,
   },
+  flex: { flex: 1 },
   body: {
     paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing.xxxl,

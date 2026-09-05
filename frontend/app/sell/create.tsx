@@ -24,11 +24,13 @@ import { pickListingPhotos } from '@/lib/listing-photos';
 import * as Haptics from 'expo-haptics';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
 
 export default function CreateListingScreen() {
   const router = useRouter();
   const { bottom } = useScreenInsets();
+  const keyboard = useKeyboardInset();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { session } = useAuth();
   const { form, setForm, getListing, loadFormFromListing, saveDraft, loading: listingsLoading } = useListings();
@@ -213,9 +215,20 @@ export default function CreateListingScreen() {
       {loading ? (
         <CreateListingSkeleton />
       ) : (
-        <ScrollView
-          contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl + bottom }]}
-          keyboardShouldPersistTaps="handled">
+        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView
+            contentContainerStyle={[
+              styles.body,
+              {
+                paddingBottom:
+                  Spacing.xxxl +
+                  bottom +
+                  (Platform.OS === 'android' && keyboard.height > 0 ? keyboard.height : 0),
+              },
+            ]}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}>
           {!isConnected ? (
             <AlertBanner variant="warning" title="No connection" message="Reconnect to save this listing." style={styles.banner} />
           ) : null}
@@ -454,6 +467,7 @@ export default function CreateListingScreen() {
             </>
           ) : null}
         </ScrollView>
+        </KeyboardAvoidingView>
       )}
 
       <Dialog
@@ -531,6 +545,7 @@ function CreateListingSkeleton() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Palette.ivory },
+  flex: { flex: 1 },
   body: { paddingHorizontal: Spacing.xl },
   banner: { marginBottom: Spacing.lg },
   retry: { marginBottom: Spacing.lg },

@@ -13,10 +13,11 @@ import { useListings } from '@/context/listings-context';
 import { MAX_LIVE_MODERATORS, useLive } from '@/context/live-context';
 import { DEPARTMENTS } from '@/data/seed';
 import { formatNaira } from '@/lib/format';
+import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 const DEPARTMENT_CHIPS = DEPARTMENTS.map((department) => ({ label: department, value: department }));
 const IVORY_50 = 'rgba(255,247,240,0.5)';
@@ -24,6 +25,7 @@ const IVORY_50 = 'rgba(255,247,240,0.5)';
 export default function PrepareLiveScreen() {
   const router = useRouter();
   const { sheetBottom } = useScreenInsets();
+  const keyboard = useKeyboardInset();
   const { session } = useAuth();
   const { listingsForSeller } = useListings();
   const inbox = useInbox();
@@ -119,9 +121,18 @@ export default function PrepareLiveScreen() {
           </Pressable>
         }
       />
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView
-        contentContainerStyle={[styles.body, { paddingBottom: sheetBottom }]}
+        contentContainerStyle={[
+          styles.body,
+          {
+            paddingBottom:
+              sheetBottom + (Platform.OS === 'android' && keyboard.height > 0 ? keyboard.height : 0) + 24,
+          },
+        ]}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
       >
         <Text style={styles.sectionLabel}>Cover image</Text>
         <Pressable onPress={() => setCoverSet(true)} style={[styles.cover, coverSet && styles.coverSet]}>
@@ -294,6 +305,7 @@ export default function PrepareLiveScreen() {
           </Text>
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       <ModeratorsSheet
         visible={modsOpen}
@@ -315,6 +327,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Palette.liveDark,
   },
+  flex: { flex: 1 },
   cancel: {
     fontSize: 13,
     fontFamily: Typography.bodySemiBold,
