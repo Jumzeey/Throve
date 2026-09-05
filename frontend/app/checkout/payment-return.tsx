@@ -6,7 +6,7 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 /**
  * Deep-link return from Flutterwave: throveapp://checkout/payment-return?tx_ref=…
- * Verifies payment and routes to confirmation or back to the payment screen states.
+ * Verifies payment and routes to confirmation (or payment if failed/cancelled).
  */
 export default function PaymentReturnScreen() {
   const router = useRouter();
@@ -33,14 +33,15 @@ export default function PaymentReturnScreen() {
           router.replace('/checkout/confirmation');
           return;
         }
-        if (result.status === 'failed') {
+        if (result.status === 'failed' || result.status === 'cancelled') {
           router.replace('/checkout/payment');
           return;
         }
-        setMessage("We're confirming your payment…");
-        router.replace('/checkout/payment');
+        // Payment may be confirmed while order creation is still finishing.
+        setMessage('Payment confirmed — creating your order…');
+        router.replace(`/checkout/confirmation?txRef=${encodeURIComponent(txRef)}`);
       } catch {
-        router.replace('/checkout/payment');
+        router.replace(`/checkout/confirmation?txRef=${encodeURIComponent(txRef)}`);
       }
     })();
   }, [checkout, router, txRef]);

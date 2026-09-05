@@ -1,3 +1,4 @@
+import { LocationField } from '@/components/ui/location-field';
 import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
@@ -113,6 +114,17 @@ export default function EditProfileScreen() {
     }
   }
 
+  const missingPhoto = !photoUri;
+  const missingBio = !bio.trim();
+  const lead =
+    missingPhoto && missingBio
+      ? 'Add a photo and a few details so buyers and sellers know who you are.'
+      : missingPhoto
+        ? 'Add a profile photo and update your details so buyers and sellers know who you are.'
+        : missingBio
+          ? 'Add a short bio and update your details so buyers and sellers know who you are.'
+          : 'Update your photo and details so buyers and sellers know who you are.';
+
   return (
     <View style={styles.screen}>
       <ScreenHeader title="Edit profile" onBack={() => router.back()} />
@@ -129,7 +141,7 @@ export default function EditProfileScreen() {
           automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
         >
           {!isConnected ? <OfflineBanner message="Reconnect to save your profile." /> : null}
-          <Text style={styles.lead}>Update your photo and details so buyers and sellers know who you are.</Text>
+          <Text style={styles.lead}>{lead}</Text>
           <Pressable onPress={onPickPhoto} style={styles.avatarWrap}>
             <ProfileAvatar uri={photoUri} username={username} style={styles.avatar} allowLocal />
             <View style={styles.avatarBadge}>
@@ -167,12 +179,13 @@ export default function EditProfileScreen() {
               style={styles.bio}
               onFocus={scrollFieldIntoView}
             />
-            <TextField
+            <LocationField
               label="Location"
-              placeholder="Lagos, NG"
+              placeholder="Search Google Maps"
               value={location}
-              onChangeText={setLocation}
+              hint="Pick a real city or area from Google Maps."
               onFocus={scrollFieldIntoView}
+              onSelect={(place) => setLocation(place.label || place.formattedAddress)}
             />
           </View>
           {error ? <AlertBanner variant="error" title="We couldn't save that" message={error} /> : null}

@@ -136,6 +136,7 @@ export type Order = {
   name: string;
   address: string;
   city: string;
+  state?: string | null;
   phone: string;
   deliveryMethod: DeliveryMethod;
   deliveryFee: number;

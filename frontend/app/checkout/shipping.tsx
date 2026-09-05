@@ -1,22 +1,20 @@
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
 import { CheckoutProgress } from '@/components/checkout/checkout-progress';
-import { ChevronDownIcon } from '@/components/ui/icons';
+import { LocationField } from '@/components/ui/location-field';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { leaveCheckout, useCheckout } from '@/context/checkout-context';
 import { useLive } from '@/context/live-context';
-import { NIGERIA_STATES } from '@/data/nigeria-states';
+import { matchNigeriaState } from '@/data/nigeria-states';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
   KeyboardAvoidingView,
-  Modal,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -48,7 +46,6 @@ export default function ShippingDetailsScreen() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [saveError, setSaveError] = useState(false);
   const [continuing, setContinuing] = useState(false);
-  const [stateOpen, setStateOpen] = useState(false);
   const draft = checkout.draft;
 
   if (!draft) {
@@ -150,41 +147,44 @@ export default function ShippingDetailsScreen() {
                 setFieldErrors((current) => ({ ...current, phone: undefined }));
               }}
             />
-            <TextField
-              label="Address"
-              placeholder="14B Bourdillon Road"
-              value={draft.address}
-              autoComplete="street-address"
-              error={fieldErrors.address}
-              onChangeText={(address) => {
-                checkout.updateDraft({ address });
-                setFieldErrors((current) => ({ ...current, address: undefined }));
+            <LocationField
+              label="Delivery address"
+              mode="address"
+              placeholder="Search Google Maps"
+              value={
+                draft.address
+                  ? [draft.address, draft.city, draft.state].filter(Boolean).join(', ')
+                  : ''
+              }
+              error={fieldErrors.address || fieldErrors.city || fieldErrors.state}
+              hint="Search and pick the exact delivery place. City and state fill in automatically."
+              onSelect={(place) => {
+                checkout.updateDraft({
+                  address: place.addressLine || place.formattedAddress,
+                  city: place.city || place.label.split(',')[0]?.trim() || '',
+                  state: matchNigeriaState(place.state),
+                });
+                setFieldErrors((current) => ({
+                  ...current,
+                  address: undefined,
+                  city: undefined,
+                  state: undefined,
+                }));
               }}
             />
 
-            <View style={styles.row}>
-              <TextField
-                label="City / area"
-                placeholder="Ikoyi"
-                value={draft.city}
-                containerStyle={styles.half}
-                error={fieldErrors.city}
-                onChangeText={(city) => {
-                  checkout.updateDraft({ city });
-                  setFieldErrors((current) => ({ ...current, city: undefined }));
-                }}
-              />
-              <View style={styles.half}>
-                <Text style={styles.label}>State</Text>
-                <Pressable
-                  onPress={() => setStateOpen(true)}
-                  style={[styles.stateField, fieldErrors.state ? styles.stateError : null]}>
-                  <Text style={styles.stateValue}>{draft.state || 'Select state'}</Text>
-                  <ChevronDownIcon color={Palette.muted} />
-                </Pressable>
-                {fieldErrors.state ? <Text style={styles.errorText}>{fieldErrors.state}</Text> : null}
+            {(draft.city || draft.state) && (
+              <View style={styles.row}>
+                <View style={styles.half}>
+                  <Text style={styles.label}>City / area</Text>
+                  <Text style={styles.filledValue}>{draft.city || '—'}</Text>
+                </View>
+                <View style={styles.half}>
+                  <Text style={styles.label}>State</Text>
+                  <Text style={styles.filledValue}>{draft.state || '—'}</Text>
+                </View>
               </View>
-            </View>
+            )}
 
             <TextField
               label="Delivery note (optional)"
@@ -214,29 +214,6 @@ export default function ShippingDetailsScreen() {
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
-
-      <Modal visible={stateOpen} transparent animationType="slide" onRequestClose={() => setStateOpen(false)}>
-        <Pressable style={styles.overlay} onPress={() => setStateOpen(false)}>
-          <Pressable style={[styles.sheet, { paddingBottom: bottom + 12 }]} onPress={() => undefined}>
-            <View style={styles.handle} />
-            <Text style={styles.sheetTitle}>Select state</Text>
-            <ScrollView style={styles.stateList}>
-              {NIGERIA_STATES.map((state) => (
-                <Pressable
-                  key={state}
-                  onPress={() => {
-                    checkout.updateDraft({ state });
-                    setFieldErrors((current) => ({ ...current, state: undefined }));
-                    setStateOpen(false);
-                  }}
-                  style={styles.stateRow}>
-                  <Text style={[styles.stateRowLabel, draft.state === state ? styles.stateRowOn : null]}>{state}</Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
     </View>
   );
 }
@@ -316,31 +293,17 @@ const styles = StyleSheet.create({
     color: Palette.label,
     marginBottom: 7,
   },
-  stateField: {
-    minHeight: 52,
+  filledValue: {
+    minHeight: 48,
     borderWidth: 1,
     borderColor: Palette.border,
     borderRadius: Radius.sm,
     paddingHorizontal: 15,
-    backgroundColor: Palette.ivoryElevated,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  stateError: {
-    borderColor: Palette.error,
-    borderWidth: 1.5,
-  },
-  stateValue: {
+    paddingVertical: 14,
+    backgroundColor: Palette.sand,
     fontSize: 14.5,
     fontFamily: Typography.body,
     color: Palette.espresso,
-  },
-  errorText: {
-    marginTop: 6,
-    fontSize: 12,
-    fontFamily: Typography.body,
-    color: Palette.error,
   },
   noteInput: {
     minHeight: 88,
@@ -367,51 +330,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontFamily: Typography.body,
     color: Palette.muted,
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: Palette.liveOverlay,
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    maxHeight: '70%',
-    backgroundColor: Palette.ivory,
-    borderTopLeftRadius: Radius.lg,
-    borderTopRightRadius: Radius.lg,
-    paddingTop: 10,
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: Palette.border,
-    marginBottom: 8,
-  },
-  sheetTitle: {
-    paddingHorizontal: Spacing.xl,
-    marginBottom: 8,
-    fontSize: 18,
-    fontFamily: Typography.display,
-    color: Palette.espresso,
-  },
-  stateList: {
-    paddingHorizontal: Spacing.xl,
-  },
-  stateRow: {
-    minHeight: 48,
-    justifyContent: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: Palette.divider,
-  },
-  stateRowLabel: {
-    fontSize: 14,
-    fontFamily: Typography.body,
-    color: Palette.body,
-  },
-  stateRowOn: {
-    color: Palette.plum,
-    fontFamily: Typography.bodySemiBold,
   },
   expiredBody: {
     paddingHorizontal: Spacing.xl,

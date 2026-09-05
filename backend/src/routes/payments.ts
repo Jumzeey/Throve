@@ -182,6 +182,7 @@ router.post('/payments/verify', requireAuth, async (req, res) => {
           name: order.name,
           address: order.address,
           city: order.city,
+          state: order.state ?? null,
           phone: order.phone,
           deliveryMethod: order.delivery_method,
           deliveryFee: order.delivery_fee,

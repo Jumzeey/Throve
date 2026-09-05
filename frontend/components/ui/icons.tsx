@@ -19,6 +19,32 @@ export function ChevronDownIcon({ size = 16, color = Palette.muted, strokeWidth 
   );
 }
 
+export function ChevronForwardIcon({ size = 15, color = Palette.muted3, strokeWidth = 1.8 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="m9 5 7 7-7 7" />
+    </Svg>
+  );
+}
+
+export function ListingsIcon({ size = 18, color = Palette.plum, strokeWidth = 1.7 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round">
+      <Rect x={3.5} y={4} width={17} height={16} rx={2.5} />
+      <Path d="M8 9h8M8 13h5" />
+    </Svg>
+  );
+}
+
+export function BagIcon({ size = 18, color = Palette.plum, strokeWidth = 1.7 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round">
+      <Path d="M4 8h16l-1.4 11H5.4z" />
+      <Path d="M9 8V6a3 3 0 0 1 6 0v2" />
+    </Svg>
+  );
+}
+
 export function MoreVerticalIcon({ size = 18, color = Palette.muted, strokeWidth = 1.8 }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}>

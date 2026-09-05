@@ -176,6 +176,7 @@ export async function fulfillPaidCheckout(
     name: data.name,
     address: data.address,
     city: data.city,
+    state: data.state ?? null,
     phone: data.phone,
     deliveryMethod: data.delivery_method,
     deliveryFee: data.delivery_fee,

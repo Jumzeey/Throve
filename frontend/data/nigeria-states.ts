@@ -40,3 +40,15 @@ export const NIGERIA_STATES = [
 ] as const;
 
 export type NigeriaState = (typeof NIGERIA_STATES)[number];
+
+/** Map Google Places admin area names onto our Nigeria state list. */
+export function matchNigeriaState(value: string | null | undefined) {
+  if (!value) return '';
+  const cleaned = value
+    .replace(/\s+State$/i, '')
+    .replace(/^Federal Capital Territory$/i, 'FCT')
+    .replace(/^Abuja$/i, 'FCT')
+    .trim();
+  const found = NIGERIA_STATES.find((state) => state.toLowerCase() === cleaned.toLowerCase());
+  return found ?? cleaned;
+}

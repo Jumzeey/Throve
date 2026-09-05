@@ -1,3 +1,4 @@
+import { LocationField } from '@/components/ui/location-field';
 import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
@@ -186,12 +187,13 @@ export default function SetupScreen() {
                 />
               </View>
               <View onLayout={onFieldLayout('location')}>
-                <TextField
+                <LocationField
                   label="Location"
-                  placeholder="Lagos, NG"
+                  placeholder="Search Google Maps"
                   value={location}
-                  onChangeText={setLocation}
+                  hint="Pick a real city or area from Google Maps."
                   onFocus={() => onFieldFocus('location')}
+                  onSelect={(place) => setLocation(place.label || place.formattedAddress)}
                 />
               </View>
             </View>

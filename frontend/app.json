@@ -22,6 +22,7 @@
         "NSMicrophoneUsageDescription": "Throve needs microphone access so viewers can hear you during live selling.",
         "NSPhotoLibraryUsageDescription": "Throve needs photo library access so you can add listing and profile photos.",
         "NSPhotoLibraryAddUsageDescription": "Throve needs permission to save photos when you download or share them.",
+        "NSLocationWhenInUseUsageDescription": "Throve uses your location so you can select a real delivery or profile place from Google Maps.",
         "LSApplicationQueriesSchemes": [
           "whatsapp",
           "instagram",
@@ -75,7 +76,9 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ],
       "blockedPermissions": [
         "android.permission.READ_MEDIA_IMAGES",
@@ -145,6 +148,12 @@
             "org.telegram.messenger",
             "com.zhiliaoapp.musically"
           ]
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Throve uses your location so you can select a real delivery or profile place from Google Maps."
         }
       ],
       "expo-build-properties"
