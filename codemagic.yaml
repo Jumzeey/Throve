@@ -50,9 +50,10 @@ workflows:
       events:
         - push
       branch_patterns:
-        - pattern: main
+        - pattern: 'main'
           include: true
           source: true
+      cancel_previous_builds: true
     scripts:
       - name: Install npm dependencies
         script: |
@@ -114,20 +115,15 @@ workflows:
         track: alpha
         submit_as_draft: false
 
-  # Manual / Start new build only until App Store Connect + iOS signing are wired up.
+  # Manual only (Start new build). Wire App Store Connect + ios_signing before enabling IPA publish.
   react-native-ios:
     name: React Native iOS
     max_build_duration: 120
     instance_type: mac_mini_m2
-    integrations:
-      app_store_connect: codemagic
     environment:
       node: 22.13.1
       xcode: latest
       cocoapods: default
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.throve.app
       groups:
         - throve_frontend
       vars:
@@ -135,8 +131,6 @@ workflows:
         # Expo prebuild uses app.json "name" → ios/throve.xcworkspace + scheme throve
         XCODE_WORKSPACE: "throve.xcworkspace"
         XCODE_SCHEME: "throve"
-        # Set your App Store Connect Apple ID (numeric) when ready to auto-bump build numbers
-        APP_STORE_APPLE_ID: "0000000000"
     cache:
       cache_paths:
         - $HOME/.npm
@@ -182,27 +176,11 @@ workflows:
         script: |
           cd frontend/ios
           pod install
-      - name: Set up code signing settings on Xcode project
-        script: xcode-project use-profiles
-      - name: Increment build number
+      - name: Verify Xcode workspace
         script: |
-          cd frontend/ios
-          if [ "$APP_STORE_APPLE_ID" != "0000000000" ]; then
-            LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID" || echo "0")
-            agvtool new-version -all $((LATEST_BUILD_NUMBER + 1))
-          else
-            agvtool new-version -all "$BUILD_NUMBER"
-          fi
-      - name: Build ipa for distribution
-        script: |
-          xcode-project build-ipa \
-            --workspace "$CM_BUILD_DIR/frontend/ios/$XCODE_WORKSPACE" \
-            --scheme "$XCODE_SCHEME"
+          test -d "$CM_BUILD_DIR/frontend/ios/$XCODE_WORKSPACE" \
+            || test -d "$CM_BUILD_DIR/frontend/ios/${XCODE_SCHEME}.xcworkspace" \
+            || ls frontend/ios
+          echo "iOS project ready. Add ios_signing + App Store Connect to produce an IPA."
     artifacts:
-      - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
-    publishing:
-      app_store_connect:
-        auth: integration
-        submit_to_testflight: false
-        submit_to_app_store: false
