@@ -217,13 +217,13 @@ export default function LiveBroadcastScreen() {
       <ModeratorsSheet
         visible={modsOpen}
         title={`Moderators during the live · ${moderators.length} of ${MAX_LIVE_MODERATORS}`}
-        copy="Search a username, tap who you want, then Add. They help with comments only."
+        copy="Search, tap a person to add them, then Add. They help with comments only."
         roleLabel="Active moderator"
         hostUsername={session.username}
         moderators={moderators}
         suggestions={suggestedMods}
         onClose={() => setModsOpen(false)}
-        onAdd={(username) => live.addSessionModerator(sessionId, username)}
+        onAdd={(usernames) => live.addSessionModerators(sessionId, usernames)}
         onRemove={(username) => live.removeSessionModerator(sessionId, username)}
       />
     </View>

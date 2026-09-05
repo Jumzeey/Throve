@@ -1,27 +1,23 @@
-import { AppImage } from '@/components/ui/app-image';
 import { EmptyState } from '@/components/ui/empty-state';
 import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
 import { LoadingSkeleton } from '@/components/ui/loading-skeleton';
 import { OfflineBanner } from '@/components/ui/alert-banner';
 import { Palette, Spacing, Typography } from '@/constants/theme';
-import { getSellerAvatar } from '@/data/images';
 import { useAuth } from '@/context/auth-context';
-import { useInbox } from '@/context/inbox-context';
+import { useNotifications } from '@/context/notifications-context';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatRelativeTime } from '@/lib/format';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { Redirect, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useScreenInsets } from '@/hooks/use-screen-insets';
 
-export default function InboxScreen() {
+export default function AlertsScreen() {
   const { top, tabScrollBottom } = useScreenInsets();
   const router = useRouter();
   const { session } = useAuth();
-  const { refresh, conversationsFor, loading, otherParticipant } = useInbox();
+  const { items, loading, refresh, markRead } = useNotifications();
   const { isConnected } = useNetworkStatus();
-  const me = session?.username ?? '';
-  const conversations = conversationsFor(me);
 
   const pullTask = useCallback(async () => {
     await refresh();
@@ -31,23 +27,27 @@ export default function InboxScreen() {
   useFocusEffect(
     useCallback(() => {
       if (!session) return;
-      void refresh({ silent: true });
-    }, [session, refresh]),
+      void refresh();
+    }, [refresh, session]),
   );
+
+  if (!session) {
+    return <Redirect href="/(auth)/welcome" />;
+  }
 
   return (
     <View style={[styles.screen, { paddingTop: top }]}>
       <Text style={styles.title}>Inbox</Text>
       <View style={styles.tabs}>
-        <View style={[styles.tab, styles.tabOn]}>
-          <Text style={[styles.tabLabel, styles.tabLabelOn]}>Messages</Text>
-        </View>
+        <Pressable onPress={() => router.replace('/(tabs)/inbox')} style={styles.tab}>
+          <Text style={styles.tabLabel}>Messages</Text>
+        </Pressable>
         <Pressable onPress={() => router.push('/inbox/offers')} style={styles.tab}>
           <Text style={styles.tabLabel}>Offers</Text>
         </Pressable>
-        <Pressable onPress={() => router.push('/inbox/alerts')} style={styles.tab}>
-          <Text style={styles.tabLabel}>Alerts</Text>
-        </Pressable>
+        <View style={[styles.tab, styles.tabOn]}>
+          <Text style={[styles.tabLabel, styles.tabLabelOn]}>Alerts</Text>
+        </View>
       </View>
       <LiquidRefreshScrollView
         refreshing={refreshing}
@@ -57,32 +57,36 @@ export default function InboxScreen() {
       >
         {!isConnected ? (
           <View style={styles.offline}>
-            <OfflineBanner message="Reconnect to send and receive messages." />
+            <OfflineBanner message="Reconnect to see alerts." />
           </View>
         ) : null}
-
-        {loading && !refreshing ? (
+        {loading && !refreshing && items.length === 0 ? (
           <LoadingSkeleton rows={5} style={styles.skeleton} />
-        ) : conversations.length === 0 ? (
+        ) : items.length === 0 ? (
           <EmptyState
-            title="No messages yet"
-            message="When you message a seller or buyer, conversations will appear here."
+            title="No alerts yet"
+            message="Live moderator invites, and other account notices, will show up here."
             style={styles.empty}
           />
         ) : (
-          conversations.map((conv) => {
-            const other = otherParticipant(conv, me);
-            const unread = conv.unreadBy.includes(me);
+          items.map((item) => {
+            const unread = !item.readAt;
             return (
-              <Pressable key={conv.id} onPress={() => router.push(`/inbox/chat/${conv.id}`)} style={styles.row}>
-                <AppImage source={getSellerAvatar(other)} style={styles.avatar} />
+              <Pressable
+                key={item.id}
+                onPress={() => {
+                  void markRead(item.id);
+                  if (item.deepLink) router.push(`/${item.deepLink}` as never);
+                }}
+                style={styles.row}
+              >
                 <View style={styles.meta}>
                   <View style={styles.top}>
-                    <Text style={styles.name}>@{other}</Text>
-                    <Text style={styles.time}>{formatRelativeTime(conv.updatedAt)}</Text>
+                    <Text style={styles.name}>{item.title}</Text>
+                    <Text style={styles.time}>{formatRelativeTime(item.createdAt)}</Text>
                   </View>
-                  <Text style={[styles.preview, unread ? styles.previewUnread : null]} numberOfLines={1}>
-                    {conv.lastMessage || 'No messages yet.'}
+                  <Text style={[styles.preview, unread ? styles.previewUnread : null]} numberOfLines={2}>
+                    {item.body}
                   </Text>
                 </View>
                 {unread ? <View style={styles.dot} /> : null}
@@ -96,10 +100,7 @@ export default function InboxScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: Palette.ivory,
-  },
+  screen: { flex: 1, backgroundColor: Palette.ivory },
   title: {
     fontSize: 28,
     fontFamily: Typography.display,
@@ -123,74 +124,43 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
   },
-  tabOn: {
-    borderBottomColor: Palette.plum,
-  },
+  tabOn: { borderBottomColor: Palette.plum },
   tabLabel: {
     fontSize: 13,
     fontFamily: Typography.bodySemiBold,
     color: Palette.muted3,
   },
-  tabLabelOn: {
-    color: Palette.plum,
-  },
-  body: {
-    paddingBottom: Spacing.xxl,
-  },
-  offline: {
-    marginHorizontal: Spacing.xl,
-    marginBottom: Spacing.md,
-  },
-  skeleton: {
-    paddingHorizontal: Spacing.xl,
-  },
-  empty: {
-    marginHorizontal: Spacing.xl,
-    marginTop: Spacing.xxxl,
-  },
+  tabLabelOn: { color: Palette.plum },
+  body: { paddingBottom: Spacing.xxl },
+  offline: { marginHorizontal: Spacing.xl, marginBottom: Spacing.md },
+  skeleton: { paddingHorizontal: Spacing.xl },
+  empty: { marginHorizontal: Spacing.xl, marginTop: Spacing.xxxl },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 12,
+    paddingVertical: 14,
     paddingHorizontal: Spacing.xl,
     borderBottomWidth: 1,
     borderBottomColor: Palette.divider,
   },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-  },
-  meta: {
-    flex: 1,
-    minWidth: 0,
-  },
-  top: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
+  meta: { flex: 1, minWidth: 0 },
+  top: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
   name: {
-    fontSize: 13,
+    flex: 1,
+    fontSize: 14,
     fontFamily: Typography.bodySemiBold,
     color: Palette.espresso,
   },
-  time: {
-    fontSize: 11,
-    fontFamily: Typography.body,
-    color: Palette.muted3,
-  },
+  time: { fontSize: 11, fontFamily: Typography.body, color: Palette.muted3 },
   preview: {
-    marginTop: 2,
-    fontSize: 12,
+    marginTop: 4,
+    fontSize: 12.5,
+    lineHeight: 18,
     fontFamily: Typography.body,
     color: Palette.muted,
   },
-  previewUnread: {
-    fontFamily: Typography.bodySemiBold,
-    color: Palette.espresso,
-  },
+  previewUnread: { color: Palette.espresso, fontFamily: Typography.bodySemiBold },
   dot: {
     width: 8,
     height: 8,

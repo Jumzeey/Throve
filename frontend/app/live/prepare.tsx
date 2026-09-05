@@ -293,12 +293,12 @@ export default function PrepareLiveScreen() {
       <ModeratorsSheet
         visible={modsOpen}
         title="Live moderators"
-        copy="You can appoint up to two. Search a username, tap who you want, then Add."
+        copy="You can appoint up to two. Search, tap a person to add them, then Add."
         hostUsername={host}
         moderators={moderators}
         suggestions={suggestedMods}
         onClose={() => setModsOpen(false)}
-        onAdd={live.addPrepareModerator}
+        onAdd={live.addPrepareModerators}
         onRemove={live.removePrepareModerator}
       />
     </View>

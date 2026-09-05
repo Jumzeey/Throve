@@ -5,7 +5,7 @@ import { useAuth } from '@/context/auth-context';
 import { MAX_LIVE_MODERATORS } from '@/context/live-context';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { searchProfiles, type ProfileSearchHit } from '@/lib/profile-search';
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -30,8 +30,8 @@ type Props = {
   moderators: string[];
   suggestions?: string[];
   onClose: () => void;
-  onAdd: (username: string) => void;
-  onRemove: (username: string) => void;
+  onAdd: (usernames: string[]) => void | Promise<void>;
+  onRemove: (username: string) => void | Promise<void>;
 };
 
 function normalizeUsername(value: string) {
@@ -86,9 +86,11 @@ export function ModeratorsSheet({
   const [searchFailed, setSearchFailed] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
   const [hits, setHits] = useState<SearchHit[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [picked, setPicked] = useState<SearchHit[]>([]);
+  const inputRef = useRef<TextInput>(null);
   const atLimit = moderators.length >= MAX_LIVE_MODERATORS;
   const slotsLeft = Math.max(0, MAX_LIVE_MODERATORS - moderators.length);
+  const remainingSlots = Math.max(0, slotsLeft - picked.length);
   const query = normalizeUsername(draft);
 
   function isHostUser(username: string) {
@@ -124,19 +126,25 @@ export function ModeratorsSheet({
   const suggestionHits = useMemo<SearchHit[]>(
     () =>
       suggestions
-        .filter((name) => !moderators.some((mod) => mod.toLowerCase() === name.toLowerCase()))
+        .filter(
+          (name) =>
+            !moderators.some((mod) => mod.toLowerCase() === name.toLowerCase()) &&
+            !picked.some((item) => item.username.toLowerCase() === name.toLowerCase()),
+        )
         .map((username) => ({ username })),
-    [moderators, suggestions],
+    [moderators, picked, suggestions],
   );
 
-  const list = query.length > 0 ? hits : suggestionHits;
+  const list = (query.length > 0 ? hits : suggestionHits).filter(
+    (hit) => !picked.some((item) => item.username.toLowerCase() === hit.username.toLowerCase()),
+  );
 
   useEffect(() => {
     if (!visible) {
       setDraft('');
       setFormError('');
       setHits([]);
-      setSelected([]);
+      setPicked([]);
       setSearching(false);
       setSearchFailed(false);
     }
@@ -177,42 +185,57 @@ export function ModeratorsSheet({
     };
   }, [atLimit, query, retryTick, visible, withHostHit]);
 
-  function toggleSelect(username: string) {
-    if (isHostUser(username)) return;
-    setFormError('');
-    setSelected((current) => {
-      if (current.some((item) => item.toLowerCase() === username.toLowerCase())) {
-        return current.filter((item) => item.toLowerCase() !== username.toLowerCase());
-      }
-      if (current.length >= slotsLeft) {
-        return [...current.slice(0, slotsLeft - 1), username];
-      }
-      return [...current, username];
-    });
-  }
-
-  function addSelected() {
-    if (adding) return;
-    if (!selected.length) {
-      setFormError('Tap a person in the list, then Add.');
+  function pickPerson(hit: SearchHit) {
+    if (isHostUser(hit.username)) return;
+    if (picked.some((item) => item.username.toLowerCase() === hit.username.toLowerCase())) return;
+    if (remainingSlots < 1) {
+      setFormError(`You can appoint up to ${MAX_LIVE_MODERATORS} moderators.`);
       return;
     }
-    if (selected.length > slotsLeft) {
+    setFormError('');
+    setPicked((current) => [...current, hit]);
+    setDraft('');
+    setHits([]);
+    setSearchFailed(false);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
+  function removePicked(username: string) {
+    setFormError('');
+    setPicked((current) => current.filter((item) => item.username.toLowerCase() !== username.toLowerCase()));
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
+  async function addSelected() {
+    if (adding) return;
+    if (!picked.length) {
+      setFormError('Tap a person to add them here, then Add.');
+      return;
+    }
+    if (picked.length > slotsLeft) {
       setFormError(`You can appoint up to ${MAX_LIVE_MODERATORS} moderators.`);
       return;
     }
 
     setAdding(true);
     setFormError('');
-    for (const username of selected) {
-      if (username.toLowerCase() === hostUsername.toLowerCase()) continue;
-      if (moderators.some((mod) => mod.toLowerCase() === username.toLowerCase())) continue;
-      onAdd(username);
+    const usernames = picked
+      .map((hit) => hit.username)
+      .filter(
+        (username) =>
+          username.toLowerCase() !== hostUsername.toLowerCase() &&
+          !moderators.some((mod) => mod.toLowerCase() === username.toLowerCase()),
+      );
+    try {
+      await onAdd(usernames);
+      setDraft('');
+      setPicked([]);
+      setHits([]);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Could not add moderators.');
+    } finally {
+      setAdding(false);
     }
-    setDraft('');
-    setSelected([]);
-    setHits([]);
-    setAdding(false);
   }
 
   return (
@@ -249,32 +272,54 @@ export function ModeratorsSheet({
             ) : (
               <View style={styles.addBlock}>
                 <View style={styles.inputRow}>
-                  <View style={styles.searchField}>
-                    <SearchIcon size={16} color={Palette.muted3} />
-                    <TextInput
-                      value={draft}
-                      onChangeText={(value) => {
-                        setDraft(value);
-                        setFormError('');
-                        setSearchFailed(false);
-                      }}
-                      placeholder="Search a username"
-                      placeholderTextColor={Palette.disabled}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      returnKeyType="search"
-                      style={styles.input}
-                    />
+                  <View style={styles.composer}>
+                    {picked.map((hit) => (
+                      <View key={hit.username} style={styles.chip}>
+                        <ProfileAvatar uri={hit.photoUri} username={hit.username} style={styles.chipAvatar} />
+                        <Text style={styles.chipLabel} numberOfLines={1}>
+                          @{hit.username}
+                        </Text>
+                        <Pressable
+                          onPress={() => removePicked(hit.username)}
+                          hitSlop={8}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Remove @${hit.username}`}
+                          style={styles.chipRemove}
+                        >
+                          <Text style={styles.chipRemoveMark}>×</Text>
+                        </Pressable>
+                      </View>
+                    ))}
+                    {remainingSlots > 0 ? (
+                      <View style={styles.searchInline}>
+                        {picked.length === 0 ? <SearchIcon size={16} color={Palette.muted3} /> : null}
+                        <TextInput
+                          ref={inputRef}
+                          value={draft}
+                          onChangeText={(value) => {
+                            setDraft(value);
+                            setFormError('');
+                            setSearchFailed(false);
+                          }}
+                          placeholder={picked.length === 0 ? 'Search a username' : 'Search another'}
+                          placeholderTextColor={Palette.disabled}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          returnKeyType="search"
+                          style={styles.input}
+                        />
+                      </View>
+                    ) : null}
                   </View>
                   <Pressable
                     onPress={addSelected}
-                    disabled={adding || selected.length === 0}
-                    style={[styles.addBtn, selected.length === 0 ? styles.addBtnOff : null]}
+                    disabled={adding || picked.length === 0}
+                    style={[styles.addBtn, picked.length === 0 ? styles.addBtnOff : null]}
                   >
                     {adding ? (
                       <ActivityIndicator color={Palette.ivory} size="small" />
                     ) : (
-                      <Text style={[styles.addBtnLabel, selected.length === 0 ? styles.addBtnLabelOff : null]}>Add</Text>
+                      <Text style={[styles.addBtnLabel, picked.length === 0 ? styles.addBtnLabelOff : null]}>Add</Text>
                     )}
                   </Pressable>
                 </View>
@@ -303,11 +348,11 @@ export function ModeratorsSheet({
                       message="Try their exact username, without the @."
                     />
                   ) : null}
-                  {!searching && query.length < 1 && list.length === 0 ? (
+                  {!searching && query.length < 1 && list.length === 0 && picked.length === 0 ? (
                     <ResultsStatus
                       icon={<UserIcon size={20} color={Palette.plum} />}
                       title="Search someone"
-                      message="Type a Throve username to appoint them as a moderator."
+                      message="Type a Throve username, tap them to add a box, then Add."
                     />
                   ) : null}
                   {!searching && query.length < 1 && list.length > 0 ? (
@@ -315,14 +360,13 @@ export function ModeratorsSheet({
                   ) : null}
                   <ScrollView keyboardShouldPersistTaps="handled" style={styles.resultList}>
                     {list.map((hit) => {
-                      const isOn = selected.some((item) => item.toLowerCase() === hit.username.toLowerCase());
                       const isHost = isHostUser(hit.username);
                       return (
                         <Pressable
                           key={hit.username}
                           disabled={isHost}
-                          onPress={() => toggleSelect(hit.username)}
-                          style={[styles.hitRow, isOn && styles.hitRowOn, isHost && styles.hitRowHost]}
+                          onPress={() => pickPerson(hit)}
+                          style={[styles.hitRow, isHost && styles.hitRowHost]}
                         >
                           <ProfileAvatar uri={hit.photoUri} username={hit.username} style={styles.avatar} />
                           <View style={styles.meta}>
@@ -335,11 +379,7 @@ export function ModeratorsSheet({
                             <View style={styles.hostTag}>
                               <Text style={styles.hostTagLabel}>Host</Text>
                             </View>
-                          ) : (
-                            <View style={[styles.check, isOn && styles.checkOn]}>
-                              {isOn ? <Text style={styles.checkMark}>✓</Text> : null}
-                            </View>
-                          )}
+                          ) : null}
                         </Pressable>
                       );
                     })}
@@ -446,23 +486,69 @@ const styles = StyleSheet.create({
   inputRow: {
     flexDirection: 'row',
     gap: 8,
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
-  searchField: {
+  composer: {
     flex: 1,
     minHeight: 46,
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     borderWidth: 1,
     borderColor: Palette.border,
-    borderRadius: 23,
-    paddingHorizontal: 14,
+    borderRadius: 18,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     backgroundColor: Palette.ivoryElevated,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    maxWidth: '100%',
+    paddingLeft: 4,
+    paddingRight: 4,
+    paddingVertical: 3,
+    borderRadius: 14,
+    backgroundColor: Palette.sand,
+    borderWidth: 1,
+    borderColor: Palette.border,
+  },
+  chipAvatar: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+  },
+  chipLabel: {
+    maxWidth: 112,
+    fontSize: 12,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.espresso,
+  },
+  chipRemove: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chipRemoveMark: {
+    fontSize: 14,
+    lineHeight: 16,
+    color: Palette.muted,
+  },
+  searchInline: {
+    flexGrow: 1,
+    flexBasis: 96,
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   input: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 32,
     fontSize: 14,
     fontFamily: Typography.body,
     color: Palette.espresso,
@@ -574,12 +660,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 8,
     borderRadius: Radius.sm,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  hitRowOn: {
-    backgroundColor: Palette.sand,
-    borderColor: Palette.plum,
   },
   hitRowHost: {
     opacity: 0.72,
@@ -609,24 +689,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: Typography.body,
     color: Palette.muted,
-  },
-  check: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1.5,
-    borderColor: Palette.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkOn: {
-    backgroundColor: Palette.plum,
-    borderColor: Palette.plum,
-  },
-  checkMark: {
-    color: Palette.ivory,
-    fontSize: 12,
-    fontFamily: Typography.bodySemiBold,
   },
   limit: {
     marginTop: 11,

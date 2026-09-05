@@ -102,6 +102,7 @@ export type LiveSession = {
   startedAt?: string;
   endedAt?: string;
   products?: LiveStreamProduct[];
+  moderators?: string[];
 };
 
 export type LiveKitCredentials = {
@@ -216,4 +217,16 @@ export type PublicProfile = {
   bio: string;
   location: string;
   photoUri?: string;
+};
+
+export type AppNotification = {
+  id: string;
+  category: string;
+  type: string;
+  title: string;
+  body: string;
+  data?: Record<string, string>;
+  deepLink?: string;
+  readAt?: number;
+  createdAt: number;
 };

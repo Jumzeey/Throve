@@ -11,6 +11,7 @@ import inboxRoutes from './routes/inbox.js';
 import listingsRoutes from './routes/listings.js';
 import liveRoutes from './routes/live.js';
 import mediaRoutes from './routes/media.js';
+import notificationsRoutes from './routes/notifications.js';
 import openRoutes from './routes/open.js';
 import profilesRoutes from './routes/profiles.js';
 
@@ -34,6 +35,7 @@ app.use('/inbox', inboxRoutes);
 app.use('/live', liveRoutes);
 app.use('/checkout', checkoutRoutes);
 app.use('/media', mediaRoutes);
+app.use('/notifications', notificationsRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({ message: 'Not found', code: 'NOT_FOUND' });

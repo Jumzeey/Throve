@@ -4,6 +4,7 @@ import { CheckoutProvider } from '@/context/checkout-context';
 import { InboxProvider } from '@/context/inbox-context';
 import { ListingsProvider } from '@/context/listings-context';
 import { LiveProvider } from '@/context/live-context';
+import { NotificationsProvider } from '@/context/notifications-context';
 import { SplashScreen } from '@/components/ui/splash-screen';
 import { Palette } from '@/constants/theme';
 import { Stack } from 'expo-router';
@@ -105,6 +106,7 @@ export default function RootLayout() {
         <AuthProvider>
           <ListingsProvider>
             <InboxProvider>
+              <NotificationsProvider>
               <LiveProvider>
                 <CheckoutProvider>
                   <ThemeProvider value={ThroveTheme}>
@@ -113,6 +115,7 @@ export default function RootLayout() {
                   </ThemeProvider>
                 </CheckoutProvider>
               </LiveProvider>
+              </NotificationsProvider>
             </InboxProvider>
           </ListingsProvider>
         </AuthProvider>

@@ -34,6 +34,26 @@ export function liveStartedEmail(input: {
   });
 }
 
+export function liveModeratorAppointedEmail(input: {
+  hostUsername: string;
+  sessionId?: string;
+  liveTitle?: string;
+}): EmailContent {
+  const link = input.sessionId ? deepLinks.live(input.sessionId) : deepLinks.liveList();
+  const titleBit = input.liveTitle
+    ? ` <strong style="color:#2B211F;">${escapeHtml(input.liveTitle)}</strong>`
+    : ' a live';
+  return buildEmail({
+    subject: truncateSubject(`@${input.hostUsername} appointed you as a live moderator`),
+    title: 'You’re a live moderator',
+    bodyHtml: `<strong style="color:#2B211F;">@${escapeHtml(input.hostUsername)}</strong> appointed you as a moderator for${titleBit}. You can help with comments only — no video, products, orders, or ending the live.`,
+    bodyText: `@${input.hostUsername} appointed you as a moderator${input.liveTitle ? ` for ${input.liveTitle}` : ''}. You can help with comments only.`,
+    ctaLabel: input.sessionId ? 'Open live room' : 'Open Throve Live',
+    actionLink: link,
+    footnote: 'A moderator is not a co-host.',
+  });
+}
+
 export function liveClaimReservedEmail(input: {
   sessionId: string;
   listingTitle: string;

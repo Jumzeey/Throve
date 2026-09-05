@@ -62,10 +62,10 @@ type LiveContextValue = {
   subscribeSession: (sessionId: string) => () => void;
   prepareModerators: string[];
   getModerators: (sessionId?: string) => string[];
-  addPrepareModerator: (username: string) => void;
-  removePrepareModerator: (username: string) => void;
-  addSessionModerator: (sessionId: string, username: string) => void;
-  removeSessionModerator: (sessionId: string, username: string) => void;
+  addPrepareModerators: (usernames: string[]) => Promise<void>;
+  removePrepareModerator: (username: string) => Promise<void>;
+  addSessionModerators: (sessionId: string, usernames: string[]) => Promise<void>;
+  removeSessionModerator: (sessionId: string, username: string) => Promise<void>;
   isModerator: (sessionId: string | undefined, username: string) => boolean;
 };
 
@@ -115,7 +115,15 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     try {
       const data = await apiFetch<{ liveNow: LiveSession[]; upcoming: LiveSession[]; all: LiveSession[] }>('/live/sessions');
-      setSessions(data.all ?? [...data.liveNow, ...data.upcoming]);
+      const all = data.all ?? [...data.liveNow, ...data.upcoming];
+      setSessions(all);
+      setModeratorsBySession((current) => {
+        const next = { ...current };
+        for (const session of all) {
+          if (session.moderators) next[session.id] = session.moderators;
+        }
+        return next;
+      });
     } catch {
       // Backend offline — live tab handles empty/offline UI
     } finally {
@@ -157,6 +165,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       next[idx] = session;
       return next;
     });
+    if (session.moderators) {
+      setModeratorsBySession((current) => ({ ...current, [sessionId]: session.moderators ?? [] }));
+    }
     const [comments, claims] = await Promise.all([
       apiFetch<LiveComment[]>(`/live/sessions/${sessionId}/comments`),
       apiFetch<LiveClaim[]>(`/live/sessions/${sessionId}/claims/me`).catch(() => [] as LiveClaim[]),
@@ -465,6 +476,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         featuredListingIds: listings,
         products,
         scheduledAt: input.scheduledAt,
+        moderatorUsernames: prepareModerators,
       }),
     });
     setSessions((current) => [session, ...current]);
@@ -494,29 +506,59 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     [moderatorsBySession, prepareModerators],
   );
 
-  const addPrepareModerator = useCallback((username: string) => {
+  const addPrepareModerators = useCallback(async (usernames: string[]) => {
+    const result = await apiFetch<{ usernames: string[] }>('/live/moderators', {
+      method: 'POST',
+      body: JSON.stringify({ usernames }),
+    });
     setPrepareModerators((current) => {
-      if (current.includes(username) || current.length >= MAX_LIVE_MODERATORS) return current;
-      return [...current, username];
+      const next = [...current];
+      for (const username of result.usernames) {
+        if (!next.some((item) => item.toLowerCase() === username.toLowerCase()) && next.length < MAX_LIVE_MODERATORS) {
+          next.push(username);
+        }
+      }
+      return next;
     });
   }, []);
 
-  const removePrepareModerator = useCallback((username: string) => {
-    setPrepareModerators((current) => current.filter((item) => item !== username));
+  const removePrepareModerator = useCallback(async (username: string) => {
+    try {
+      await apiFetch(`/live/moderators/${encodeURIComponent(username)}`, { method: 'DELETE' });
+    } catch {
+      /* still drop locally */
+    }
+    setPrepareModerators((current) => current.filter((item) => item.toLowerCase() !== username.toLowerCase()));
   }, []);
 
-  const addSessionModerator = useCallback((sessionId: string, username: string) => {
+  const addSessionModerators = useCallback(async (sessionId: string, usernames: string[]) => {
+    const result = await apiFetch<{ usernames: string[] }>('/live/moderators', {
+      method: 'POST',
+      body: JSON.stringify({ usernames, sessionId }),
+    });
     setModeratorsBySession((current) => {
       const list = current[sessionId] ?? [];
-      if (list.includes(username) || list.length >= MAX_LIVE_MODERATORS) return current;
-      return { ...current, [sessionId]: [...list, username] };
+      const next = [...list];
+      for (const username of result.usernames) {
+        if (!next.some((item) => item.toLowerCase() === username.toLowerCase()) && next.length < MAX_LIVE_MODERATORS) {
+          next.push(username);
+        }
+      }
+      return { ...current, [sessionId]: next };
     });
   }, []);
 
-  const removeSessionModerator = useCallback((sessionId: string, username: string) => {
+  const removeSessionModerator = useCallback(async (sessionId: string, username: string) => {
+    try {
+      await apiFetch(`/live/moderators/${encodeURIComponent(username)}?sessionId=${encodeURIComponent(sessionId)}`, {
+        method: 'DELETE',
+      });
+    } catch {
+      /* still drop locally */
+    }
     setModeratorsBySession((current) => ({
       ...current,
-      [sessionId]: (current[sessionId] ?? []).filter((item) => item !== username),
+      [sessionId]: (current[sessionId] ?? []).filter((item) => item.toLowerCase() !== username.toLowerCase()),
     }));
   }, []);
 
@@ -564,9 +606,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       subscribeSession,
       prepareModerators,
       getModerators,
-      addPrepareModerator,
+      addPrepareModerators,
       removePrepareModerator,
-      addSessionModerator,
+      addSessionModerators,
       removeSessionModerator,
       isModerator,
     }),
@@ -605,9 +647,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       upcoming,
       prepareModerators,
       getModerators,
-      addPrepareModerator,
+      addPrepareModerators,
       removePrepareModerator,
-      addSessionModerator,
+      addSessionModerators,
       removeSessionModerator,
       isModerator,
     ],

@@ -8,6 +8,12 @@ import {
   liveStartedEmail,
   liveUpcomingEmail,
 } from '../lib/email/templates/live.js';
+import {
+  attachPendingModerators,
+  appointModerators,
+  listModeratorUsernames,
+  removeModerator,
+} from '../lib/live-moderators.js';
 import { mapLiveClaim, mapLiveSession, mapLiveStreamProduct } from '../lib/live-mappers.js';
 import { createLiveKitToken, getLiveKitUrl, isLiveKitConfigured } from '../lib/livekit.js';
 import { getProfileById, getSellerMap, mapListing } from '../lib/mappers.js';
@@ -77,7 +83,12 @@ router.get('/sessions', optionalAuth, async (req, res) => {
   const sessions = await Promise.all(
     (data ?? []).map(async (row: DbRow) => {
       const products = await loadProducts(supabase, String(row.id));
-      return mapLiveSession(row, hostMap.get(row.host_id as string) ?? 'unknown', products);
+      return mapLiveSession(
+        row,
+        hostMap.get(row.host_id as string) ?? 'unknown',
+        products,
+        await listModeratorUsernames(String(row.id)),
+      );
     }),
   );
 
@@ -96,7 +107,7 @@ router.get('/sessions/:id', optionalAuth, async (req, res) => {
 
   const host = await getProfileById(supabase, data.host_id);
   const products = await loadProducts(supabase, data.id);
-  return res.json(mapLiveSession(data, host?.username ?? 'unknown', products));
+  return res.json(mapLiveSession(data, host?.username ?? 'unknown', products, await listModeratorUsernames(data.id)));
 });
 
 router.post('/sessions', requireAuth, async (req, res) => {
@@ -119,6 +130,7 @@ router.post('/sessions', requireAuth, async (req, res) => {
         .optional(),
       scheduledAt: z.string().optional(),
       thumbnailUrl: z.string().optional(),
+      moderatorUsernames: z.array(z.string()).optional(),
     })
     .safeParse(req.body);
 
@@ -222,9 +234,71 @@ router.post('/sessions', requireAuth, async (req, res) => {
     });
   }
 
+  await attachPendingModerators(userId, data.id);
+  if (parsed.data.moderatorUsernames?.length) {
+    try {
+      await appointModerators({
+        hostId: userId,
+        usernames: parsed.data.moderatorUsernames,
+        sessionId: data.id,
+        sessionTitle: data.title,
+      });
+    } catch (err) {
+      console.warn('[live] attach moderators', err instanceof Error ? err.message : err);
+    }
+  }
+
+  const moderators = await listModeratorUsernames(data.id);
   return res.status(201).json(
-    mapLiveSession({ ...data, livekit_room_name: roomName }, hostUsername, products),
+    mapLiveSession({ ...data, livekit_room_name: roomName }, hostUsername, products, moderators),
   );
+});
+
+router.post('/moderators', requireAuth, async (req, res) => {
+  const { userId } = req as AuthedRequest;
+  const parsed = z
+    .object({
+      usernames: z.array(z.string()).min(1),
+      sessionId: z.string().optional(),
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, 'Invalid input');
+
+  let sessionTitle: string | undefined;
+  if (parsed.data.sessionId) {
+    const admin = createServiceClient();
+    const { data: session } = await admin
+      .from('live_sessions')
+      .select('id, host_id, title')
+      .eq('id', parsed.data.sessionId)
+      .maybeSingle();
+    if (!session || session.host_id !== userId) return sendError(res, 404, 'Session not found');
+    sessionTitle = String(session.title);
+  }
+
+  try {
+    const appointed = await appointModerators({
+      hostId: userId,
+      usernames: parsed.data.usernames,
+      sessionId: parsed.data.sessionId,
+      sessionTitle,
+    });
+    return res.json({ usernames: appointed });
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    const message = err instanceof Error ? err.message : 'Could not appoint moderators.';
+    if (code === 'LIMIT') return sendError(res, 400, message, 'LIMIT');
+    if (code === 'NOT_FOUND') return sendError(res, 404, message, 'NOT_FOUND');
+    console.warn('[live/moderators]', message);
+    return sendError(res, 400, message);
+  }
+});
+
+router.delete('/moderators/:username', requireAuth, async (req, res) => {
+  const { userId } = req as AuthedRequest;
+  const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : undefined;
+  await removeModerator(userId, String(req.params.username), sessionId);
+  return res.json({ ok: true });
 });
 
 router.post('/sessions/:id/start', requireAuth, async (req, res) => {

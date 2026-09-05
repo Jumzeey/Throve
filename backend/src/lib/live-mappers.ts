@@ -59,7 +59,7 @@ export function mapLiveClaim(row: DbRow, username: string): LiveClaimDto {
   };
 }
 
-export function mapLiveSession(row: DbRow, host: string, products?: LiveStreamProductDto[]) {
+export function mapLiveSession(row: DbRow, host: string, products?: LiveStreamProductDto[], moderators: string[] = []) {
   const pinned = products?.find((p) => p.isPinned);
   return {
     id: row.id,
@@ -78,5 +78,6 @@ export function mapLiveSession(row: DbRow, host: string, products?: LiveStreamPr
     startedAt: row.started_at ?? undefined,
     endedAt: row.ended_at ?? undefined,
     products: products ?? [],
+    moderators,
   };
 }
