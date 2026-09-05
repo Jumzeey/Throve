@@ -1,3 +1,4 @@
+import { ModeratorsSheet } from '@/components/live/moderators-sheet';
 import { Button } from '@/components/ui/button';
 import { DepartmentChips } from '@/components/ui/department-chips';
 import { AlertBanner } from '@/components/ui/alert-banner';
@@ -7,22 +8,15 @@ import { ScreenHeader } from '@/components/ui/screen-header';
 import { StatusChip } from '@/components/ui/status-chip';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
+import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
-import { MAX_LIVE_MODERATORS, SUGGESTED_MODERATORS, useLive } from '@/context/live-context';
+import { MAX_LIVE_MODERATORS, useLive } from '@/context/live-context';
 import { DEPARTMENTS } from '@/data/seed';
 import { formatNaira } from '@/lib/format';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
-import {
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 const DEPARTMENT_CHIPS = DEPARTMENTS.map((department) => ({ label: department, value: department }));
 const IVORY_50 = 'rgba(255,247,240,0.5)';
@@ -32,6 +26,7 @@ export default function PrepareLiveScreen() {
   const { sheetBottom } = useScreenInsets();
   const { session } = useAuth();
   const { listingsForSeller } = useListings();
+  const inbox = useInbox();
   const live = useLive();
   const [title, setTitle] = useState('');
   const [coverSet, setCoverSet] = useState(false);
@@ -60,6 +55,10 @@ export default function PrepareLiveScreen() {
 
   const host = session.username;
   const moderators = live.prepareModerators;
+  const suggestedMods = inbox
+    .conversationsFor(host)
+    .map((conv) => inbox.otherParticipant(conv, host))
+    .filter(Boolean);
   const canStart = title.trim() && department && selected.length > 0 && cameraReady && micReady;
 
   function toggleProduct(id: string) {
@@ -211,9 +210,9 @@ export default function PrepareLiveScreen() {
           />
         ) : null}
 
-        <Text style={[styles.sectionLabel, styles.deviceLabel]}>Device check</Text>
+        <Text style={[styles.sectionLabel, styles.deviceSection]}>Device check</Text>
         <View style={styles.deviceRow}>
-          <Text style={styles.deviceLabel}>Camera</Text>
+          <Text style={styles.deviceName}>Camera</Text>
           <View style={styles.deviceRight}>
             {cameraReady ? <StatusChip kind="live" variant="available" label="READY" /> : null}
             <ReadyToggle
@@ -226,7 +225,7 @@ export default function PrepareLiveScreen() {
           </View>
         </View>
         <View style={styles.deviceRow}>
-          <Text style={styles.deviceLabel}>Microphone</Text>
+          <Text style={styles.deviceName}>Microphone</Text>
           <View style={styles.deviceRight}>
             {micReady ? <StatusChip kind="live" variant="available" label="READY" /> : null}
             <ReadyToggle
@@ -293,69 +292,16 @@ export default function PrepareLiveScreen() {
 
       <ModeratorsSheet
         visible={modsOpen}
+        title="Live moderators"
+        copy="You can appoint up to two. Search a username, tap who you want, then Add."
+        hostUsername={host}
         moderators={moderators}
+        suggestions={suggestedMods}
         onClose={() => setModsOpen(false)}
         onAdd={live.addPrepareModerator}
         onRemove={live.removePrepareModerator}
       />
     </View>
-  );
-}
-
-function ModeratorsSheet({
-  visible,
-  moderators,
-  onClose,
-  onAdd,
-  onRemove,
-}: {
-  visible: boolean;
-  moderators: string[];
-  onClose: () => void;
-  onAdd: (username: string) => void;
-  onRemove: (username: string) => void;
-}) {
-  const { sheetBottom } = useScreenInsets();
-  const available = SUGGESTED_MODERATORS.filter((name) => !moderators.includes(name));
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.sheetOverlay} onPress={onClose}>
-        <View style={[styles.sheetCard, { paddingBottom: sheetBottom }]} onStartShouldSetResponder={() => true}>
-          <Text style={styles.sheetTitle}>Live moderators</Text>
-          <Text style={styles.sheetCopy}>
-            You can appoint up to two. They help with comments and disruptive viewers — nothing else.
-          </Text>
-          {moderators.map((mod, index) => (
-            <View key={mod} style={styles.sheetModRow}>
-              <View style={styles.modAvatar}>
-                <UserIcon size={16} color={Palette.muted3} />
-              </View>
-              <View style={styles.modMeta}>
-                <Text style={styles.sheetModName}>{mod}</Text>
-                <Text style={styles.sheetModSub}>Moderator {index + 1}</Text>
-              </View>
-              <Pressable onPress={() => onRemove(mod)} hitSlop={8}>
-                <Text style={styles.sheetRemove}>Remove</Text>
-              </Pressable>
-            </View>
-          ))}
-          {moderators.length < MAX_LIVE_MODERATORS
-            ? available.map((mod) => (
-                <Pressable key={mod} onPress={() => onAdd(mod)} style={styles.sheetAddRow}>
-                  <Text style={styles.sheetAddLabel}>+ {mod}</Text>
-                </Pressable>
-              ))
-            : (
-              <Text style={styles.sheetLimit}>Add moderator · limit reached</Text>
-            )}
-          <Text style={styles.sheetFootnote}>
-            A moderator is not a co-host: no video, no product control, no orders, no finance, and they can't end the
-            live.
-          </Text>
-        </View>
-      </Pressable>
-    </Modal>
   );
 }
 
@@ -512,8 +458,13 @@ const styles = StyleSheet.create({
   whenBtnLabelOn: {
     color: Palette.liveDark,
   },
-  deviceLabel: {
+  deviceSection: {
     marginTop: 12,
+  },
+  deviceName: {
+    fontSize: 13.5,
+    fontFamily: Typography.body,
+    color: Palette.ivory,
   },
   deviceRow: {
     flexDirection: 'row',
@@ -548,7 +499,7 @@ const styles = StyleSheet.create({
   emptyModLabel: {
     fontSize: 12.5,
     fontFamily: Typography.bodySemiBold,
-    color: Palette.plum,
+    color: Palette.blush,
   },
   modRow: {
     flexDirection: 'row',
@@ -612,79 +563,5 @@ const styles = StyleSheet.create({
     fontFamily: Typography.body,
     color: 'rgba(255,247,240,0.5)',
     textAlign: 'center',
-  },
-  sheetOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(27,17,19,0.45)',
-    justifyContent: 'flex-end',
-  },
-  sheetCard: {
-    backgroundColor: Palette.ivory,
-    borderTopLeftRadius: Radius.xl,
-    borderTopRightRadius: Radius.xl,
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 28,
-  },
-  sheetTitle: {
-    fontSize: 18,
-    fontFamily: Typography.display,
-    color: Palette.espresso,
-  },
-  sheetCopy: {
-    marginTop: 5,
-    fontSize: 11.5,
-    lineHeight: 19,
-    fontFamily: Typography.body,
-    color: Palette.muted,
-  },
-  sheetModRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 11,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: Palette.divider,
-    marginTop: 8,
-  },
-  sheetModName: {
-    fontSize: 12.5,
-    fontFamily: Typography.bodySemiBold,
-    color: Palette.espresso,
-  },
-  sheetModSub: {
-    marginTop: 2,
-    fontSize: 10.5,
-    fontFamily: Typography.body,
-    color: Palette.muted,
-  },
-  sheetRemove: {
-    fontSize: 11.5,
-    fontFamily: Typography.bodySemiBold,
-    color: Palette.error,
-  },
-  sheetAddRow: {
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: Palette.divider,
-  },
-  sheetAddLabel: {
-    fontSize: 12.5,
-    fontFamily: Typography.bodySemiBold,
-    color: Palette.plum,
-  },
-  sheetLimit: {
-    marginTop: 11,
-    textAlign: 'center',
-    fontSize: 13,
-    fontFamily: Typography.bodySemiBold,
-    color: Palette.disabled,
-  },
-  sheetFootnote: {
-    marginTop: 11,
-    fontSize: 11,
-    lineHeight: 18,
-    fontFamily: Typography.body,
-    color: Palette.muted2,
   },
 });

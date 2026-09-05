@@ -108,8 +108,8 @@ export default function RootLayout() {
               <LiveProvider>
                 <CheckoutProvider>
                   <ThemeProvider value={ThroveTheme}>
-                    <RootNavigator />
                     <StatusBar style="dark" />
+                    <RootNavigator />
                   </ThemeProvider>
                 </CheckoutProvider>
               </LiveProvider>

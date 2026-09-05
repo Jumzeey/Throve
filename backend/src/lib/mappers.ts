@@ -102,9 +102,10 @@ export async function getProfileByUsername(
   supabase: ReturnType<typeof import('./supabase.js').createSupabaseClient>,
   username: string,
 ) {
-  const { data, error } = await supabase.from('profiles').select('*').eq('username', username).maybeSingle();
+  const escaped = username.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+  const { data, error } = await supabase.from('profiles').select('*').ilike('username', escaped).limit(1);
   if (error) throw error;
-  return data as ProfileRow | null;
+  return (data?.[0] as ProfileRow | undefined) ?? null;
 }
 
 export async function getSellerMap(

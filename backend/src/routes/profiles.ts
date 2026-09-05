@@ -164,6 +164,33 @@ router.post('/me/deactivate', requireAuth, async (req, res) => {
   return res.json({ ok: true });
 });
 
+router.get('/search', requireAuth, async (req, res) => {
+  const raw = String(req.query.q ?? '')
+    .trim()
+    .replace(/^@/, '');
+  if (raw.length < 1) return res.json([]);
+
+  const { supabase } = req as AuthedRequest;
+  const escaped = raw.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('username, name, photo_url, deactivated, setup_complete, id')
+    .eq('deactivated', false)
+    .eq('setup_complete', true)
+    .or(`username.ilike.%${escaped}%,name.ilike.%${escaped}%`)
+    .order('username', { ascending: true })
+    .limit(8);
+
+  if (error) return handleSupabaseError(res, error);
+  return res.json(
+    (data ?? []).map((row) => ({
+      username: row.username,
+      name: row.name || row.username,
+      photoUri: publicPhotoUrl(row.photo_url),
+    })),
+  );
+});
+
 router.get('/:username/public', optionalAuth, async (req, res) => {
   const supabase = (req as AuthedRequest).supabase ?? createSupabaseClient();
   const username = String(req.params.username);

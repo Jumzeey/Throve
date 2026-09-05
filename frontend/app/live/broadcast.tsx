@@ -1,3 +1,4 @@
+import { ModeratorsSheet } from '@/components/live/moderators-sheet';
 import {
   EndLiveDialog,
   LiveCommentActionsSheet,
@@ -8,12 +9,12 @@ import {
   LiveStage,
 } from '@/components/live/live-stage';
 import { PinnedProductCard, type PinnedProductVariant } from '@/components/live/pinned-product-card';
-import { UserIcon } from '@/components/ui/icons';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import type { LiveComment, LiveKitCredentials, LiveStreamProduct } from '@/data/types';
 import { useAuth } from '@/context/auth-context';
+import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
-import { MAX_LIVE_MODERATORS, SUGGESTED_MODERATORS, useLive } from '@/context/live-context';
+import { MAX_LIVE_MODERATORS, useLive } from '@/context/live-context';
 import { formatNaira } from '@/lib/format';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, useRouter } from 'expo-router';
@@ -26,6 +27,7 @@ export default function LiveBroadcastScreen() {
   const { top, sheetBottom } = useScreenInsets();
   const { session } = useAuth();
   const { getListing } = useListings();
+  const inbox = useInbox();
   const live = useLive();
   const [credentials, setCredentials] = useState<LiveKitCredentials | null>(null);
   const [endOpen, setEndOpen] = useState(false);
@@ -79,6 +81,10 @@ export default function LiveBroadcastScreen() {
 
   const moderators = live.getModerators(liveSession.id);
   const sessionId = liveSession.id;
+  const suggestedMods = inbox
+    .conversationsFor(session.username)
+    .map((conv) => inbox.otherParticipant(conv, session.username))
+    .filter(Boolean);
 
   async function confirmEnd() {
     setEnding(true);
@@ -208,9 +214,14 @@ export default function LiveBroadcastScreen() {
         }}
       />
 
-      <ModeratorsLiveSheet
+      <ModeratorsSheet
         visible={modsOpen}
+        title={`Moderators during the live · ${moderators.length} of ${MAX_LIVE_MODERATORS}`}
+        copy="Search a username, tap who you want, then Add. They help with comments only."
+        roleLabel="Active moderator"
+        hostUsername={session.username}
         moderators={moderators}
+        suggestions={suggestedMods}
         onClose={() => setModsOpen(false)}
         onAdd={(username) => live.addSessionModerator(sessionId, username)}
         onRemove={(username) => live.removeSessionModerator(sessionId, username)}
@@ -263,58 +274,6 @@ function ProductPickerSheet({
               </Pressable>
             );
           })}
-        </View>
-      </Pressable>
-    </Modal>
-  );
-}
-
-function ModeratorsLiveSheet({
-  visible,
-  moderators,
-  onClose,
-  onAdd,
-  onRemove,
-}: {
-  visible: boolean;
-  moderators: string[];
-  onClose: () => void;
-  onAdd: (username: string) => void;
-  onRemove: (username: string) => void;
-}) {
-  const { sheetBottom } = useScreenInsets();
-  const available = SUGGESTED_MODERATORS.filter((name) => !moderators.includes(name));
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.sheetOverlay} onPress={onClose}>
-        <View style={[styles.sheetCard, { paddingBottom: sheetBottom }]} onStartShouldSetResponder={() => true}>
-          <Text style={styles.sheetTitle}>
-            Moderators during the live · {moderators.length} of {MAX_LIVE_MODERATORS}
-          </Text>
-          {moderators.map((mod) => (
-            <View key={mod} style={styles.sheetModRow}>
-              <View style={styles.modAvatar}>
-                <UserIcon size={16} color={Palette.muted3} />
-              </View>
-              <View style={styles.modMeta}>
-                <Text style={styles.sheetModName}>{mod}</Text>
-                <Text style={styles.sheetModSub}>Active moderator</Text>
-              </View>
-              <Pressable onPress={() => onRemove(mod)} hitSlop={8}>
-                <Text style={styles.sheetRemove}>Remove</Text>
-              </Pressable>
-            </View>
-          ))}
-          {moderators.length < MAX_LIVE_MODERATORS
-            ? available.map((mod) => (
-                <Pressable key={mod} onPress={() => onAdd(mod)} style={styles.sheetAddRow}>
-                  <Text style={styles.sheetAddLabel}>+ {mod}</Text>
-                </Pressable>
-              ))
-            : (
-              <Text style={styles.sheetLimit}>Add moderator · limit reached</Text>
-            )}
         </View>
       </Pressable>
     </Modal>
@@ -436,59 +395,5 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     fontFamily: Typography.bodySemiBold,
     color: Palette.plum,
-  },
-  sheetModRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 11,
-    paddingVertical: 11,
-    borderTopWidth: 1,
-    borderTopColor: Palette.divider,
-  },
-  modAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Palette.border,
-    borderWidth: 1,
-    borderColor: Palette.borderSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modMeta: {
-    flex: 1,
-  },
-  sheetModName: {
-    fontSize: 12.5,
-    fontFamily: Typography.bodySemiBold,
-    color: Palette.espresso,
-  },
-  sheetModSub: {
-    marginTop: 2,
-    fontSize: 10.5,
-    fontFamily: Typography.body,
-    color: Palette.muted,
-  },
-  sheetRemove: {
-    fontSize: 11.5,
-    fontFamily: Typography.bodySemiBold,
-    color: Palette.error,
-  },
-  sheetAddRow: {
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: Palette.divider,
-  },
-  sheetAddLabel: {
-    fontSize: 12.5,
-    fontFamily: Typography.bodySemiBold,
-    color: Palette.plum,
-  },
-  sheetLimit: {
-    marginTop: 11,
-    textAlign: 'center',
-    fontSize: 13,
-    fontFamily: Typography.bodySemiBold,
-    color: Palette.disabled,
   },
 });

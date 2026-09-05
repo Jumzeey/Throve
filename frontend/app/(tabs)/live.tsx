@@ -7,7 +7,8 @@ import { Palette, Radius, Typography } from '@/constants/theme';
 import { getLiveImage } from '@/data/images';
 import { useLive } from '@/context/live-context';
 import type { LiveSession } from '@/data/types';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
@@ -21,6 +22,13 @@ export default function LiveDiscoveryScreen() {
   const router = useRouter();
   const { liveNow, upcoming, loading, refresh } = useLive();
   const [error, setError] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      setStatusBarStyle('light');
+      return () => setStatusBarStyle('dark');
+    }, []),
+  );
 
   const pullTask = useCallback(async () => {
     setError(null);
@@ -37,6 +45,7 @@ export default function LiveDiscoveryScreen() {
 
   return (
     <View style={[styles.screen, { paddingTop: top }]}>
+      <StatusBar style="light" />
       <View style={styles.header}>
         <Text style={styles.title}>Live</Text>
         <Text style={styles.subtitle}>Shop in real time with Throve sellers</Text>

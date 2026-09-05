@@ -17,8 +17,6 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 export const CHECKOUT_RESERVE_MS = 10 * 60 * 1000;
 export const MAX_LIVE_MODERATORS = 2;
 
-export const SUGGESTED_MODERATORS = ['femi.k', 'ijeoma.a', 'chidinma.o', 'funke_b'] as const;
-
 type StartLiveInput = {
   host: string;
   title: string;
