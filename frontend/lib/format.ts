@@ -25,3 +25,17 @@ export function formatRelativeTime(ts: number) {
   if (days === 1) return '1d';
   return `${days}d`;
 }
+
+/** Inbox list timestamps: today → HH:mm, yesterday → Yesterday, else short date. */
+export function formatInboxTime(ts: number) {
+  if (!Number.isFinite(ts) || ts <= 0) return '';
+  const date = new Date(ts);
+  const now = new Date();
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startYesterday = startToday - 86_400_000;
+  if (ts >= startToday) {
+    return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
+  }
+  if (ts >= startYesterday) return 'Yesterday';
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}

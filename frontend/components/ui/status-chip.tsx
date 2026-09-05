@@ -18,14 +18,14 @@ const LISTING: Record<ListingChipVariant, ChipConfig> = {
 };
 
 const OFFER: Record<OfferChipVariant, ChipConfig> = {
-  sent: { label: 'Sent', color: Palette.plum, border: '#C9A9BD' },
-  received: { label: 'Received', color: Palette.plum, border: '#C9A9BD' },
-  pending: { label: 'Pending', color: Palette.warningText, border: '#E9CFA6', bg: Palette.warningBg },
-  accepted: { label: 'Accepted', color: Palette.successText, border: Palette.successBorder },
-  rejected: { label: 'Rejected', color: Palette.error, border: Palette.errorBorder },
-  countered: { label: 'Countered', color: Palette.plum, border: '#C9A9BD' },
-  withdrawn: { label: 'Withdrawn', color: Palette.muted, border: '#D4C7BE' },
-  expired: { label: 'Expired', color: Palette.muted, border: '#D4C7BE' },
+  sent: { label: 'SENT', color: Palette.plum, border: '#C9A9BD' },
+  received: { label: 'RECEIVED', color: Palette.plum, border: '#C9A9BD' },
+  pending: { label: 'PENDING', color: Palette.warningText, border: '#E9CFA6' },
+  accepted: { label: 'ACCEPTED', color: Palette.successText, border: Palette.successBorder },
+  rejected: { label: 'REJECTED', color: Palette.error, border: Palette.errorBorder },
+  countered: { label: 'COUNTERED', color: Palette.plum, border: '#C9A9BD' },
+  withdrawn: { label: 'WITHDRAWN', color: Palette.muted, border: '#D4C7BE' },
+  expired: { label: 'EXPIRED', color: Palette.muted, border: '#D4C7BE' },
 };
 
 const LIVE: Record<LiveChipVariant, ChipConfig> = {
@@ -96,7 +96,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   text: {
-    fontSize: 11,
+    fontSize: 10.5,
+    letterSpacing: 0.55,
     fontFamily: Typography.bodySemiBold,
   },
   liveText: {

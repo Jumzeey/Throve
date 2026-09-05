@@ -1,20 +1,27 @@
-# Codemagic CI/CD for this Expo React Native app (Android only for now).
-# Native android/ is generated on the build machine with `npx expo prebuild`.
+# Codemagic CI/CD for this Expo React Native app.
+# Native android/ and ios/ are generated on the build machine with `npx expo prebuild`.
 #
 # In the Codemagic UI:
 # 1. Add this repository as a React Native app, then scan for this file.
 # 2. Android signing — Team settings > codemagic.yaml settings > Code signing identities:
 #    upload a keystore and set its Reference name to `throve`.
-# 3. Environment groups (Team settings > Global variables and secrets):
+# 3. iOS signing — add an App Store Connect integration + iOS code signing for
+#    bundle id `com.throve.app`, then set `integrations.app_store_connect` below
+#    to match your integration name (default placeholder: `codemagic`).
+# 4. Environment groups (Team settings > Global variables and secrets):
 #    - `throve_frontend` — set all of these in the UI (do not hardcode in this file):
 #        EXPO_PUBLIC_SUPABASE_URL
 #        EXPO_PUBLIC_SUPABASE_ANON_KEY
 #        EXPO_PUBLIC_API_URL          (must be hosted backend, e.g. Railway — not localhost)
 #        EXPO_PUBLIC_AUTH_REDIRECT_URL (e.g. throveapp://auth/callback)
 #    - `google_play` — GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS (Play service-account JSON)
-# 4. Mark secret values as Secure in the UI.
+# 5. Mark secret values as Secure in the UI.
+# 6. Caching — configured per workflow below via `cache.cache_paths`. After the next
+#    successful build, entries appear under the Caching tab (Refresh list).
+#    Each workflow has its own cache.
 #
 # Docs: https://docs.codemagic.io/yaml-quick-start/building-a-react-native-app/
+# Cache docs: https://docs.codemagic.io/knowledge-codemagic/caching/
 
 workflows:
   react-native-android:
@@ -30,6 +37,15 @@ workflows:
         - google_play
       vars:
         PACKAGE_NAME: "com.throve.app"
+    cache:
+      cache_paths:
+        # npm global cache (safer across lockfile bumps than only node_modules)
+        - $HOME/.npm
+        # installed frontend deps
+        - $CM_BUILD_DIR/frontend/node_modules
+        # Android Gradle dependency jars (do not cache all of $HOME/.gradle)
+        - $HOME/.gradle/caches
+        - $HOME/.gradle/wrapper
     triggering:
       events:
         - push
@@ -97,3 +113,96 @@ workflows:
         credentials: $GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS
         track: alpha
         submit_as_draft: false
+
+  # Manual / Start new build only until App Store Connect + iOS signing are wired up.
+  react-native-ios:
+    name: React Native iOS
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: codemagic
+    environment:
+      node: 22.13.1
+      xcode: latest
+      cocoapods: default
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.throve.app
+      groups:
+        - throve_frontend
+      vars:
+        BUNDLE_ID: "com.throve.app"
+        # Expo prebuild uses app.json "name" → ios/throve.xcworkspace + scheme throve
+        XCODE_WORKSPACE: "throve.xcworkspace"
+        XCODE_SCHEME: "throve"
+        # Set your App Store Connect Apple ID (numeric) when ready to auto-bump build numbers
+        APP_STORE_APPLE_ID: "0000000000"
+    cache:
+      cache_paths:
+        - $HOME/.npm
+        - $CM_BUILD_DIR/frontend/node_modules
+        # CocoaPods
+        - $HOME/Library/Caches/CocoaPods
+        # Swift Package Manager (global)
+        - $HOME/Library/Caches/org.swift.swiftpm
+        # Xcode compilation cache (not full DerivedData)
+        - $HOME/Library/Developer/Xcode/DerivedData/CompilationCache.noindex
+    scripts:
+      - name: Install npm dependencies
+        script: |
+          cd frontend
+          npm install
+      - name: Write Expo env file
+        script: |
+          set -e
+          test -n "$EXPO_PUBLIC_SUPABASE_URL" || { echo "Missing EXPO_PUBLIC_SUPABASE_URL in throve_frontend group"; exit 1; }
+          test -n "$EXPO_PUBLIC_SUPABASE_ANON_KEY" || { echo "Missing EXPO_PUBLIC_SUPABASE_ANON_KEY in throve_frontend group"; exit 1; }
+          test -n "$EXPO_PUBLIC_API_URL" || { echo "Missing EXPO_PUBLIC_API_URL in throve_frontend group"; exit 1; }
+          test -n "$EXPO_PUBLIC_AUTH_REDIRECT_URL" || { echo "Missing EXPO_PUBLIC_AUTH_REDIRECT_URL in throve_frontend group"; exit 1; }
+
+          case "$EXPO_PUBLIC_API_URL" in
+            *localhost*|*127.0.0.1*)
+              echo "EXPO_PUBLIC_API_URL must not be localhost for store builds: $EXPO_PUBLIC_API_URL"
+              exit 1
+              ;;
+          esac
+
+          printf '%s\n' \
+            "EXPO_PUBLIC_SUPABASE_URL=$EXPO_PUBLIC_SUPABASE_URL" \
+            "EXPO_PUBLIC_SUPABASE_ANON_KEY=$EXPO_PUBLIC_SUPABASE_ANON_KEY" \
+            "EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL" \
+            "EXPO_PUBLIC_AUTH_REDIRECT_URL=$EXPO_PUBLIC_AUTH_REDIRECT_URL" \
+            > frontend/.env
+          echo "Wrote frontend/.env (API → $EXPO_PUBLIC_API_URL)"
+      - name: Run Expo Prebuild
+        script: |
+          cd frontend
+          npx expo prebuild --platform ios --non-interactive
+      - name: Install CocoaPods dependencies
+        script: |
+          cd frontend/ios
+          pod install
+      - name: Set up code signing settings on Xcode project
+        script: xcode-project use-profiles
+      - name: Increment build number
+        script: |
+          cd frontend/ios
+          if [ "$APP_STORE_APPLE_ID" != "0000000000" ]; then
+            LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID" || echo "0")
+            agvtool new-version -all $((LATEST_BUILD_NUMBER + 1))
+          else
+            agvtool new-version -all "$BUILD_NUMBER"
+          fi
+      - name: Build ipa for distribution
+        script: |
+          xcode-project build-ipa \
+            --workspace "$CM_BUILD_DIR/frontend/ios/$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: false
+        submit_to_app_store: false
