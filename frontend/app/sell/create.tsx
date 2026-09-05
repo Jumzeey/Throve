@@ -17,6 +17,7 @@ import {
   listingFormIssues,
   shippingOption,
   sizeIsRequired,
+  sizesForProductType,
   type ListingCatalog,
 } from '@/lib/listing-catalog';
 import { pickListingPhotos } from '@/lib/listing-photos';
@@ -89,8 +90,9 @@ export default function CreateListingScreen() {
   const issues = catalog ? listingFormIssues(form, catalog) : [];
   const canPreview = issues.length === 0;
   const photoMax = catalog?.photo.max ?? 8;
-  const sizeRequired = catalog ? sizeIsRequired(catalog, form.category) : false;
-  const sizeLabel = catalog?.sizes.find((item) => item.value === form.size)?.label ?? form.size;
+  const sizeOptions = catalog ? sizesForProductType(catalog, form.productType) : [];
+  const sizeRequired = catalog ? sizeIsRequired(catalog, form.productType) : false;
+  const sizeLabel = sizeOptions.find((item) => item.value === form.size)?.label ?? form.size;
   const selectedShipping = catalog ? shippingOption(catalog, form.shippingMethod) : null;
   const emptySlots =
     photoUris.length >= photoMax
@@ -171,7 +173,28 @@ export default function CreateListingScreen() {
   function selectDepartment(department: string) {
     const nextCategories = catalog ? categoriesForDepartment(catalog, department) : [];
     const category = nextCategories.includes(form.category) ? form.category : '';
-    setForm({ department, category });
+    const productType =
+      category && catalog?.productTypes.includes(category) ? category : form.productType && catalog?.productTypes.includes(form.productType)
+        ? form.productType
+        : '';
+    const nextSizes = catalog && productType ? sizesForProductType(catalog, productType) : [];
+    const size = nextSizes.some((item) => item.value === form.size) ? form.size : '';
+    setForm({ department, category, productType, size });
+    setShowErrors(false);
+  }
+
+  function selectCategory(category: string) {
+    const productType = catalog?.productTypes.includes(category) ? category : form.productType;
+    const nextSizes = catalog && productType ? sizesForProductType(catalog, productType) : [];
+    const size = nextSizes.some((item) => item.value === form.size) ? form.size : '';
+    setForm({ category, productType, size });
+    setShowErrors(false);
+  }
+
+  function selectProductType(productType: string) {
+    const nextSizes = catalog ? sizesForProductType(catalog, productType) : [];
+    const size = nextSizes.some((item) => item.value === form.size) ? form.size : '';
+    setForm({ productType, size });
     setShowErrors(false);
   }
 
@@ -309,14 +332,7 @@ export default function CreateListingScreen() {
               {form.department ? (
                 <>
                   <Text style={styles.label}>Category in {form.department}</Text>
-                  <WrapChips
-                    chips={categories}
-                    selected={form.category}
-                    onSelect={(category) => {
-                      setForm({ category });
-                      setShowErrors(false);
-                    }}
-                  />
+                  <WrapChips chips={categories} selected={form.category} onSelect={selectCategory} />
                   <Text style={styles.hint}>{catalog.hints.category}</Text>
                 </>
               ) : null}
@@ -331,18 +347,28 @@ export default function CreateListingScreen() {
                 }}
               />
 
-              <Text style={styles.label}>Size</Text>
+              <Text style={styles.label}>Product type</Text>
+              <PickerField
+                value={form.productType}
+                options={catalog.productTypes}
+                placeholder="Choose a product type"
+                error={showErrors && !form.productType ? 'Choose a product type for the size chart.' : null}
+                onSelect={selectProductType}
+              />
+              <Text style={styles.hint}>{catalog.hints.productType ?? catalog.hints.size}</Text>
+
+              <Text style={styles.label}>Size{sizeRequired ? '' : ' - optional'}</Text>
               <PickerField
                 value={sizeLabel}
-                options={catalog.sizes.map((item) => item.label)}
-                placeholder="Choose a size"
+                options={sizeOptions.map((item) => item.label)}
+                placeholder={form.productType ? 'Choose a size' : 'Choose a product type first'}
                 error={
                   showErrors && sizeRequired && !form.size
-                    ? `Size is required for ${form.department} · ${form.category}.`
+                    ? `Size is required for ${form.productType}.`
                     : null
                 }
                 onSelect={(label) => {
-                  const match = catalog.sizes.find((item) => item.label === label);
+                  const match = sizeOptions.find((item) => item.label === label);
                   setForm({ size: match?.value ?? label });
                   setShowErrors(false);
                 }}
@@ -350,7 +376,15 @@ export default function CreateListingScreen() {
               <Text style={styles.hint}>{catalog.hints.size}</Text>
 
               <Text style={styles.label}>Brand</Text>
-              <TextField placeholder="e.g. Zara" value={form.brand} onChangeText={(brand) => setForm({ brand })} />
+              <PickerField
+                value={form.brand}
+                options={catalog.brands ?? []}
+                placeholder="e.g. Zara"
+                onSelect={(brand) => {
+                  setForm({ brand });
+                  setDraftSaved(false);
+                }}
+              />
 
               <Text style={styles.label}>Colour - optional</Text>
               <TextField placeholder="e.g. Black" value={form.colour} onChangeText={(colour) => setForm({ colour })} />

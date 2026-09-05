@@ -33,6 +33,7 @@ export type ListingForm = {
   category: string;
   brand: string;
   condition: string;
+  productType: string;
   size: string;
   colour: string;
   price: string;

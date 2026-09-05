@@ -5,7 +5,7 @@ import type { DbRow } from '../lib/db-types.js';
 import { queueEmail } from '../lib/email/send.js';
 import { listingPublishedEmail } from '../lib/email/templates/listings.js';
 import { getProfileById, getSellerCards, getSellerMap, mapListing, escapeIlike } from '../lib/mappers.js';
-import { LISTING_CATALOG, categoriesForDepartment, shippingSummary } from '../lib/listing-catalog.js';
+import { LISTING_CATALOG, categoriesForDepartment, shippingSummary, sizeIsRequiredForProductType } from '../lib/listing-catalog.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
 
 const router = Router();
@@ -320,10 +320,7 @@ router.post('/:id/publish', requireAuth, async (req, res) => {
     return sendError(res, 400, 'Category is not valid for this department');
   }
   const size = String(existing.size ?? '').trim();
-  if (
-    (LISTING_CATALOG.sizeRequiredCategories as readonly string[]).includes(String(existing.category)) &&
-    (!size || size === '—')
-  ) {
+  if (sizeIsRequiredForProductType(String(existing.category)) && (!size || size === '—')) {
     return sendError(res, 400, 'Size is required for this category');
   }
 

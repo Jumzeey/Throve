@@ -1,11 +1,17 @@
 import type { ListingForm } from '@/data/types';
 import { apiFetch } from '@/lib/api';
 
+export type CatalogSize = { value: string; label: string };
+
 export type ListingCatalog = {
   departments: string[];
   categories: Record<string, string[]>;
   conditions: string[];
-  sizes: { value: string; label: string }[];
+  brands: string[];
+  productTypes: string[];
+  sizesByProductType: Record<string, CatalogSize[]>;
+  sizes: CatalogSize[];
+  sizeRequiredProductTypes: string[];
   sizeRequiredCategories: string[];
   photo: { min: number; max: number };
   titleMax: number;
@@ -16,6 +22,7 @@ export type ListingCatalog = {
     photos: string;
     photosEmpty: string;
     category: string;
+    productType?: string;
     size: string;
   };
 };
@@ -32,8 +39,16 @@ export async function fetchListingCatalog(force = false) {
   if (inflight && !force) return inflight;
   inflight = apiFetch<ListingCatalog>('/listings/catalog')
     .then((data) => {
-      cached = data;
-      return data;
+      cached = {
+        ...data,
+        brands: Array.isArray(data.brands) ? data.brands : [],
+        productTypes: Array.isArray(data.productTypes) ? data.productTypes : [],
+        sizesByProductType: data.sizesByProductType ?? {},
+        sizeRequiredProductTypes: Array.isArray(data.sizeRequiredProductTypes)
+          ? data.sizeRequiredProductTypes
+          : data.sizeRequiredCategories ?? [],
+      };
+      return cached;
     })
     .finally(() => {
       inflight = null;
@@ -45,8 +60,18 @@ export function categoriesForDepartment(catalog: ListingCatalog, department: str
   return catalog.categories[department] ?? [];
 }
 
-export function sizeIsRequired(catalog: ListingCatalog, category: string) {
-  return catalog.sizeRequiredCategories.includes(category);
+export function sizesForProductType(catalog: ListingCatalog, productType: string): CatalogSize[] {
+  if (productType && catalog.sizesByProductType?.[productType]) {
+    return catalog.sizesByProductType[productType];
+  }
+  return catalog.sizes ?? [];
+}
+
+export function sizeIsRequired(catalog: ListingCatalog, productType: string) {
+  const required = catalog.sizeRequiredProductTypes?.length
+    ? catalog.sizeRequiredProductTypes
+    : catalog.sizeRequiredCategories;
+  return required.includes(productType);
 }
 
 export function listingFormIssues(form: ListingForm, catalog: ListingCatalog) {
@@ -56,9 +81,10 @@ export function listingFormIssues(form: ListingForm, catalog: ListingCatalog) {
   if (!form.department.trim()) issues.push('Department');
   if (!form.category.trim()) issues.push('Category');
   if (!form.condition.trim()) issues.push('Condition');
+  if (!form.productType.trim()) issues.push('Product type');
   const price = Number(form.price.replace(/[^\d]/g, ''));
   if (!Number.isFinite(price) || price <= 0) issues.push('Price');
-  if (sizeIsRequired(catalog, form.category) && !form.size.trim()) issues.push('Size');
+  if (sizeIsRequired(catalog, form.productType) && !form.size.trim()) issues.push('Size');
   return issues;
 }
 
