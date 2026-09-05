@@ -101,7 +101,7 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+      <SafeAreaProvider initialMetrics={Platform.OS === 'ios' ? initialWindowMetrics : undefined}>
         <AuthProvider>
           <ListingsProvider>
             <InboxProvider>

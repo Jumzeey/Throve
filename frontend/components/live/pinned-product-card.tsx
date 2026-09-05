@@ -18,6 +18,7 @@ type Props = {
   countdown?: string;
   role?: 'viewer' | 'host';
   claimError?: string | null;
+  claiming?: boolean;
   onClaim?: () => void;
   onBuyNow?: () => void;
   onCheckout?: () => void;
@@ -42,6 +43,7 @@ export function PinnedProductCard({
   countdown,
   role = 'viewer',
   claimError,
+  claiming,
   onClaim,
   onBuyNow,
   onCheckout,
@@ -84,6 +86,7 @@ export function PinnedProductCard({
       {role === 'viewer' ? (
         <ViewerActions
           variant={variant}
+          claiming={claiming}
           onClaim={onClaim}
           onBuyNow={onBuyNow}
           onCheckout={onCheckout}
@@ -118,11 +121,13 @@ export function PinnedProductCard({
 
 function ViewerActions({
   variant,
+  claiming,
   onClaim,
   onBuyNow,
   onCheckout,
 }: {
   variant: PinnedProductVariant;
+  claiming?: boolean;
   onClaim?: () => void;
   onBuyNow?: () => void;
   onCheckout?: () => void;
@@ -147,8 +152,8 @@ function ViewerActions({
   }
   return (
     <View style={styles.actionRow}>
-      <Button label="Claim" variant="secondary" onPress={onClaim} style={styles.actionHalf} />
-      <Button label="Buy now" onPress={onBuyNow ?? onClaim} style={styles.actionWide} />
+      <Button label="Claim" variant="secondary" loading={claiming} onPress={onClaim} style={styles.actionHalf} />
+      <Button label="Buy now" loading={claiming} onPress={onBuyNow ?? onClaim} style={styles.actionWide} />
     </View>
   );
 }

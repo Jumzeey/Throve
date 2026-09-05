@@ -1,3 +1,4 @@
+import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
 import { CheckIcon, UserIcon } from '@/components/ui/icons';
@@ -8,12 +9,12 @@ import { Palette, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useKeyboardBottomInset } from '@/hooks/use-keyboard-bottom-inset';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { ensureMediaLibraryPermission } from '@/lib/listing-photos';
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -23,15 +24,14 @@ import {
   View,
   type LayoutChangeEvent,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type FieldKey = 'username' | 'bio' | 'location';
 
 export default function SetupScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
+  const { bottom } = useScreenInsets();
   const keyboardBottom = useKeyboardBottomInset();
-  const { session, completeSetup, logout } = useAuth();
+  const { session, completeSetup, setProfilePhoto, logout } = useAuth();
   const { isConnected } = useNetworkStatus();
   const scrollRef = useRef<ScrollView>(null);
   const focusedField = useRef<FieldKey | null>(null);
@@ -66,16 +66,26 @@ export default function SetupScreen() {
   async function onPickPhoto() {
     const allowed = await ensureMediaLibraryPermission();
     if (!allowed) return;
-    setUploading(true);
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.7,
     });
-    setUploading(false);
-    if (!result.canceled) {
-      setPhotoUri(result.assets[0]?.uri);
+    const local = result.canceled ? undefined : result.assets[0]?.uri;
+    if (!local) return;
+
+    const previous = photoUri;
+    setPhotoUri(local);
+    setUploading(true);
+    setError('');
+    try {
+      setPhotoUri(await setProfilePhoto(local));
+    } catch (err) {
+      setPhotoUri(previous);
+      setError(err instanceof Error ? err.message : 'Could not upload photo.');
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -112,7 +122,7 @@ export default function SetupScreen() {
     setTimeout(scrollFocusedIntoView, 280);
   }
 
-  const bottomPad = Math.max(keyboardBottom, insets.bottom) + (keyboardBottom > 0 ? 24 : 40);
+  const bottomPad = Math.max(keyboardBottom, bottom) + (keyboardBottom > 0 ? 24 : 40);
 
   return (
     <View style={styles.screen}>
@@ -136,7 +146,7 @@ export default function SetupScreen() {
             {!isConnected ? <OfflineBanner message="Reconnect to save your profile." /> : null}
             <Pressable onPress={onPickPhoto} style={styles.avatarWrap}>
               {photoUri ? (
-                <Image source={{ uri: photoUri }} style={styles.avatar} />
+                <ProfileAvatar uri={photoUri} username={username} style={styles.avatar} allowLocal />
               ) : (
                 <View style={styles.avatarEmpty}>
                   <UserIcon size={30} />
@@ -186,7 +196,13 @@ export default function SetupScreen() {
               </View>
             </View>
             {error ? <AlertBanner variant="error" title="We couldn't save that" message={error} style={styles.banner} /> : null}
-            <Button label="Continue" loading={loading} onPress={onSubmit} disabled={!isConnected} style={styles.submit} />
+            <Button
+              label="Continue"
+              loading={loading}
+              onPress={onSubmit}
+              disabled={!isConnected || uploading}
+              style={styles.submit}
+            />
           </ScrollView>
         ) : (
           <View style={styles.done}>

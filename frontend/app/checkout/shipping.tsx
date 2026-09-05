@@ -8,6 +8,7 @@ import { leaveCheckout, useCheckout } from '@/context/checkout-context';
 import { useLive } from '@/context/live-context';
 import { getListingImage } from '@/data/images';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatCountdown, formatNaira } from '@/lib/format';
 import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
@@ -15,6 +16,7 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } fr
 
 export default function ShippingDetailsScreen() {
   const router = useRouter();
+  const { bottom } = useScreenInsets();
   const live = useLive();
   const checkout = useCheckout();
   const { isConnected } = useNetworkStatus();
@@ -55,7 +57,7 @@ export default function ShippingDetailsScreen() {
     <View style={styles.screen}>
       <ScreenHeader title="Shipping" onBack={cancel} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl + bottom }]} keyboardShouldPersistTaps="handled">
           {!isConnected ? <OfflineBanner message="Reconnect to continue checkout." /> : null}
           <AlertBanner
             variant="info"

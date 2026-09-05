@@ -8,6 +8,7 @@ import { useLive } from '@/context/live-context';
 import { getDeliveryOption } from '@/data/checkout';
 import { getListingImage } from '@/data/images';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatCountdown, formatNaira } from '@/lib/format';
 import { Redirect, useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -15,6 +16,7 @@ import { ExpiredCheckout } from './shipping';
 
 export default function CheckoutSummaryScreen() {
   const router = useRouter();
+  const { bottom } = useScreenInsets();
   const live = useLive();
   const checkout = useCheckout();
   const { isConnected } = useNetworkStatus();
@@ -42,7 +44,7 @@ export default function CheckoutSummaryScreen() {
   return (
     <View style={styles.screen}>
       <ScreenHeader title="Summary" onBack={() => router.back()} />
-      <ScrollView contentContainerStyle={styles.body}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl + bottom }]}>
         {!isConnected ? <OfflineBanner message="Reconnect to continue checkout." /> : null}
         <AlertBanner
           variant="info"

@@ -1,5 +1,6 @@
 import { apiFetch, apiUpload } from '@/lib/api';
-import { isLocalListingPhotoUri, listingPhotoFormPart } from '@/lib/listing-photos';
+import { isLocalListingPhotoUri, isUploadableLocalFileUri, listingPhotoFormPart } from '@/lib/listing-photos';
+import { useAuth } from '@/context/auth-context';
 import type { Department, Listing, ListingForm, ListingStatus } from '@/data/types';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
@@ -37,7 +38,7 @@ type ListingsContextValue = {
   canDelete: (id: string) => boolean;
   toggleSave: (listingId: string, username: string) => Promise<void>;
   hideActiveForSeller: (username: string) => Promise<void>;
-  savedListingsFor: (username: string) => Promise<Listing[]>;
+  savedListingsFor: (username: string) => Listing[];
 };
 
 const ListingsContext = createContext<ListingsContextValue | null>(null);
@@ -64,6 +65,7 @@ export function isListingFormPublishable(form: ListingForm) {
 }
 
 export function ListingsProvider({ children }: { children: ReactNode }) {
+  const { isReady, session } = useAuth();
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setFormState] = useState<ListingForm>(EMPTY_LISTING_FORM);
@@ -81,15 +83,11 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    if (!isReady) return;
+    void refresh();
+  }, [isReady, session?.userId, refresh]);
 
   const getListing = useCallback((id: string) => listings.find((listing) => listing.id === id), [listings]);
-
-  const listingsForSeller = useCallback(
-    async (username: string) => apiFetch<Listing[]>(`/listings/seller/${encodeURIComponent(username)}`),
-    [],
-  );
 
   const setForm = useCallback((patch: Partial<ListingForm>) => {
     setFormState((current) => ({ ...current, ...patch }));
@@ -120,7 +118,7 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
     if (!uris.length) return [] as string[];
 
     const remote = uris.filter((uri) => !isLocalListingPhotoUri(uri));
-    const local = uris.filter((uri) => isLocalListingPhotoUri(uri));
+    const local = uris.filter((uri) => isLocalListingPhotoUri(uri) && isUploadableLocalFileUri(uri));
     if (!local.length) return remote;
 
     const formData = new FormData();
@@ -275,9 +273,10 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
     await refresh();
   }, [refresh]);
 
-  const savedListingsFor = useCallback(async (_username: string) => {
-    return apiFetch<Listing[]>('/listings/saved/me');
-  }, []);
+  const savedListingsFor = useCallback(
+    (username: string) => listings.filter((listing) => listing.savedBy.includes(username)),
+    [listings],
+  );
 
   const listingsForSellerSync = useCallback(
     (username: string) => listings.filter((listing) => listing.seller === username),

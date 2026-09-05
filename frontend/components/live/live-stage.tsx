@@ -14,8 +14,9 @@ import {
 import { SimulatedStage } from '@/components/ui/simulated-stage';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import type { LiveConnection, LiveComment, LiveKitCredentials } from '@/data/types';
-import Constants, { ExecutionEnvironment } from 'expo-constants';
-import { useEffect, useState, type ReactNode } from 'react';
+import { loadLiveKitNative, type LiveKitNative } from '@/lib/livekit-native';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
+import { memo, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 type Props = {
@@ -32,45 +33,64 @@ const LIVE_IVORY_60 = 'rgba(255,247,240,0.6)';
 const LIVE_IVORY_62 = 'rgba(255,247,240,0.62)';
 const LIVE_IVORY_16 = 'rgba(255,247,240,0.16)';
 
-function canLoadNativeLiveKit() {
-  // Expo Go has no LiveKit / WebRTC native modules — never dynamic-import them there.
-  if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) return false;
-  if (Constants.appOwnership === 'expo') return false;
-  return true;
-}
-
 /**
  * LiveKit video stage. Falls back to SimulatedStage when credentials are missing
  * or native modules are unavailable (Expo Go).
  */
 export function LiveStage({ credentials, isHost, onConnectionChange, children }: Props) {
-  const [mods, setMods] = useState<{ rn: LiveKitModule; client: LivekitClient } | null>(null);
+  return (
+    <View style={styles.room}>
+      <LiveVideoLayer credentials={credentials} isHost={isHost} onConnectionChange={onConnectionChange} />
+      <View style={styles.overlay} pointerEvents="box-none">
+        {children}
+      </View>
+    </View>
+  );
+}
+
+const LiveVideoLayer = memo(function LiveVideoLayer({
+  credentials,
+  isHost,
+  onConnectionChange,
+}: {
+  credentials: LiveKitCredentials | null;
+  isHost: boolean;
+  onConnectionChange?: (state: LiveConnection) => void;
+}) {
+  const [mods, setMods] = useState<LiveKitNative | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!credentials?.token || !credentials.url || !canLoadNativeLiveKit()) {
+      if (!credentials?.token || !credentials.url) {
         setFailed(true);
         return;
       }
-      try {
-        await import('@livekit/react-native-webrtc');
-        const rn = await import('@livekit/react-native');
-        const client = await import('livekit-client');
-        rn.registerGlobals();
-        if (!cancelled) setMods({ rn, client });
-      } catch {
-        if (!cancelled) setFailed(true);
+      const loaded = await loadLiveKitNative();
+      if (cancelled) return;
+      if (!loaded) {
+        setFailed(true);
+        return;
       }
+      setFailed(false);
+      setMods(loaded);
     })();
     return () => {
       cancelled = true;
     };
   }, [credentials?.token, credentials?.url]);
 
+  const onConnected = useCallback(() => onConnectionChange?.('live'), [onConnectionChange]);
+  const onDisconnected = useCallback(() => onConnectionChange?.('lost'), [onConnectionChange]);
+  const onError = useCallback(() => onConnectionChange?.('reconnecting'), [onConnectionChange]);
+
   if (failed || !credentials) {
-    return <SimulatedStage>{children}</SimulatedStage>;
+    return (
+      <View style={styles.videoLayer}>
+        <SimulatedStage />
+      </View>
+    );
   }
 
   if (!mods) {
@@ -78,9 +98,6 @@ export function LiveStage({ credentials, isHost, onConnectionChange, children }:
       <View style={styles.placeholder}>
         <VideoIcon size={34} color="rgba(255,247,240,0.28)" />
         <Text style={styles.placeholderText}>Connecting stream…</Text>
-        <View style={styles.overlay} pointerEvents="box-none">
-          {children}
-        </View>
       </View>
     );
   }
@@ -88,27 +105,22 @@ export function LiveStage({ credentials, isHost, onConnectionChange, children }:
   const { LiveKitRoom } = mods.rn;
 
   return (
-    <View style={styles.room}>
+    <View style={styles.videoLayer} pointerEvents="none">
       <LiveKitRoom
         token={credentials.token}
         serverUrl={credentials.url}
         connect
         audio={isHost}
         video={isHost}
-        onConnected={() => onConnectionChange?.('live')}
-        onDisconnected={() => onConnectionChange?.('lost')}
-        onError={() => onConnectionChange?.('reconnecting')}
+        onConnected={onConnected}
+        onDisconnected={onDisconnected}
+        onError={onError}
       >
-        <View style={styles.room}>
-          <CameraLayer rn={mods.rn} client={mods.client} isHost={isHost} />
-          <View style={styles.overlay} pointerEvents="box-none">
-            {children}
-          </View>
-        </View>
+        <CameraLayer rn={mods.rn} client={mods.client} isHost={isHost} />
       </LiveKitRoom>
     </View>
   );
-}
+});
 
 function CameraLayer({
   rn,
@@ -316,6 +328,7 @@ export function LiveCommentActionsSheet({
   onClose: () => void;
   onRemove?: () => void;
 }) {
+  const { sheetBottom } = useScreenInsets();
   if (!comment) return null;
 
   const actions = [
@@ -329,7 +342,7 @@ export function LiveCommentActionsSheet({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.sheetOverlay} onPress={onClose}>
-        <View style={styles.sheetCard} onStartShouldSetResponder={() => true}>
+        <View style={[styles.sheetCard, { paddingBottom: sheetBottom }]} onStartShouldSetResponder={() => true}>
           <Text style={styles.sheetTitle}>Comment actions</Text>
           <View style={styles.sheetPreview}>
             <Text style={styles.sheetPreviewText}>
@@ -444,11 +457,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Palette.liveDarkAlt,
   },
+  videoLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
   video: {
     ...StyleSheet.absoluteFillObject,
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-start',
   },
   placeholder: {
     flex: 1,

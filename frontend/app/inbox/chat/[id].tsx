@@ -14,7 +14,8 @@ import { getSellerAvatar } from '@/data/images';
 import { useAuth } from '@/context/auth-context';
 import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
-import { useKeyboardBottomInset } from '@/hooks/use-keyboard-bottom-inset';
+import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { pickChatImage, uploadChatImage } from '@/lib/chat-media';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -28,14 +29,16 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ChatScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
-  const keyboardBottom = useKeyboardBottomInset();
+  const { top, bottom, sheetBottom } = useScreenInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const keyboard = useKeyboardInset();
+  const keyboardBottom = keyboard.height;
   const { id } = useLocalSearchParams<{ id: string }>();
   const { session } = useAuth();
   const inbox = useInbox();
@@ -89,7 +92,10 @@ export default function ChatScreen() {
   );
   const canSend = !blocked && !sellerLocked;
   const thread = threadPreview;
-  const composerPad = Math.max(insets.bottom, 12) + (Platform.OS === 'android' ? keyboardBottom : 0);
+  const composerPad =
+    Platform.OS === 'android' && keyboard.height > 0
+      ? Math.max(0, windowHeight - keyboard.screenY) + 24
+      : Math.max(bottom, 12);
   const hasPayload = Boolean(draft.trim() || pendingImage);
   const sendDisabled = !canSend || !hasPayload || sending;
 
@@ -138,7 +144,7 @@ export default function ChatScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={[styles.header, { paddingTop: Math.max(insets.top, 14) }]}>
+      <View style={[styles.header, { paddingTop: Math.max(top, 14) }]}>
         <Pressable onPress={() => router.back()} hitSlop={12} style={styles.back}>
           <ChevronBackIcon />
         </Pressable>
@@ -267,7 +273,7 @@ export default function ChatScreen() {
 
       {menuOpen ? (
         <Pressable style={styles.overlay} onPress={() => setMenuOpen(false)}>
-          <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+          <View style={[styles.sheet, { paddingBottom: sheetBottom }]}>
             <Pressable
               onPress={() => {
                 setMenuOpen(false);
@@ -303,7 +309,7 @@ export default function ChatScreen() {
       ) : null}
 
       {toast ? (
-        <View style={[styles.toast, { top: insets.top + 62 }]}>
+        <View style={[styles.toast, { top: top + 62 }]}>
           <Text style={styles.toastText}>{toast}</Text>
         </View>
       ) : null}
@@ -318,7 +324,7 @@ export default function ChatScreen() {
         <View style={styles.viewer}>
           <Pressable
             onPress={() => setViewerUri(null)}
-            style={[styles.viewerClose, { top: Math.max(insets.top, 12) + 8 }]}
+            style={[styles.viewerClose, { top: Math.max(top, 12) + 8 }]}
             hitSlop={12}
             accessibilityRole="button"
             accessibilityLabel="Close photo"

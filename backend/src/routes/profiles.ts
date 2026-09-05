@@ -1,6 +1,6 @@
 import { sendTransactionalEmail } from '../lib/email/send.js';
 import { accountDeactivatedEmail } from '../lib/email/templates/account.js';
-import { getProfileById, getProfileByUsername, mapProfile } from '../lib/mappers.js';
+import { getProfileById, getProfileByUsername, mapProfile, publicPhotoUrl, storedPhotoUrl } from '../lib/mappers.js';
 import { createSupabaseClient } from '../lib/supabase.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
 import { Router } from 'express';
@@ -14,6 +14,10 @@ router.get('/me', requireAuth, async (req, res) => {
   const profile = await getProfileById(supabase, userId);
   if (!profile || profile.deactivated) {
     return sendError(res, 404, 'Profile not found', 'NOT_FOUND');
+  }
+  if (profile.photo_url && !publicPhotoUrl(profile.photo_url)) {
+    await supabase.from('profiles').update({ photo_url: null }).eq('id', userId);
+    profile.photo_url = null;
   }
   return res.json(mapProfile(profile));
 });
@@ -46,17 +50,20 @@ router.put('/me', requireAuth, async (req, res) => {
   if (taken.error) return handleSupabaseError(res, taken.error);
   if (taken.data) return sendError(res, 409, 'That username is unavailable', 'USERNAME_TAKEN');
 
+  const patch: Record<string, string | null> = {
+    name: parsed.data.name.trim(),
+    username: parsed.data.username.trim(),
+    bio: parsed.data.bio?.trim() ?? '',
+    location: parsed.data.location?.trim() ?? '',
+  };
+  if (parsed.data.dob !== undefined) patch.dob = parsed.data.dob || null;
+  if (parsed.data.phone !== undefined) patch.phone = parsed.data.phone.trim() || null;
+  const photoUrl = storedPhotoUrl(parsed.data.photoUri);
+  if (photoUrl !== undefined) patch.photo_url = photoUrl;
+
   const { data, error } = await supabase
     .from('profiles')
-    .update({
-      name: parsed.data.name.trim(),
-      username: parsed.data.username.trim(),
-      bio: parsed.data.bio?.trim() ?? '',
-      location: parsed.data.location?.trim() ?? '',
-      photo_url: parsed.data.photoUri ?? null,
-      dob: parsed.data.dob ?? null,
-      phone: parsed.data.phone?.trim() || null,
-    })
+    .update(patch)
     .eq('id', userId)
     .select('*')
     .single();
@@ -90,15 +97,18 @@ router.post('/me/setup', requireAuth, async (req, res) => {
   if (taken.error) return handleSupabaseError(res, taken.error);
   if (taken.data) return sendError(res, 409, 'That username is unavailable', 'USERNAME_TAKEN');
 
+  const setupPatch: Record<string, string | boolean | null> = {
+    username: parsed.data.username.trim(),
+    bio: parsed.data.bio?.trim() ?? '',
+    location: parsed.data.location?.trim() ?? '',
+    setup_complete: true,
+  };
+  const setupPhoto = storedPhotoUrl(parsed.data.photoUri);
+  if (setupPhoto !== undefined) setupPatch.photo_url = setupPhoto;
+
   const { data, error } = await supabase
     .from('profiles')
-    .update({
-      username: parsed.data.username.trim(),
-      bio: parsed.data.bio?.trim() ?? '',
-      location: parsed.data.location?.trim() ?? '',
-      photo_url: parsed.data.photoUri ?? null,
-      setup_complete: true,
-    })
+    .update(setupPatch)
     .eq('id', userId)
     .select('*')
     .single();
@@ -165,7 +175,7 @@ router.get('/:username/public', optionalAuth, async (req, res) => {
     username: profile.username,
     bio: profile.bio,
     location: profile.location,
-    photoUri: profile.photo_url ?? undefined,
+    photoUri: publicPhotoUrl(profile.photo_url),
   });
 });
 

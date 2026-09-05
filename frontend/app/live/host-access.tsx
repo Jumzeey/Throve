@@ -3,16 +3,16 @@ import { Button } from '@/components/ui/button';
 import { ChevronBackIcon, SpinnerArcIcon, VideoIcon } from '@/components/ui/icons';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type AccessState = 'checking' | 'denied' | 'error' | 'offline';
 
 export default function HostAccessScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
+  const { top, bottom } = useScreenInsets();
   const { session, isReady } = useAuth();
   const [accessState, setAccessState] = useState<AccessState>('checking');
 
@@ -24,7 +24,7 @@ export default function HostAccessScreen() {
 
   if (!isReady || accessState === 'checking') {
     return (
-      <View style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+      <View style={[styles.screen, { paddingTop: top, paddingBottom: bottom }]}>
         <Pressable onPress={() => router.back()} style={styles.back}>
           <ChevronBackIcon color={Palette.ivory} />
         </Pressable>
@@ -44,7 +44,7 @@ export default function HostAccessScreen() {
   }
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+    <View style={[styles.screen, { paddingTop: top, paddingBottom: bottom }]}>
       <Pressable onPress={() => router.back()} style={styles.back}>
         <ChevronBackIcon color={Palette.ivory} />
       </Pressable>

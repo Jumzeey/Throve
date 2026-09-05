@@ -8,11 +8,13 @@ import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { deliveryLabel, useCheckout } from '@/context/checkout-context';
 import { getListingImage } from '@/data/images';
 import { formatNaira } from '@/lib/format';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export default function CheckoutConfirmationScreen() {
   const router = useRouter();
+  const { bottom } = useScreenInsets();
   const checkout = useCheckout();
   const order = checkout.lastOrder;
 
@@ -23,7 +25,7 @@ export default function CheckoutConfirmationScreen() {
   return (
     <View style={styles.screen}>
       <ScreenHeader title="Confirmed" onBack={() => router.replace('/(tabs)')} />
-      <ScrollView contentContainerStyle={styles.body}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl + bottom }]}>
         <View style={styles.successIcon}>
           <CheckIcon size={22} color={Palette.ivory} />
         </View>

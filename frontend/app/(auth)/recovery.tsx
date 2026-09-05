@@ -4,6 +4,7 @@ import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
 import { Palette, Typography } from '@/constants/theme';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { isValidEmail } from '@/lib/validation';
 import { Redirect, useRouter } from 'expo-router';
 import { useAuth } from '@/context/auth-context';
@@ -13,6 +14,7 @@ import { KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-na
 /** Account recovery now routes into the OTP password setup / reset flow. */
 export default function RecoveryScreen() {
   const router = useRouter();
+  const { bottom } = useScreenInsets();
   const { session } = useAuth();
   const { isConnected } = useNetworkStatus();
   const [email, setEmail] = useState('');
@@ -44,7 +46,7 @@ export default function RecoveryScreen() {
     <View style={styles.screen}>
       <ScreenHeader title="" onBack={() => router.back()} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.form}>
+        <View style={[styles.form, { paddingBottom: bottom + 16 }]}>
           <Text style={styles.heading}>Forgot{'\n'}password</Text>
           <Text style={styles.lead}>
             Enter your email and we’ll help you set a new password with a one-time verification code.

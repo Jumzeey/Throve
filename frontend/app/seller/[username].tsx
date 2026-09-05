@@ -1,3 +1,4 @@
+import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
 import { ScreenHeader } from '@/components/ui/screen-header';
@@ -9,9 +10,9 @@ import { useCheckout } from '@/context/checkout-context';
 import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
 import { useLive } from '@/context/live-context';
-import { getListingImage, getSellerAvatar } from '@/data/images';
-import { apiFetch } from '@/lib/api';
+import { getListingImage } from '@/data/images';
 import { formatNaira } from '@/lib/format';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -19,30 +20,29 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 
 export default function SellerProfileScreen() {
   const router = useRouter();
+  const { sheetBottom } = useScreenInsets();
   const { username: raw } = useLocalSearchParams<{ username: string }>();
   const username = Array.isArray(raw) ? raw[0] : raw;
-  const { session } = useAuth();
+  const { session, publicProfiles, ensurePublicProfile } = useAuth();
   const { listingsForSeller } = useListings();
   const { ratingInfo, getReviews } = useCheckout();
   const inbox = useInbox();
   const live = useLive();
   const [tab, setTab] = useState<'active' | 'sold'>('active');
   const [reviewsOpen, setReviewsOpen] = useState(false);
-  const [publicProfile, setPublicProfile] = useState<{ bio: string; location: string; photoUri?: string } | null>(null);
 
   useEffect(() => {
     if (!username || session?.username === username) return;
-    apiFetch<{ bio: string; location: string; photoUri?: string }>(`/profiles/${username}/public`)
-      .then(setPublicProfile)
-      .catch(() => setPublicProfile({ bio: '', location: '' }));
-  }, [session?.username, username]);
+    void ensurePublicProfile(username).catch(() => undefined);
+  }, [ensurePublicProfile, session?.username, username]);
 
   if (!session) return <Redirect href="/(auth)/welcome" />;
   if (!username) return <Redirect href="/(tabs)" />;
 
-  const profile = session.username === username
-    ? { bio: session.bio, location: session.location }
-    : publicProfile ?? { bio: '', location: '' };
+  const profile =
+    session.username === username
+      ? { bio: session.bio, location: session.location, photoUri: session.photoUri }
+      : publicProfiles[username] ?? { bio: '', location: '' };
   const mine = listingsForSeller(username);
   const shown = tab === 'sold' ? mine.filter((i) => i.status === 'sold') : mine.filter((i) => i.status === 'available' || i.status === 'reserved');
   const rating = ratingInfo(username);
@@ -64,7 +64,7 @@ export default function SellerProfileScreen() {
       <ScrollView contentContainerStyle={styles.body}>
         <View style={styles.identity}>
           <View style={styles.avatarWrap}>
-            <AppImage source={getSellerAvatar(username)} style={styles.avatar} />
+            <ProfileAvatar uri={profile.photoUri} username={username} style={styles.avatar} />
             {liveSession ? <View style={styles.liveDot} /> : null}
           </View>
           <Text style={styles.name}>@{username}</Text>
@@ -118,7 +118,7 @@ export default function SellerProfileScreen() {
       </ScrollView>
       <Modal visible={reviewsOpen} transparent animationType="slide" onRequestClose={() => setReviewsOpen(false)}>
         <Pressable style={styles.overlay} onPress={() => setReviewsOpen(false)}>
-          <Pressable style={styles.sheet} onPress={() => {}}>
+          <Pressable style={[styles.sheet, { paddingBottom: sheetBottom }]} onPress={() => {}}>
             <View style={styles.sheetTop}>
               <Text style={styles.sheetTitle}>Reviews</Text>
               <Pressable onPress={() => setReviewsOpen(false)} hitSlop={12}>

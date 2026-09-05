@@ -15,15 +15,15 @@ import { useAuth } from '@/context/auth-context';
 import { useListings } from '@/context/listings-context';
 import { MAX_LIVE_MODERATORS, SUGGESTED_MODERATORS, useLive } from '@/context/live-context';
 import { formatNaira } from '@/lib/format';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function LiveBroadcastScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
+  const { top, sheetBottom } = useScreenInsets();
   const { session } = useAuth();
   const { getListing } = useListings();
   const live = useLive();
@@ -116,7 +116,7 @@ export default function LiveBroadcastScreen() {
         isHost
         onConnectionChange={(state) => live.setConnection(liveSession.id, state)}
       >
-        <View style={[styles.topArea, { paddingTop: insets.top + 8 }]}>
+        <View style={[styles.topArea, { paddingTop: top + 8 }]}>
           <LiveHostTopBar
             viewers={liveSession.viewers}
             onEnd={() => setEndOpen(true)}
@@ -152,34 +152,34 @@ export default function LiveBroadcastScreen() {
         </View>
 
         <LiveConnectionOverlay connection={connection} />
-      </LiveStage>
 
-      {pinnedProduct ? (
-        <View style={styles.productWrap}>
-          <PinnedProductCard
-            role="host"
-            title={pinnedProduct.title ?? pinnedListing?.title ?? 'Product'}
-            subtitle={subtitle}
-            price={formatNaira(pinnedProduct.livePrice)}
-            listingId={pinnedProduct.listingId}
-            imageUri={pinnedProduct.photoUrls?.[0]}
-            variant={productVariant}
-            onChangeProduct={() => setPickerOpen(true)}
-            onNextProduct={pinNextProduct}
+        {pinnedProduct ? (
+          <View style={styles.productWrap} pointerEvents="box-none">
+            <PinnedProductCard
+              role="host"
+              title={pinnedProduct.title ?? pinnedListing?.title ?? 'Product'}
+              subtitle={subtitle}
+              price={formatNaira(pinnedProduct.livePrice)}
+              listingId={pinnedProduct.listingId}
+              imageUri={pinnedProduct.photoUrls?.[0]}
+              variant={productVariant}
+              onChangeProduct={() => setPickerOpen(true)}
+              onNextProduct={pinNextProduct}
+            />
+          </View>
+        ) : null}
+
+        {live.roomNotice ? <Text style={styles.notice}>{live.roomNotice}</Text> : null}
+
+        <View style={[styles.composerWrap, { paddingBottom: sheetBottom }]}>
+          <LiveComposer
+            value={commentDraft}
+            onChangeText={setCommentDraft}
+            onSend={sendHostComment}
+            placeholder="Reply to your viewers…"
           />
         </View>
-      ) : null}
-
-      {live.roomNotice ? <Text style={styles.notice}>{live.roomNotice}</Text> : null}
-
-      <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, 14) }]}>
-        <LiveComposer
-          value={commentDraft}
-          onChangeText={setCommentDraft}
-          onSend={sendHostComment}
-          placeholder="Reply to your viewers…"
-        />
-      </View>
+      </LiveStage>
 
       <EndLiveDialog
         visible={endOpen}
@@ -232,10 +232,11 @@ function ProductPickerSheet({
   onClose: () => void;
   onPin: (productId: string) => void;
 }) {
+  const { sheetBottom } = useScreenInsets();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.sheetOverlay} onPress={onClose}>
-        <View style={styles.sheetCard} onStartShouldSetResponder={() => true}>
+        <View style={[styles.sheetCard, { paddingBottom: sheetBottom }]} onStartShouldSetResponder={() => true}>
           <Text style={styles.sheetTitle}>Products in this live</Text>
           {products.map((product) => {
             const listing = getListing(product.listingId);
@@ -281,12 +282,13 @@ function ModeratorsLiveSheet({
   onAdd: (username: string) => void;
   onRemove: (username: string) => void;
 }) {
+  const { sheetBottom } = useScreenInsets();
   const available = SUGGESTED_MODERATORS.filter((name) => !moderators.includes(name));
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.sheetOverlay} onPress={onClose}>
-        <View style={styles.sheetCard} onStartShouldSetResponder={() => true}>
+        <View style={[styles.sheetCard, { paddingBottom: sheetBottom }]} onStartShouldSetResponder={() => true}>
           <Text style={styles.sheetTitle}>
             Moderators during the live · {moderators.length} of {MAX_LIVE_MODERATORS}
           </Text>

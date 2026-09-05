@@ -1,5 +1,6 @@
 import { apiFetch } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/context/auth-context';
 import type {
   Listing,
   ListingStatus,
@@ -31,7 +32,6 @@ type StartLiveInput = {
 type LiveContextValue = {
   sessions: LiveSession[];
   activeBroadcastId: string | null;
-  now: number;
   liveNow: LiveSession[];
   upcoming: LiveSession[];
   loading: boolean;
@@ -72,6 +72,7 @@ type LiveContextValue = {
 };
 
 const LiveContext = createContext<LiveContextValue | null>(null);
+const LiveClockContext = createContext(0);
 
 function mapProductRow(row: Record<string, unknown>): LiveStreamProduct {
   const stock = Number(row.stock ?? 0);
@@ -98,6 +99,7 @@ function mapProductRow(row: Record<string, unknown>): LiveStreamProduct {
 }
 
 export function LiveProvider({ children }: { children: ReactNode }) {
+  const { isReady } = useAuth();
   const [sessions, setSessions] = useState<LiveSession[]>([]);
   const [commentsBySession, setCommentsBySession] = useState<Record<string, LiveComment[]>>({});
   const [connections, setConnections] = useState<Record<string, LiveConnection>>({});
@@ -124,10 +126,14 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    refresh();
+    if (!isReady) return;
+    void refresh();
+  }, [isReady, refresh]);
+
+  useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [refresh]);
+  }, []);
 
   const liveNow = useMemo(() => sessions.filter((session) => session.status === 'live'), [sessions]);
   const upcoming = useMemo(() => sessions.filter((session) => session.status === 'upcoming'), [sessions]);
@@ -212,19 +218,22 @@ export function LiveProvider({ children }: { children: ReactNode }) {
                 }
                 if (idx === -1) products.push(product);
                 else products[idx] = { ...products[idx], ...product };
-                const pinned = products.find((p) => p.isPinned);
-                if (product.isPinned) {
-                  setRoomNotice('New product pinned');
-                  setTimeout(() => setRoomNotice(null), 2500);
-                }
+                const nextProducts = products.map((p) =>
+                  p.id === product.id ? p : { ...p, isPinned: product.isPinned ? false : p.isPinned },
+                );
+                const pinned = nextProducts.find((p) => p.isPinned);
                 return {
                   ...session,
-                  products: products.map((p) => (p.id === product.id ? p : { ...p, isPinned: product.isPinned ? false : p.isPinned })),
-                  pinnedProductId: pinned?.id ?? product.isPinned ? product.id : session.pinnedProductId,
+                  products: nextProducts,
+                  pinnedProductId: pinned?.id ?? (product.isPinned ? product.id : session.pinnedProductId),
                   pinnedListingId: pinned?.listingId ?? (product.isPinned ? product.listingId : session.pinnedListingId),
                 };
               }),
             );
+            if (product.isPinned) {
+              setRoomNotice('New product pinned');
+              setTimeout(() => setRoomNotice(null), 2500);
+            }
           },
         )
         .on(
@@ -350,12 +359,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ quantity }),
       });
       setClaimsBySession((current) => ({ ...current, [sessionId]: claim }));
-      await hydrateSession(sessionId);
       setRoomNotice('Claim secured — complete checkout');
       setTimeout(() => setRoomNotice(null), 2500);
       return claim;
     },
-    [hydrateSession],
+    [],
   );
 
   const claimListing = useCallback(
@@ -526,7 +534,6 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     () => ({
       sessions,
       activeBroadcastId,
-      now,
       liveNow,
       upcoming,
       loading,
@@ -583,7 +590,6 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       listingStatus,
       liveNow,
       loading,
-      now,
       pinListing,
       pinProduct,
       refresh,
@@ -609,11 +615,20 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     ],
   );
 
-  return <LiveContext.Provider value={value}>{children}</LiveContext.Provider>;
+  return (
+    <LiveContext.Provider value={value}>
+      <LiveClockContext.Provider value={now}>{children}</LiveClockContext.Provider>
+    </LiveContext.Provider>
+  );
 }
 
 export function useLive() {
   const value = useContext(LiveContext);
   if (!value) throw new Error('useLive must be used within LiveProvider');
   return value;
+}
+
+/** 1s clock for claim/checkout countdowns — kept off the main live context so video views don't remount. */
+export function useLiveClock() {
+  return useContext(LiveClockContext);
 }

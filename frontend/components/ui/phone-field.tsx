@@ -1,6 +1,7 @@
 import { COUNTRY_DIAL_CODES, getCountryByIso, type CountryDialCode } from '@/data/country-codes';
 import { digitsOnly } from '@/lib/phone';
 import { Palette, Radius, Typography } from '@/constants/theme';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useState } from 'react';
 import {
@@ -12,6 +13,7 @@ import {
   TextInput,
   View,
   type StyleProp,
+  type TextInputProps,
   type ViewStyle,
 } from 'react-native';
 
@@ -23,6 +25,8 @@ type Props = {
   onNumberChange: (national: string) => void;
   error?: string | null;
   containerStyle?: StyleProp<ViewStyle>;
+  onFocus?: TextInputProps['onFocus'];
+  onBlur?: TextInputProps['onBlur'];
 };
 
 export function PhoneField({
@@ -33,7 +37,10 @@ export function PhoneField({
   onNumberChange,
   error,
   containerStyle,
+  onFocus,
+  onBlur,
 }: Props) {
+  const { sheetBottom } = useScreenInsets();
   const [focused, setFocused] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const country = getCountryByIso(countryIso);
@@ -68,15 +75,21 @@ export function PhoneField({
             focused && !hasError ? styles.focused : null,
             hasError ? styles.errorInput : null,
           ]}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
+          onFocus={(event) => {
+            setFocused(true);
+            onFocus?.(event);
+          }}
+          onBlur={(event) => {
+            setFocused(false);
+            onBlur?.(event);
+          }}
         />
       </View>
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
       <Modal visible={pickerOpen} transparent animationType="slide" onRequestClose={() => setPickerOpen(false)}>
         <Pressable style={styles.overlay} onPress={() => setPickerOpen(false)}>
-          <View style={styles.sheet} onStartShouldSetResponder={() => true}>
+          <View style={[styles.sheet, { paddingBottom: sheetBottom }]} onStartShouldSetResponder={() => true}>
             <Text style={styles.sheetTitle}>Country code</Text>
             <FlatList
               data={COUNTRY_DIAL_CODES}

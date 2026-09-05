@@ -11,6 +11,7 @@ import { useListings } from '@/context/listings-context';
 import { MAX_LIVE_MODERATORS, SUGGESTED_MODERATORS, useLive } from '@/context/live-context';
 import { DEPARTMENTS } from '@/data/seed';
 import { formatNaira } from '@/lib/format';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
@@ -22,14 +23,13 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const DEPARTMENT_CHIPS = DEPARTMENTS.map((department) => ({ label: department, value: department }));
 const IVORY_50 = 'rgba(255,247,240,0.5)';
 
 export default function PrepareLiveScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
+  const { sheetBottom } = useScreenInsets();
   const { session } = useAuth();
   const { listingsForSeller } = useListings();
   const live = useLive();
@@ -121,7 +121,7 @@ export default function PrepareLiveScreen() {
         }
       />
       <ScrollView
-        contentContainerStyle={[styles.body, { paddingBottom: Math.max(insets.bottom, 28) }]}
+        contentContainerStyle={[styles.body, { paddingBottom: sheetBottom }]}
         keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.sectionLabel}>Cover image</Text>
@@ -315,12 +315,13 @@ function ModeratorsSheet({
   onAdd: (username: string) => void;
   onRemove: (username: string) => void;
 }) {
+  const { sheetBottom } = useScreenInsets();
   const available = SUGGESTED_MODERATORS.filter((name) => !moderators.includes(name));
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.sheetOverlay} onPress={onClose}>
-        <View style={styles.sheetCard} onStartShouldSetResponder={() => true}>
+        <View style={[styles.sheetCard, { paddingBottom: sheetBottom }]} onStartShouldSetResponder={() => true}>
           <Text style={styles.sheetTitle}>Live moderators</Text>
           <Text style={styles.sheetCopy}>
             You can appoint up to two. They help with comments and disruptive viewers — nothing else.

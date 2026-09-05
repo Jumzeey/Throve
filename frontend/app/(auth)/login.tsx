@@ -8,7 +8,9 @@ import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import type { PreferredLoginMethod } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { getDeviceLoginPreference } from '@/lib/login-preference';
+import { remainingCooldownSec } from '@/lib/session-persistence';
 import { isValidEmail } from '@/lib/validation';
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -18,18 +20,23 @@ const RESEND_COOLDOWN_SEC = 30;
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { session, requestMagicLink, completeMagicLink, signInWithPassword, getLoginOptions } = useAuth();
+  const { bottom } = useScreenInsets();
+  const { session, requestMagicLink, completeMagicLink, signInWithPassword, getLoginOptions, authResume, persistAuthResume, clearAuthResumeFlow } =
+    useAuth();
   const { isConnected } = useNetworkStatus();
+  const restoredMagic = authResume?.kind === 'login-magic' ? authResume : null;
   const [method, setMethod] = useState<PreferredLoginMethod>('password');
   const [ready, setReady] = useState(false);
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(restoredMagic?.email ?? '');
   const [password, setPassword] = useState('');
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [stage, setStage] = useState<'form' | 'sent'>('form');
-  const [cooldown, setCooldown] = useState(0);
+  const [stage, setStage] = useState<'form' | 'sent'>(restoredMagic ? 'sent' : 'form');
+  const [cooldown, setCooldown] = useState(() =>
+    restoredMagic ? remainingCooldownSec(restoredMagic.cooldownUntil) : 0,
+  );
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -37,7 +44,7 @@ export default function LoginScreen() {
     (async () => {
       const preferred = await getDeviceLoginPreference();
       if (!cancelled) {
-        setMethod(preferred);
+        setMethod(restoredMagic ? 'magic_link' : preferred);
         setReady(true);
       }
     })();
@@ -52,8 +59,15 @@ export default function LoginScreen() {
     };
   }, []);
 
-  function startCooldown() {
-    setCooldown(RESEND_COOLDOWN_SEC);
+  useEffect(() => {
+    if (cooldown > 0 && !cooldownRef.current) {
+      startCooldown(cooldown);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function startCooldown(seconds = RESEND_COOLDOWN_SEC) {
+    setCooldown(seconds);
     if (cooldownRef.current) clearInterval(cooldownRef.current);
     cooldownRef.current = setInterval(() => {
       setCooldown((prev) => {
@@ -116,6 +130,12 @@ export default function LoginScreen() {
       await requestMagicLink(email);
       setStage('sent');
       startCooldown();
+      await persistAuthResume({
+        kind: 'login-magic',
+        email: email.trim().toLowerCase(),
+        cooldownUntil: Date.now() + RESEND_COOLDOWN_SEC * 1000,
+        updatedAt: Date.now(),
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Please try again in a moment.');
     } finally {
@@ -135,12 +155,13 @@ export default function LoginScreen() {
     }
   }
 
-  function onBack() {
+  async function onBack() {
     if (stage === 'sent') {
       setStage('form');
       setError('');
       return;
     }
+    await clearAuthResumeFlow();
     router.back();
   }
 
@@ -154,7 +175,7 @@ export default function LoginScreen() {
       <ScreenHeader title="" onBack={onBack} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         {stage === 'form' ? (
-          <View style={styles.form}>
+          <View style={[styles.form, { paddingBottom: bottom + 16 }]}>
             <Text style={styles.heading}>Welcome back</Text>
             <Text style={styles.lead}>
               {!ready

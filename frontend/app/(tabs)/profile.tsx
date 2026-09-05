@@ -1,9 +1,7 @@
-import { AppImage } from '@/components/ui/app-image';
+import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { Button } from '@/components/ui/button';
-import { LoadingSkeleton } from '@/components/ui/loading-skeleton';
 import { OfflineBanner } from '@/components/ui/alert-banner';
 import { Palette, Radius, Shadows, Spacing, Typography } from '@/constants/theme';
-import { getSellerAvatar } from '@/data/images';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAuth } from '@/context/auth-context';
@@ -11,8 +9,7 @@ import { useCheckout } from '@/context/checkout-context';
 import { useListings } from '@/context/listings-context';
 import { starString } from '@/lib/format';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 
 export default function ProfileScreen() {
@@ -23,27 +20,10 @@ export default function ProfileScreen() {
   const { ratingInfo } = useCheckout();
   const { isConnected } = useNetworkStatus();
 
-  const [savedCount, setSavedCount] = useState<number | null>(null);
-  const [loadingSaved, setLoadingSaved] = useState(true);
-
-  useEffect(() => {
-    let active = true;
-    setLoadingSaved(true);
-    savedListingsFor(session?.username ?? '')
-      .then((items) => {
-        if (active) setSavedCount(items.length);
-      })
-      .finally(() => {
-        if (active) setLoadingSaved(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [savedListingsFor, session?.username]);
-
   if (!session) return null;
 
   const soldCount = listingsForSeller(session.username).filter((item) => item.status === 'sold').length;
+  const savedCount = savedListingsFor(session.username).length;
   const rating = ratingInfo(session.username);
   const ratingValue = rating.count > 0 ? starString(rating.avg) : '—';
   const locationLine = session.location ? `@${session.username} · ${session.location}` : `@${session.username}`;
@@ -63,29 +43,21 @@ export default function ProfileScreen() {
           </View>
         ) : null}
         <View style={styles.identity}>
-          {session.photoUri ? (
-            <Image source={{ uri: session.photoUri }} style={styles.avatar} />
-          ) : (
-            <AppImage source={getSellerAvatar(session.username)} style={styles.avatar} />
-          )}
+          <ProfileAvatar uri={session.photoUri} username={session.username} style={styles.avatar} />
           <Text style={styles.name}>{session.name}</Text>
           <Text style={styles.meta}>{locationLine}</Text>
           {session.bio ? <Text style={styles.bio}>{session.bio}</Text> : null}
           <Button label="Edit profile" variant="secondary" onPress={() => router.push('/profile/edit')} style={styles.editBtn} />
         </View>
-        {loadingSaved ? (
-          <LoadingSkeleton style={styles.statsSkeleton} rows={1} />
-        ) : (
-          <View style={styles.stats}>
+        <View style={styles.stats}>
             <Stat value={String(soldCount)} label="Sold" />
             <Stat value={ratingValue} label={`${rating.count} reviews`} />
-            <Stat value={String(savedCount ?? 0)} label="Saved" />
+            <Stat value={String(savedCount)} label="Saved" />
           </View>
-        )}
         <Text style={styles.sectionTitle}>Your activity</Text>
         <View style={styles.rows}>
           <Row label="My listings" onPress={() => router.push('/(tabs)/sell')} />
-          <Row label="Saved items" hint={`${savedCount ?? 0}`} onPress={() => router.push('/profile/saved')} />
+          <Row label="Saved items" hint={`${savedCount}`} onPress={() => router.push('/profile/saved')} />
           <Row label="Orders" onPress={() => router.push('/profile/orders')} />
           <Row label="Settings and account" onPress={() => router.push('/profile/settings')} />
         </View>
@@ -184,9 +156,6 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
     alignSelf: 'center',
     minWidth: 148,
-  },
-  statsSkeleton: {
-    paddingHorizontal: Spacing.xl,
   },
   stats: {
     flexDirection: 'row',

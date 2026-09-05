@@ -13,14 +13,14 @@ import { useCheckout } from '@/context/checkout-context';
 import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
 import { formatNaira } from '@/lib/format';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function SellerListingScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
+  const { top, sheetBottom } = useScreenInsets();
   const { id, notice } = useLocalSearchParams<{ id: string; notice?: string }>();
   const { session } = useAuth();
   const { getListing, loadFormFromListing, setStatus, removeListing, canDelete } = useListings();
@@ -42,7 +42,7 @@ export default function SellerListingScreen() {
   if (!listing) {
     return (
       <View style={styles.screen}>
-        <Pressable onPress={() => router.replace('/(tabs)/sell')} style={[styles.missingBack, { marginTop: insets.top + 12 }]}>
+        <Pressable onPress={() => router.replace('/(tabs)/sell')} style={[styles.missingBack, { marginTop: top + 12 }]}>
           <ChevronBackIcon />
         </Pressable>
         <EmptyState
@@ -106,7 +106,7 @@ export default function SellerListingScreen() {
       <ScrollView>
         <View>
           <PhotoPager count={item.photoCount} listingId={item.id} uris={item.photoUrls} />
-          <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/sell'))} style={[styles.backBtn, { top: insets.top + 8 }]}>
+          <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)/sell'))} style={[styles.backBtn, { top: top + 8 }]}>
             <ChevronBackIcon />
           </Pressable>
           <View style={styles.statusWrap}>
@@ -166,7 +166,7 @@ export default function SellerListingScreen() {
           ) : null}
         </View>
       </ScrollView>
-      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+      <View style={[styles.footer, { paddingBottom: sheetBottom }]}>
         <Button label="Edit" variant="secondary" onPress={edit} style={styles.footerBtn} />
         <Button label={hideLabel} variant="secondary" disabled={hideDisabled} onPress={toggleHidden} style={styles.footerBtn} />
         <Button label={soldLabel} variant="secondary" disabled={soldDisabled} onPress={toggleSold} style={styles.footerBtn} />

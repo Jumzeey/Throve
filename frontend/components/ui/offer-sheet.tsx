@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { TextField } from '@/components/ui/text-field';
 import { Palette, Radius, Shadows, Typography } from '@/constants/theme';
 import { minOfferAmount, validateOfferAmount } from '@/context/inbox-context';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatNaira } from '@/lib/format';
 import { useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -15,6 +16,7 @@ type Props = {
 };
 
 export function OfferSheet({ visible, listingPrice, onClose, onSubmit }: Props) {
+  const { sheetBottom } = useScreenInsets();
   const [amount, setAmount] = useState('');
   const [error, setError] = useState<string | null>(null);
   const min = minOfferAmount(listingPrice);
@@ -40,7 +42,7 @@ export function OfferSheet({ visible, listingPrice, onClose, onSubmit }: Props) 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
       <Pressable style={styles.overlay} onPress={close}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
+        <Pressable style={[styles.sheet, { paddingBottom: sheetBottom }]} onPress={() => {}}>
           <View style={styles.handle} />
           <Text style={styles.title}>Make an offer</Text>
           <Text style={styles.sub}>

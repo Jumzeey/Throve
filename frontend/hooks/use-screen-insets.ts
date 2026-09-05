@@ -5,21 +5,28 @@ import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 /** Visual height of tab icons + labels (excluding system bottom inset). */
 export const TAB_BAR_CONTENT_HEIGHT = 56;
 
+/**
+ * Height of Android 3-button navigation. Edge-to-edge often reports
+ * insets.bottom as 0, which lets scaffolds overlap the system controls.
+ */
+export const ANDROID_NAV_MIN = 48;
+
 const ZERO_INSETS = { top: 0, bottom: 0, left: 0, right: 0 };
 
 /**
- * Normalised safe-area helpers for tab stacks and full-screen flows.
- * Android edge-to-edge often needs a minimum bottom inset when the OS reports 0.
+ * Normalised safe-area helpers for tab stacks, sheets, and full-screen flows.
  */
 export function useScreenInsets() {
   const insets = useContext(SafeAreaInsetsContext) ?? ZERO_INSETS;
-  const bottom = Math.max(insets.bottom, Platform.OS === 'android' ? 8 : 0);
+  const bottom = Platform.OS === 'android' ? Math.max(insets.bottom, ANDROID_NAV_MIN) : insets.bottom;
   const tabBarHeight = TAB_BAR_CONTENT_HEIGHT + bottom;
 
   return {
     top: insets.top,
     bottom,
-    /** Scroll padding so last items sit above the tab bar (includes system nav inset on Android). */
+    /** Bottom sheets and sticky action bars — nav inset plus a little breathing room. */
+    sheetBottom: bottom + 12,
+    /** Scroll padding so last items sit above the tab bar. */
     tabScrollBottom: tabBarHeight + 16,
     tabBarHeight,
   };

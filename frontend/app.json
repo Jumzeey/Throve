@@ -109,6 +109,9 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "apiUrl": "https://throve-production.up.railway.app"
     }
   }
 }

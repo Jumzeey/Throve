@@ -9,6 +9,7 @@ import { DELIVERY_OPTIONS } from '@/data/checkout';
 import { getListingImage } from '@/data/images';
 import type { DeliveryMethod } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatCountdown, formatNaira } from '@/lib/format';
 import { Redirect, useRouter } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -16,6 +17,7 @@ import { ExpiredCheckout } from './shipping';
 
 export default function DeliveryMethodScreen() {
   const router = useRouter();
+  const { bottom } = useScreenInsets();
   const live = useLive();
   const checkout = useCheckout();
   const { isConnected } = useNetworkStatus();
@@ -46,7 +48,7 @@ export default function DeliveryMethodScreen() {
   return (
     <View style={styles.screen}>
       <ScreenHeader title="Delivery" onBack={() => router.back()} />
-      <ScrollView contentContainerStyle={styles.body}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl + bottom }]}>
         {!isConnected ? <OfflineBanner message="Reconnect to continue checkout." /> : null}
         <AlertBanner
           variant="info"

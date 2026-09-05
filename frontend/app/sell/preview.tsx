@@ -5,13 +5,13 @@ import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { isListingFormPublishable, parseListingPrice, useListings } from '@/context/listings-context';
 import { formatNaira } from '@/lib/format';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, useRouter } from 'expo-router';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ListingPreviewScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
+  const { sheetBottom } = useScreenInsets();
   const { session } = useAuth();
   const { form, publish } = useListings();
 
@@ -61,7 +61,7 @@ export default function ListingPreviewScreen() {
           <Text style={styles.description}>{form.description.trim() || 'No description provided.'}</Text>
         </View>
       </ScrollView>
-      <View style={[styles.actions, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+      <View style={[styles.actions, { paddingBottom: sheetBottom }]}>
         <Button label="Edit" variant="secondary" onPress={goEdit} style={styles.action} />
         <Button label="Publish" onPress={goPublish} style={styles.action} />
       </View>

@@ -15,6 +15,7 @@ import { CANCEL_REASONS } from '@/data/seed';
 import { getListingImage } from '@/data/images';
 import type { OrderStatus } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatNaira } from '@/lib/format';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -37,6 +38,7 @@ function timelineIndex(status: OrderStatus) {
 
 export default function CheckoutOrderScreen() {
   const router = useRouter();
+  const { bottom } = useScreenInsets();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { session } = useAuth();
   const checkout = useCheckout();
@@ -118,7 +120,7 @@ export default function CheckoutOrderScreen() {
   return (
     <View style={styles.screen}>
       <ScreenHeader title={`Order #${order.id}`} onBack={() => router.back()} />
-      <ScrollView contentContainerStyle={styles.body}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl + bottom }]}>
         {!isConnected ? <OfflineBanner message="Reconnect to update this order." /> : null}
         <AlertBanner variant="info" title="Prototype order" message="Simulated purchase — no real payment collected." />
         <View style={styles.itemCard}>

@@ -4,14 +4,15 @@ import { SplashScreen } from '@/components/ui/splash-screen';
 import { Palette, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
+import { authResumeHref } from '@/lib/session-persistence';
 import { Redirect, useRouter } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function WelcomeScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
-  const { session, isReady, isAuthenticatingLink } = useAuth();
+  const { top, bottom } = useScreenInsets();
+  const { session, isReady, isAuthenticatingLink, authResume } = useAuth();
   const { isConnected } = useNetworkStatus();
 
   if (!isReady || isAuthenticatingLink) {
@@ -23,9 +24,12 @@ export default function WelcomeScreen() {
   if (session) {
     return <Redirect href="/(auth)/setup" />;
   }
+  if (authResume) {
+    return <Redirect href={authResumeHref(authResume)} />;
+  }
 
   return (
-    <View style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom + 24 }]}>
+    <View style={[styles.screen, { paddingTop: top, paddingBottom: bottom + 24 }]}>
       <View style={styles.top}>
         <Text style={styles.wordmark}>throve</Text>
       </View>

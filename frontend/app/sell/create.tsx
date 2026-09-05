@@ -9,6 +9,7 @@ import { useAuth } from '@/context/auth-context';
 import { isListingFormPublishable, PREVIEW_ERROR, useListings } from '@/context/listings-context';
 import { CONDITIONS, DEPARTMENTS, getCategoriesForDepartment } from '@/data/seed';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { MAX_LISTING_PHOTOS, MIN_LISTING_PHOTO_SIDE, pickListingPhotos } from '@/lib/listing-photos';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -16,6 +17,7 @@ import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View
 
 export default function CreateListingScreen() {
   const router = useRouter();
+  const { bottom } = useScreenInsets();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { session } = useAuth();
   const { form, setForm, getListing, loadFormFromListing, saveDraft } = useListings();
@@ -97,7 +99,7 @@ export default function CreateListingScreen() {
   return (
     <View style={styles.screen}>
       <ScreenHeader title="New listing" onBack={() => router.replace('/(tabs)/sell')} />
-      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl + bottom }]} keyboardShouldPersistTaps="handled">
         {!isConnected ? (
           <AlertBanner variant="warning" title="No connection" message="Reconnect to save or publish your listing." style={styles.banner} />
         ) : null}

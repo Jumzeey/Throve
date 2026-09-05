@@ -3,9 +3,9 @@ import { Palette, Radius, Shadows, Typography } from '@/constants/theme';
 import { CONDITIONS, DEPARTMENTS, FILTER_BRANDS } from '@/data/seed';
 import { DEFAULT_FILTERS, PRICE_BANDS, SORT_OPTIONS } from '@/data/filter-listings';
 import type { ListingFilters } from '@/data/types';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Props = {
   visible: boolean;
@@ -16,7 +16,7 @@ type Props = {
 };
 
 export function FiltersSheet({ visible, value, onClose, onApply, showDepartment = false }: Props) {
-  const insets = useSafeAreaInsets();
+  const { sheetBottom } = useScreenInsets();
   const [draft, setDraft] = useState(value);
 
   useEffect(() => {
@@ -43,7 +43,7 @@ export function FiltersSheet({ visible, value, onClose, onApply, showDepartment 
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <Pressable style={styles.backdrop} onPress={onClose} />
-        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+        <View style={[styles.sheet, { paddingBottom: sheetBottom }]}>
           <View style={styles.header}>
             <Text style={styles.title}>Filters & Sort</Text>
             <Pressable onPress={onClose} hitSlop={12}>

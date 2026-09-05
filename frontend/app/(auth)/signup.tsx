@@ -12,10 +12,12 @@ import { TextField } from '@/components/ui/text-field';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { DEFAULT_COUNTRY_ISO } from '@/data/country-codes';
+import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { validatePassword } from '@/lib/password';
 import { formatPhoneE164, isValidPhone } from '@/lib/phone';
 import { OTP_LENGTH } from '@/lib/otp';
+import { remainingCooldownSec } from '@/lib/session-persistence';
 import { isValidDob, isValidEmail } from '@/lib/validation';
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -25,12 +27,15 @@ const RESEND_COOLDOWN_SEC = 30;
 
 export default function SignupScreen() {
   const router = useRouter();
-  const { session, signup, verifySignupOtp, completeVerification, sendPasswordOtp } = useAuth();
+  const { session, signup, verifySignupOtp, completeVerification, sendPasswordOtp, authResume, persistAuthResume, clearAuthResumeFlow } =
+    useAuth();
   const { isConnected } = useNetworkStatus();
-  const [email, setEmail] = useState('');
-  const [name, setName] = useState('');
-  const [username, setUsername] = useState('');
-  const [dob, setDob] = useState('');
+  const keyboardScroll = useKeyboardAwareScroll();
+  const restored = authResume?.kind === 'signup-verify' ? authResume : null;
+  const [email, setEmail] = useState(restored?.email ?? '');
+  const [name, setName] = useState(restored?.name ?? '');
+  const [username, setUsername] = useState(restored?.username ?? '');
+  const [dob, setDob] = useState(restored?.dob ?? '');
   const [countryIso, setCountryIso] = useState(DEFAULT_COUNTRY_ISO);
   const [nationalNumber, setNationalNumber] = useState('');
   const [password, setPassword] = useState('');
@@ -39,8 +44,8 @@ export default function SignupScreen() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [stage, setStage] = useState<'form' | 'verify'>('form');
-  const [cooldown, setCooldown] = useState(0);
+  const [stage, setStage] = useState<'form' | 'verify'>(restored ? 'verify' : 'form');
+  const [cooldown, setCooldown] = useState(() => (restored ? remainingCooldownSec(restored.cooldownUntil) : 0));
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -49,8 +54,15 @@ export default function SignupScreen() {
     };
   }, []);
 
-  function startCooldown() {
-    setCooldown(RESEND_COOLDOWN_SEC);
+  useEffect(() => {
+    if (cooldown > 0 && !cooldownRef.current) {
+      startCooldown(cooldown);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function startCooldown(seconds = RESEND_COOLDOWN_SEC) {
+    setCooldown(seconds);
     if (cooldownRef.current) clearInterval(cooldownRef.current);
     cooldownRef.current = setInterval(() => {
       setCooldown((prev) => {
@@ -92,6 +104,15 @@ export default function SignupScreen() {
       await signup({ email, name, username, dob, password, phone });
       setStage('verify');
       startCooldown();
+      await persistAuthResume({
+        kind: 'signup-verify',
+        email: email.trim().toLowerCase(),
+        name: name.trim(),
+        username: username.trim(),
+        dob: dob.trim(),
+        cooldownUntil: Date.now() + RESEND_COOLDOWN_SEC * 1000,
+        updatedAt: Date.now(),
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Please try again in a moment.';
       if (msg.toLowerCase().includes('username')) {
@@ -129,6 +150,15 @@ export default function SignupScreen() {
       await sendPasswordOtp(email, 'signup');
       setOtp('');
       startCooldown();
+      await persistAuthResume({
+        kind: 'signup-verify',
+        email: email.trim().toLowerCase(),
+        name: name.trim(),
+        username: username.trim(),
+        dob: dob.trim(),
+        cooldownUntil: Date.now() + RESEND_COOLDOWN_SEC * 1000,
+        updatedAt: Date.now(),
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Please try again in a moment.');
     } finally {
@@ -148,12 +178,13 @@ export default function SignupScreen() {
     }
   }
 
-  function onBack() {
+  async function onBack() {
     if (stage === 'verify') {
       setStage('form');
       setError('');
       return;
     }
+    await clearAuthResumeFlow();
     router.back();
   }
 
@@ -162,41 +193,84 @@ export default function SignupScreen() {
       <ScreenHeader title="" onBack={onBack} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         {stage === 'form' ? (
-          <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            ref={keyboardScroll.scrollRef}
+            contentContainerStyle={[styles.form, { paddingBottom: keyboardScroll.contentPaddingBottom }]}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            showsVerticalScrollIndicator={false}
+            automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
+            onScroll={keyboardScroll.onScroll}
+            scrollEventThrottle={16}
+          >
             <Text style={styles.heading}>Create your{'\n'}account</Text>
             <Text style={styles.lead}>Sign up with email and password. We’ll send a code to verify your email.</Text>
             {!isConnected ? (
               <OfflineBanner message="You'll need an internet connection to create your account. Reconnect and try again." />
             ) : null}
             <View style={styles.fields}>
-              <TextField
-                label="Email address"
-                autoCapitalize="none"
-                keyboardType="email-address"
-                value={email}
-                onChangeText={setEmail}
-                error={fieldErrors.email}
-              />
-              <TextField label="Name" value={name} onChangeText={setName} error={fieldErrors.name} placeholder="Your name" />
-              <TextField
-                label="Username"
-                autoCapitalize="none"
-                value={username}
-                onChangeText={setUsername}
-                error={fieldErrors.username}
-              />
+              <View ref={keyboardScroll.setAnchor('email')} collapsable={false}>
+                <TextField
+                  label="Email address"
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  value={email}
+                  onChangeText={setEmail}
+                  error={fieldErrors.email}
+                  onFocus={() => keyboardScroll.onFieldFocus('email')}
+                />
+              </View>
+              <View ref={keyboardScroll.setAnchor('name')} collapsable={false}>
+                <TextField
+                  label="Name"
+                  value={name}
+                  onChangeText={setName}
+                  error={fieldErrors.name}
+                  placeholder="Your name"
+                  onFocus={() => keyboardScroll.onFieldFocus('name')}
+                />
+              </View>
+              <View ref={keyboardScroll.setAnchor('username')} collapsable={false}>
+                <TextField
+                  label="Username"
+                  autoCapitalize="none"
+                  value={username}
+                  onChangeText={setUsername}
+                  error={fieldErrors.username}
+                  onFocus={() => keyboardScroll.onFieldFocus('username')}
+                />
+              </View>
               <DateField label="Date of birth" value={dob} onChange={setDob} error={fieldErrors.dob} />
-              <PhoneField
-                countryIso={countryIso}
-                nationalNumber={nationalNumber}
-                onCountryChange={setCountryIso}
-                onNumberChange={setNationalNumber}
-                error={fieldErrors.phone}
-              />
-              <PasswordField label="Password" value={password} onChangeText={setPassword} error={fieldErrors.password} />
+              <View ref={keyboardScroll.setAnchor('phone')} collapsable={false}>
+                <PhoneField
+                  countryIso={countryIso}
+                  nationalNumber={nationalNumber}
+                  onCountryChange={setCountryIso}
+                  onNumberChange={setNationalNumber}
+                  error={fieldErrors.phone}
+                  onFocus={() => keyboardScroll.onFieldFocus('phone')}
+                />
+              </View>
+              <View ref={keyboardScroll.setAnchor('password')} collapsable={false}>
+                <PasswordField
+                  label="Password"
+                  value={password}
+                  onChangeText={setPassword}
+                  error={fieldErrors.password}
+                  onFocus={() => keyboardScroll.onFieldFocus('password')}
+                />
+              </View>
               <PasswordStrengthMeter password={password} />
               <PasswordRequirements password={password} />
-              <PasswordField label="Confirm password" value={confirm} onChangeText={setConfirm} error={fieldErrors.confirm} />
+              <View ref={keyboardScroll.setAnchor('confirm')} collapsable={false}>
+                <PasswordField
+                  label="Confirm password"
+                  value={confirm}
+                  onChangeText={setConfirm}
+                  error={fieldErrors.confirm}
+                  onFocus={() => keyboardScroll.onFieldFocus('confirm')}
+                />
+              </View>
             </View>
             <View style={styles.notice}>
               <MailIcon size={18} />
@@ -217,7 +291,12 @@ export default function SignupScreen() {
             </Text>
           </ScrollView>
         ) : (
-          <ScrollView contentContainerStyle={styles.verify} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            contentContainerStyle={[styles.verify, { paddingBottom: keyboardScroll.contentPaddingBottom }]}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
+          >
             <View style={styles.verifyCard}>
               <MailIcon size={26} />
               <Text style={styles.verifyTitle}>Check your email</Text>

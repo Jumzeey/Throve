@@ -9,9 +9,11 @@ import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
+import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { validatePassword } from '@/lib/password';
 import { OTP_LENGTH } from '@/lib/otp';
+import { remainingCooldownSec } from '@/lib/session-persistence';
 import { isValidEmail } from '@/lib/validation';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -25,11 +27,26 @@ const RESEND_COOLDOWN_SEC = 30;
 export default function SetPasswordScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ email?: string; purpose?: string }>();
-  const { session, sendPasswordOtp, setPasswordWithOtp } = useAuth();
+  const { session, sendPasswordOtp, setPasswordWithOtp, authResume, persistAuthResume, clearAuthResumeFlow } = useAuth();
   const { isConnected } = useNetworkStatus();
+  const keyboardScroll = useKeyboardAwareScroll();
 
-  const purpose: Purpose = params.purpose === 'change' ? 'change' : 'setup';
-  const initialEmail = (typeof params.email === 'string' ? params.email : session?.email ?? '').trim();
+  const purpose: Purpose =
+    params.purpose === 'change' || params.purpose === 'setup'
+      ? params.purpose
+      : authResume?.kind === 'set-password'
+        ? authResume.purpose
+        : 'setup';
+  const initialEmail = (
+    typeof params.email === 'string'
+      ? params.email
+      : authResume?.kind === 'set-password'
+        ? authResume.email
+        : (session?.email ?? '')
+  ).trim();
+
+  const restored =
+    authResume?.kind === 'set-password' && authResume.email === initialEmail.toLowerCase() && authResume.otpSent;
 
   const [email, setEmail] = useState(initialEmail);
   const [otp, setOtp] = useState('');
@@ -37,13 +54,17 @@ export default function SetPasswordScreen() {
   const [confirm, setConfirm] = useState('');
   const [stage, setStage] = useState<Stage>('otp');
   const [error, setError] = useState('');
-  const [info, setInfo] = useState('');
+  const [info, setInfo] = useState(
+    restored ? 'Enter the code we already emailed you. Request a new one only if it expired.' : '',
+  );
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
-  const [otpSent, setOtpSent] = useState(false);
-  const [cooldown, setCooldown] = useState(0);
+  const [otpSent, setOtpSent] = useState(Boolean(restored));
+  const [cooldown, setCooldown] = useState(() =>
+    restored && authResume?.kind === 'set-password' ? remainingCooldownSec(authResume.cooldownUntil) : 0,
+  );
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const didAutoSend = useRef(false);
+  const didAutoSend = useRef(Boolean(restored));
 
   useEffect(() => {
     return () => {
@@ -52,7 +73,18 @@ export default function SetPasswordScreen() {
   }, []);
 
   useEffect(() => {
+    if (cooldown > 0 && !cooldownRef.current) {
+      startCooldown(cooldown);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     if (didAutoSend.current) return;
+    if (otpSent) {
+      didAutoSend.current = true;
+      return;
+    }
     if (initialEmail && isConnected) {
       didAutoSend.current = true;
       void sendCode(initialEmail);
@@ -60,8 +92,8 @@ export default function SetPasswordScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected]);
 
-  function startCooldown() {
-    setCooldown(RESEND_COOLDOWN_SEC);
+  function startCooldown(seconds = RESEND_COOLDOWN_SEC) {
+    setCooldown(seconds);
     if (cooldownRef.current) clearInterval(cooldownRef.current);
     cooldownRef.current = setInterval(() => {
       setCooldown((prev) => {
@@ -92,6 +124,14 @@ export default function SetPasswordScreen() {
       setEmail(trimmed);
       setOtpSent(true);
       startCooldown();
+      await persistAuthResume({
+        kind: 'set-password',
+        email: trimmed,
+        purpose,
+        otpSent: true,
+        cooldownUntil: Date.now() + RESEND_COOLDOWN_SEC * 1000,
+        updatedAt: Date.now(),
+      });
       if (isResend) {
         setOtp('');
         setInfo('A new code is on its way. Check your inbox and spam folder.');
@@ -133,7 +173,7 @@ export default function SetPasswordScreen() {
     }
   }
 
-  function onBack() {
+  async function onBack() {
     if (stage === 'password') {
       setStage('otp');
       setError('');
@@ -143,6 +183,7 @@ export default function SetPasswordScreen() {
       finish();
       return;
     }
+    await clearAuthResumeFlow();
     router.back();
   }
 
@@ -170,7 +211,16 @@ export default function SetPasswordScreen() {
       <ScreenHeader title="" onBack={onBack} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         {stage === 'otp' ? (
-          <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            ref={keyboardScroll.scrollRef}
+            contentContainerStyle={[styles.form, { paddingBottom: keyboardScroll.contentPaddingBottom }]}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            showsVerticalScrollIndicator={false}
+            automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
+            onScroll={keyboardScroll.onScroll}
+            scrollEventThrottle={16}
+          >
             <Text style={styles.heading}>{purpose === 'change' ? 'Confirm it’s you' : 'Set up your\npassword'}</Text>
             <Text style={styles.lead}>
               {purpose === 'change'
@@ -219,7 +269,14 @@ export default function SetPasswordScreen() {
                   <OtpInput value={otp} onChange={setOtp} error={Boolean(error)} />
                 </View>
 
-                {info ? <AlertBanner variant="info" title="Code resent" message={info} style={styles.banner} /> : null}
+                {info ? (
+                  <AlertBanner
+                    variant="info"
+                    title={info.includes('already emailed') ? 'Use your existing code' : 'Code resent'}
+                    message={info}
+                    style={styles.banner}
+                  />
+                ) : null}
                 {error ? <AlertBanner variant="error" title="Couldn’t continue" message={error} style={styles.banner} /> : null}
 
                 <Button
@@ -245,15 +302,40 @@ export default function SetPasswordScreen() {
         ) : null}
 
         {stage === 'password' ? (
-          <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            ref={keyboardScroll.scrollRef}
+            contentContainerStyle={[styles.form, { paddingBottom: keyboardScroll.contentPaddingBottom }]}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            showsVerticalScrollIndicator={false}
+            automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
+            onScroll={keyboardScroll.onScroll}
+            scrollEventThrottle={16}
+          >
             <Text style={styles.heading}>{purpose === 'change' ? 'Choose a new\npassword' : 'Create your\npassword'}</Text>
             <Text style={styles.lead}>Use a strong password you don’t reuse elsewhere.</Text>
             {!isConnected ? <OfflineBanner message="Reconnect to save your password." /> : null}
             <View style={styles.fields}>
-              <PasswordField label="Password" value={password} onChangeText={setPassword} error={fieldErrors.password} />
+              <View ref={keyboardScroll.setAnchor('password')} collapsable={false}>
+                <PasswordField
+                  label="Password"
+                  value={password}
+                  onChangeText={setPassword}
+                  error={fieldErrors.password}
+                  onFocus={() => keyboardScroll.onFieldFocus('password')}
+                />
+              </View>
               <PasswordStrengthMeter password={password} />
               <PasswordRequirements password={password} />
-              <PasswordField label="Confirm password" value={confirm} onChangeText={setConfirm} error={fieldErrors.confirm} />
+              <View ref={keyboardScroll.setAnchor('confirm')} collapsable={false}>
+                <PasswordField
+                  label="Confirm password"
+                  value={confirm}
+                  onChangeText={setConfirm}
+                  error={fieldErrors.confirm}
+                  onFocus={() => keyboardScroll.onFieldFocus('confirm')}
+                />
+              </View>
             </View>
             {error ? <AlertBanner variant="error" title="Couldn’t save password" message={error} style={styles.banner} /> : null}
             <Button label="Save password" loading={loading} onPress={onSavePassword} disabled={!isConnected} style={styles.submit} />

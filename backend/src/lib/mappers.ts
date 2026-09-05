@@ -35,6 +35,19 @@ type ListingRow = {
   created_at: string;
 };
 
+export function publicPhotoUrl(value: string | null | undefined) {
+  if (!value) return undefined;
+  if (value.startsWith('https://') || value.startsWith('http://')) return value;
+  return undefined;
+}
+
+/** Ignore device-only paths (file://) so they cannot overwrite a stored public URL. */
+export function storedPhotoUrl(value?: string) {
+  if (value === undefined) return undefined;
+  if (!value) return null;
+  return publicPhotoUrl(value) ?? undefined;
+}
+
 export function mapProfile(row: ProfileRow, sellerUsername?: string) {
   return {
     userId: row.id,
@@ -44,7 +57,7 @@ export function mapProfile(row: ProfileRow, sellerUsername?: string) {
     dob: row.dob ?? '',
     bio: row.bio,
     location: row.location,
-    photoUri: row.photo_url ?? undefined,
+    photoUri: publicPhotoUrl(row.photo_url),
     phone: row.phone ?? undefined,
     setupComplete: row.setup_complete,
     canHostLive: row.can_host_live,

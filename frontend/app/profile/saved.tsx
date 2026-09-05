@@ -10,52 +10,30 @@ import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { getListingImageSource } from '@/data/images';
 import { useAuth } from '@/context/auth-context';
 import { useListings } from '@/context/listings-context';
-import type { Listing } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { formatNaira } from '@/lib/format';
 import { Redirect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 export default function SavedItemsScreen() {
   const router = useRouter();
   const { session } = useAuth();
-  const { savedListingsFor, toggleSave, loading } = useListings();
+  const { savedListingsFor, toggleSave, loading, refresh } = useListings();
   const { isConnected } = useNetworkStatus();
-  const [saved, setSaved] = useState<Listing[]>([]);
-  const [fetching, setFetching] = useState(true);
 
-  const loadSaved = useCallback(async () => {
-    if (!session?.username) {
-      setSaved([]);
-      setFetching(false);
-      return;
-    }
-    setFetching(true);
-    try {
-      const next = await savedListingsFor(session.username);
-      setSaved(next);
-    } finally {
-      setFetching(false);
-    }
-  }, [savedListingsFor, session?.username]);
-
-  useEffect(() => {
-    void loadSaved();
-  }, [loadSaved]);
+  const saved = session?.username ? savedListingsFor(session.username) : [];
 
   const pullTask = useCallback(async () => {
-    if (!session?.username) return;
-    const next = await savedListingsFor(session.username);
-    setSaved(next);
-  }, [savedListingsFor, session?.username]);
+    await refresh();
+  }, [refresh]);
   const { refreshing, onRefresh } = usePullRefresh(pullTask);
 
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
   }
 
-  const isLoading = (loading || fetching) && !refreshing;
+  const isLoading = loading && !refreshing;
 
   return (
     <View style={styles.screen}>
@@ -95,9 +73,7 @@ export default function SavedItemsScreen() {
                       <Pressable
                         onPress={(event) => {
                           event.stopPropagation();
-                          void toggleSave(item.id, session.username).then(() => {
-                            setSaved((current) => current.filter((listing) => listing.id !== item.id));
-                          });
+                          void toggleSave(item.id, session.username);
                         }}
                         style={styles.heart}
                         hitSlop={8}>

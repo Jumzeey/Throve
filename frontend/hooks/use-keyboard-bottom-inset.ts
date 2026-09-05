@@ -1,22 +1,30 @@
 import { useEffect, useState } from 'react';
 import { Keyboard, Platform } from 'react-native';
 
+export type KeyboardInset = {
+  height: number;
+  screenY: number;
+};
+
 /**
- * Bottom inset matching the visible keyboard — reliable on Android edge-to-edge
+ * Keyboard metrics — reliable on Android edge-to-edge
  * where window resize / KeyboardAvoidingView often fails.
  */
-export function useKeyboardBottomInset() {
-  const [bottom, setBottom] = useState(0);
+export function useKeyboardInset(): KeyboardInset {
+  const [inset, setInset] = useState<KeyboardInset>({ height: 0, screenY: 0 });
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
     const showSub = Keyboard.addListener(showEvent, (event) => {
-      setBottom(event.endCoordinates.height);
+      setInset({
+        height: event.endCoordinates.height,
+        screenY: event.endCoordinates.screenY,
+      });
     });
     const hideSub = Keyboard.addListener(hideEvent, () => {
-      setBottom(0);
+      setInset({ height: 0, screenY: 0 });
     });
 
     return () => {
@@ -25,5 +33,9 @@ export function useKeyboardBottomInset() {
     };
   }, []);
 
-  return bottom;
+  return inset;
+}
+
+export function useKeyboardBottomInset() {
+  return useKeyboardInset().height;
 }

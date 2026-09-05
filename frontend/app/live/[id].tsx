@@ -8,20 +8,20 @@ import {
 } from '@/components/live/live-stage';
 import { PinnedProductCard, type PinnedProductVariant } from '@/components/live/pinned-product-card';
 import { Palette } from '@/constants/theme';
-import type { LiveKitCredentials } from '@/data/types';
+import type { LiveConnection, LiveKitCredentials } from '@/data/types';
 import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
-import { useLive } from '@/context/live-context';
+import { useLive, useLiveClock } from '@/context/live-context';
 import { formatCountdown, formatNaira } from '@/lib/format';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function LiveViewerScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
+  const { top, sheetBottom } = useScreenInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { session } = useAuth();
   const live = useLive();
@@ -30,8 +30,14 @@ export default function LiveViewerScreen() {
   const [note, setNote] = useState<string | null>(null);
   const [credentials, setCredentials] = useState<LiveKitCredentials | null>(null);
   const [claimError, setClaimError] = useState<string | null>(null);
+  const [claiming, setClaiming] = useState(false);
+  const claimingRef = useRef(false);
 
   const sessionId = Array.isArray(id) ? id[0] : id;
+  const liveSession = sessionId ? live.getSession(sessionId) : undefined;
+  const heldSession = useRef(liveSession);
+  if (liveSession) heldSession.current = liveSession;
+  const viewSession = liveSession ?? heldSession.current;
 
   useEffect(() => {
     if (!sessionId) return;
@@ -50,13 +56,11 @@ export default function LiveViewerScreen() {
     if (live.roomNotice) setNote(live.roomNotice);
   }, [live.roomNotice]);
 
-  const liveSession = sessionId ? live.getSession(sessionId) : undefined;
-
-  const pinnedProduct = liveSession ? live.getPinnedProduct(liveSession.id) : undefined;
+  const pinnedProduct = viewSession ? live.getPinnedProduct(viewSession.id) : undefined;
   const pinnedListing = pinnedProduct
     ? live.resolveListing(pinnedProduct.listingId)
-    : live.resolveListing(liveSession?.pinnedListingId);
-  const claim = liveSession ? live.getClaim(liveSession.id) : undefined;
+    : live.resolveListing(viewSession?.pinnedListingId);
+  const claim = viewSession ? live.getClaim(viewSession.id) : undefined;
   const hasActiveClaim = Boolean(
     claim && claim.status === 'active' && claim.productId === pinnedProduct?.id,
   );
@@ -71,17 +75,23 @@ export default function LiveViewerScreen() {
     return 'available';
   }, [available, claimedByMe, reservedByOther]);
 
+  const onConnectionChange = useCallback(
+    (state: LiveConnection) => {
+      if (sessionId) live.setConnection(sessionId, state);
+    },
+    [live.setConnection, sessionId],
+  );
+
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
   }
-  if (!liveSession) {
+  if (!viewSession) {
     return <Redirect href="/(tabs)/live" />;
   }
 
-  const activeSession = liveSession;
+  const activeSession = viewSession;
   const connection = live.getConnection(activeSession.id);
   const comments = live.getComments(activeSession.id);
-  const remaining = claim ? claim.expiresAt - live.now : 0;
   const username = session.username;
 
   function leave() {
@@ -99,12 +109,17 @@ export default function LiveViewerScreen() {
   }
 
   async function claimNow() {
-    if (!pinnedProduct) return;
+    if (!pinnedProduct || claimingRef.current) return;
+    claimingRef.current = true;
+    setClaiming(true);
     setClaimError(null);
     try {
       await live.claimProduct(activeSession.id, pinnedProduct.id, 1);
     } catch (err) {
       setClaimError(err instanceof Error ? err.message : 'Claim failed');
+    } finally {
+      claimingRef.current = false;
+      setClaiming(false);
     }
   }
 
@@ -131,16 +146,16 @@ export default function LiveViewerScreen() {
     <View style={styles.screen}>
       <StatusBar style="light" />
       {note ? (
-        <View style={[styles.toast, { top: insets.top + 8 }]}>
+        <View style={[styles.toast, { top: top + 8 }]}>
           <Text style={styles.toastText}>{note}</Text>
         </View>
       ) : null}
       <LiveStage
         credentials={credentials}
         isHost={false}
-        onConnectionChange={(state) => live.setConnection(activeSession.id, state)}
+        onConnectionChange={onConnectionChange}
       >
-        <View style={[styles.topArea, { paddingTop: insets.top + 8 }]}>
+        <View style={[styles.topArea, { paddingTop: top + 8 }]}>
           <LiveViewerTopBar
             viewers={activeSession.viewers}
             onClose={leave}
@@ -177,31 +192,57 @@ export default function LiveViewerScreen() {
           }
           host={activeSession.host}
         />
-      </LiveStage>
 
-      {pinnedProduct ? (
-        <View style={styles.productWrap}>
-          <PinnedProductCard
-            title={pinnedProduct.title ?? pinnedListing?.title ?? 'Product'}
-            subtitle={subtitle || undefined}
-            price={formatNaira(pinnedProduct.livePrice)}
-            listingId={pinnedProduct.listingId}
-            imageUri={pinnedProduct.photoUrls?.[0]}
-            variant={productVariant}
-            countdown={claimedByMe ? formatCountdown(remaining) : undefined}
-            claimError={claimError}
-            onClaim={claimNow}
-            onBuyNow={claimNow}
-            onCheckout={goCheckout}
-          />
+        {pinnedProduct ? (
+          <View style={styles.productWrap} pointerEvents="box-none">
+            <LiveClaimCard
+              title={pinnedProduct.title ?? pinnedListing?.title ?? 'Product'}
+              subtitle={subtitle || undefined}
+              price={formatNaira(pinnedProduct.livePrice)}
+              listingId={pinnedProduct.listingId}
+              imageUri={pinnedProduct.photoUrls?.[0]}
+              variant={productVariant}
+              expiresAt={claim?.expiresAt}
+              claimedByMe={claimedByMe}
+              claimError={claimError}
+              claiming={claiming}
+              onClaim={claimNow}
+              onBuyNow={claimNow}
+              onCheckout={goCheckout}
+            />
+          </View>
+        ) : null}
+
+        <View style={[styles.composerWrap, { paddingBottom: sheetBottom }]}>
+          <LiveComposer value={draft} onChangeText={setDraft} onSend={send} />
         </View>
-      ) : null}
-
-      <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, 14) }]}>
-        <LiveComposer value={draft} onChangeText={setDraft} onSend={send} />
-      </View>
+      </LiveStage>
     </View>
   );
+}
+
+function LiveClaimCard({
+  expiresAt,
+  claimedByMe,
+  ...props
+}: {
+  title: string;
+  subtitle?: string;
+  price: string;
+  listingId?: string;
+  imageUri?: string;
+  variant: PinnedProductVariant;
+  expiresAt?: number;
+  claimedByMe: boolean;
+  claimError: string | null;
+  claiming: boolean;
+  onClaim: () => void;
+  onBuyNow: () => void;
+  onCheckout: () => void;
+}) {
+  const now = useLiveClock();
+  const countdown = claimedByMe && expiresAt ? formatCountdown(expiresAt - now) : undefined;
+  return <PinnedProductCard {...props} countdown={countdown} />;
 }
 
 const styles = StyleSheet.create({

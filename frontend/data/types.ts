@@ -210,3 +210,10 @@ export type UserProfile = {
   preferredLoginMethod?: PreferredLoginMethod;
   hasPassword?: boolean;
 };
+
+export type PublicProfile = {
+  username: string;
+  bio: string;
+  location: string;
+  photoUri?: string;
+};

@@ -1,4 +1,4 @@
-import { listingPhotoFormPart, ensureMediaLibraryPermission } from '@/lib/listing-photos';
+import { listingPhotoFormPart, ensureMediaLibraryPermission, isUploadableLocalFileUri } from '@/lib/listing-photos';
 import { apiUpload } from '@/lib/api';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -27,6 +27,9 @@ export async function pickChatImage(): Promise<{ uri: string } | { error: string
 }
 
 export async function uploadChatImage(uri: string): Promise<string> {
+  if (!isUploadableLocalFileUri(uri)) {
+    throw new Error('Photo file is not available on this device.');
+  }
   const formData = new FormData();
   formData.append('file', listingPhotoFormPart(uri, 0) as unknown as Blob);
   const uploaded = await apiUpload<{ url: string }>('/media/chat-image', formData);

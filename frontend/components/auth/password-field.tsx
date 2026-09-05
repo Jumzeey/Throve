@@ -18,7 +18,15 @@ type Props = Omit<TextInputProps, 'secureTextEntry'> & {
   containerStyle?: StyleProp<ViewStyle>;
 };
 
-export function PasswordField({ label, error, style, containerStyle, ...props }: Props) {
+export function PasswordField({
+  label,
+  error,
+  style,
+  containerStyle,
+  onFocus,
+  onBlur,
+  ...props
+}: Props) {
   const [focused, setFocused] = useState(false);
   const [visible, setVisible] = useState(false);
   const hasError = Boolean(error);
@@ -39,15 +47,15 @@ export function PasswordField({ label, error, style, containerStyle, ...props }:
             hasError ? styles.errorInput : null,
             style,
           ]}
+          {...props}
           onFocus={(e) => {
             setFocused(true);
-            props.onFocus?.(e);
+            onFocus?.(e);
           }}
           onBlur={(e) => {
             setFocused(false);
-            props.onBlur?.(e);
+            onBlur?.(e);
           }}
-          {...props}
         />
         <Pressable
           onPress={() => setVisible((v) => !v)}

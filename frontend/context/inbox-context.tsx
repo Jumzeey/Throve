@@ -1,11 +1,12 @@
 import { apiFetch } from '@/lib/api';
 import { Palette } from '@/constants/theme';
+import { useAuth } from '@/context/auth-context';
 import type { ChatMessage, Conversation, Offer, OfferStatus } from '@/data/types';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 type InboxContextValue = {
   loading: boolean;
-  refresh: () => Promise<void>;
+  refresh: (options?: { silent?: boolean }) => Promise<void>;
   conversationsFor: (username: string) => Conversation[];
   getConversation: (id: string) => Conversation | undefined;
   openOrCreateConversation: (withUsername: string, listingId: string, me: string) => Promise<Conversation>;
@@ -60,41 +61,48 @@ export function validateOfferAmount(amount: number, listingPrice: number) {
 }
 
 export function InboxProvider({ children }: { children: ReactNode }) {
+  const { session, isReady } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messagesByConv, setMessagesByConv] = useState<Record<string, ChatMessage[]>>({});
   const [offers, setOffers] = useState<Offer[]>([]);
   const [blocked, setBlocked] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoading(true);
     try {
       const [convos, offerData, blocks] = await Promise.all([
         apiFetch<Conversation[]>('/inbox/conversations'),
         apiFetch<{ received: Offer[]; sent: Offer[]; all: Offer[] }>('/inbox/offers'),
         apiFetch<string[]>('/inbox/blocks'),
       ]);
-      setConversations(convos);
-      setOffers(offerData.all ?? [...offerData.received, ...offerData.sent]);
-      setBlocked(blocks);
+      setConversations(Array.isArray(convos) ? convos : []);
+      setOffers(offerData.all ?? [...(offerData.received ?? []), ...(offerData.sent ?? [])]);
+      setBlocked(Array.isArray(blocks) ? blocks : []);
     } catch {
-      // Backend offline — inbox screens handle empty/offline UI
+      // Keep whatever we already have; the screen can still pull-to-refresh.
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    if (!isReady) return;
+    if (!session) {
+      setConversations([]);
+      setOffers([]);
+      setBlocked([]);
+      setMessagesByConv({});
+      setLoading(false);
+      return;
+    }
+    void refresh();
+  }, [isReady, session?.userId, refresh]);
 
   const getConversation = useCallback((id: string) => conversations.find((item) => item.id === id), [conversations]);
 
   const conversationsFor = useCallback(
-    (username: string) =>
-      conversations
-        .filter((item) => item.participants.includes(username))
-        .sort((a, b) => b.updatedAt - a.updatedAt),
+    (_username: string) => [...conversations].sort((a, b) => b.updatedAt - a.updatedAt),
     [conversations],
   );
 

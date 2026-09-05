@@ -1,3 +1,4 @@
+import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
 import { UserIcon } from '@/components/ui/icons';
@@ -8,24 +9,22 @@ import { TextField } from '@/components/ui/text-field';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { DEFAULT_COUNTRY_ISO } from '@/data/country-codes';
-import { getSellerAvatar } from '@/data/images';
 import { useKeyboardBottomInset } from '@/hooks/use-keyboard-bottom-inset';
 import { useNetworkStatus } from '@/hooks/use-network-status';
-import { AppImage } from '@/components/ui/app-image';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { ensureMediaLibraryPermission } from '@/lib/listing-photos';
 import { formatPhoneE164, isValidPhone, parseStoredPhone } from '@/lib/phone';
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export default function EditProfileScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
+  const { bottom } = useScreenInsets();
   const keyboardBottom = useKeyboardBottomInset();
   const scrollRef = useRef<ScrollView>(null);
-  const { session, updateProfile } = useAuth();
+  const { session, updateProfile, setProfilePhoto } = useAuth();
   const { isConnected } = useNetworkStatus();
   const initialPhone = parseStoredPhone(session?.phone);
   const [name, setName] = useState(session?.name ?? '');
@@ -64,16 +63,26 @@ export default function EditProfileScreen() {
   async function onPickPhoto() {
     const allowed = await ensureMediaLibraryPermission();
     if (!allowed) return;
-    setUploading(true);
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.7,
     });
-    setUploading(false);
-    if (!result.canceled) {
-      setPhotoUri(result.assets[0]?.uri);
+    const local = result.canceled ? undefined : result.assets[0]?.uri;
+    if (!local) return;
+
+    const previous = photoUri;
+    setPhotoUri(local);
+    setUploading(true);
+    setError('');
+    try {
+      setPhotoUri(await setProfilePhoto(local));
+    } catch (err) {
+      setPhotoUri(previous);
+      setError(err instanceof Error ? err.message : 'Could not upload photo.');
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -112,7 +121,7 @@ export default function EditProfileScreen() {
           ref={scrollRef}
           contentContainerStyle={[
             styles.body,
-            { paddingBottom: Spacing.xxxl + insets.bottom + (keyboardBottom > 0 ? keyboardBottom : 0) },
+            { paddingBottom: Spacing.xxxl + bottom + (keyboardBottom > 0 ? keyboardBottom : 0) },
           ]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
@@ -122,11 +131,7 @@ export default function EditProfileScreen() {
           {!isConnected ? <OfflineBanner message="Reconnect to save your profile." /> : null}
           <Text style={styles.lead}>Update your photo and details so buyers and sellers know who you are.</Text>
           <Pressable onPress={onPickPhoto} style={styles.avatarWrap}>
-            {photoUri ? (
-              <Image source={{ uri: photoUri }} style={styles.avatar} />
-            ) : (
-              <AppImage source={getSellerAvatar(username)} style={styles.avatar} />
-            )}
+            <ProfileAvatar uri={photoUri} username={username} style={styles.avatar} allowLocal />
             <View style={styles.avatarBadge}>
               <UserIcon size={14} color={Palette.ivory} />
             </View>
@@ -171,7 +176,7 @@ export default function EditProfileScreen() {
             />
           </View>
           {error ? <AlertBanner variant="error" title="We couldn't save that" message={error} /> : null}
-          <Button label="Save changes" loading={loading} onPress={onSave} disabled={!isConnected} />
+          <Button label="Save changes" loading={loading} onPress={onSave} disabled={!isConnected || uploading} />
         </ScrollView>
       </KeyboardAvoidingView>
     </View>

@@ -21,6 +21,36 @@ export function isLocalListingPhotoUri(uri: string) {
 }
 
 /**
+ * Native FormData crashes the app if the URI is missing or from another OS
+ * (e.g. an Android /data/user path loaded on iOS). Only attach files that
+ * this device can actually open.
+ */
+export function isUploadableLocalFileUri(uri?: string | null): uri is string {
+  if (!uri || isRemoteUri(uri)) return false;
+
+  const path = uri.replace(/^file:\/\//, '');
+
+  if (Platform.OS === 'ios' || Platform.OS === 'macos') {
+    if (uri.startsWith('content://')) return false;
+    if (path.startsWith('/data/user/') || path.startsWith('/data/data/') || path.startsWith('/storage/')) {
+      return false;
+    }
+    return uri.startsWith('file://') || uri.startsWith('ph://') || uri.startsWith('assets-library://') || path.startsWith('/');
+  }
+
+  if (Platform.OS === 'android') {
+    if (uri.startsWith('ph://') || uri.startsWith('assets-library://')) return false;
+    if (path.startsWith('/var/') || path.startsWith('/private/var/') || path.includes('/CoreSimulator/')) {
+      return false;
+    }
+    if (/\/Containers\/Data\/Application\//.test(path)) return false;
+    return uri.startsWith('file://') || uri.startsWith('content://') || path.startsWith('/data/') || path.startsWith('/storage/');
+  }
+
+  return false;
+}
+
+/**
  * iOS still needs library permission. On Android 13+ the system photo picker
  * works without READ_MEDIA_* — we never declare those (Play policy).
  */

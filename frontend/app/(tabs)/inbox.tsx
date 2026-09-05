@@ -9,7 +9,7 @@ import { useAuth } from '@/context/auth-context';
 import { useInbox } from '@/context/inbox-context';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { formatRelativeTime } from '@/lib/format';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
@@ -27,6 +27,13 @@ export default function InboxScreen() {
     await refresh();
   }, [refresh]);
   const { refreshing, onRefresh } = usePullRefresh(pullTask);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!session) return;
+      void refresh({ silent: true });
+    }, [session, refresh]),
+  );
 
   return (
     <View style={[styles.screen, { paddingTop: top }]}>

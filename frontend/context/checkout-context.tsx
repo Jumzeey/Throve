@@ -1,5 +1,6 @@
 import { apiFetch } from '@/lib/api';
 import type { CheckoutDraft, DeliveryMethod, Order, OrderStatus, Review } from '@/data/types';
+import { useAuth } from '@/context/auth-context';
 import { CHECKOUT_RESERVE_MS, useLive } from '@/context/live-context';
 import type { Href } from 'expo-router';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -34,6 +35,7 @@ type CheckoutContextValue = {
 const CheckoutContext = createContext<CheckoutContextValue | null>(null);
 
 export function CheckoutProvider({ children }: { children: ReactNode }) {
+  const { session, isReady } = useAuth();
   const live = useLive();
   const [draft, setDraft] = useState<CheckoutDraft | null>(null);
   const [lastOrder, setLastOrder] = useState<Order | null>(null);
@@ -55,8 +57,14 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    if (!isReady) return;
+    if (!session) {
+      setOrders([]);
+      setLoading(false);
+      return;
+    }
+    void refresh();
+  }, [isReady, session?.userId, refresh]);
 
   useEffect(() => {
     if (!draft) return;
@@ -68,7 +76,7 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
     if (!draft) return 0;
     if (draft.liveSessionId) {
       const claim = live.getClaim(draft.liveSessionId);
-      return claim ? claim.expiresAt - live.now : draft.expiresAt - now;
+      return claim ? claim.expiresAt - now : draft.expiresAt - now;
     }
     return draft.expiresAt - now;
   }, [draft, live, now]);

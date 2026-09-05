@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button';
 import { CheckIcon, ChevronDownIcon } from '@/components/ui/icons';
 import { TextField } from '@/components/ui/text-field';
 import { Palette, Radius, Shadows, Typography } from '@/constants/theme';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { useState } from 'react';
 import { FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -13,6 +14,7 @@ type Props = {
 };
 
 export function PickerField({ value, options, placeholder, onSelect }: Props) {
+  const { sheetBottom } = useScreenInsets();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
 
@@ -32,7 +34,7 @@ export function PickerField({ value, options, placeholder, onSelect }: Props) {
 
       <Modal visible={open} transparent animationType="slide" onRequestClose={close}>
         <Pressable style={styles.overlay} onPress={close}>
-          <View style={styles.sheet} onStartShouldSetResponder={() => true}>
+          <View style={[styles.sheet, { paddingBottom: sheetBottom }]} onStartShouldSetResponder={() => true}>
             <View style={styles.handle} />
             <TextField
               placeholder="Search…"

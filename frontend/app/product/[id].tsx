@@ -12,14 +12,14 @@ import { getSellerAvatar } from '@/data/images';
 import { formatNaira } from '@/lib/format';
 import { ChevronBackIcon, HeartIcon } from '@/components/ui/icons';
 import { StatusChip } from '@/components/ui/status-chip';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ProductScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
+  const { top, sheetBottom } = useScreenInsets();
   const { session } = useAuth();
   const { getListing, toggleSave } = useListings();
   const inbox = useInbox();
@@ -40,7 +40,7 @@ export default function ProductScreen() {
   if (!listing) {
     return (
       <View style={styles.screen}>
-        <Pressable onPress={() => router.back()} style={[styles.missingBack, { marginTop: insets.top + 12 }]}>
+        <Pressable onPress={() => router.back()} style={[styles.missingBack, { marginTop: top + 12 }]}>
           <ChevronBackIcon />
         </Pressable>
         <Text style={styles.missing}>This listing is unavailable.</Text>
@@ -76,7 +76,7 @@ export default function ProductScreen() {
             <Pressable
               onPress={() => router.back()}
               hitSlop={8}
-              style={[styles.circleBtn, { top: insets.top + 8, left: 14 }]}>
+              style={[styles.circleBtn, { top: top + 8, left: 14 }]}>
               <ChevronBackIcon />
             </Pressable>
             <Pressable
@@ -84,7 +84,7 @@ export default function ProductScreen() {
                 void toggleSave(product.id, username).catch(() => setBanner('Could not save this item.'));
               }}
               hitSlop={8}
-              style={[styles.circleBtn, { top: insets.top + 8, right: 14 }]}>
+              style={[styles.circleBtn, { top: top + 8, right: 14 }]}>
               <HeartIcon size={16} filled={saved} color={saved ? Palette.plum : Palette.espresso} />
             </Pressable>
           </View>
@@ -94,7 +94,7 @@ export default function ProductScreen() {
             </View>
           ) : null}
           {banner ? (
-            <View style={[styles.banner, { top: insets.top + 8 }]}>
+            <View style={[styles.banner, { top: top + 8 }]}>
               <Text style={styles.bannerText}>{banner}</Text>
             </View>
           ) : null}
@@ -134,7 +134,7 @@ export default function ProductScreen() {
           ) : null}
         </View>
       </ScrollView>
-      <View style={[styles.actions, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+      <View style={[styles.actions, { paddingBottom: sheetBottom }]}>
         {!isOwn ? (
           <Button
             label="Make an offer"
