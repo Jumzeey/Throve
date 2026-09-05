@@ -1,4 +1,5 @@
 import type { Offer, OfferStatus } from '@/data/types';
+import type { OfferChipVariant } from '@/components/ui/status-chip';
 
 export function effectiveOfferStatus(offer: Offer): OfferStatus {
   if (offer.status === 'pending' && offer.expiresAt <= Date.now()) return 'expired';
@@ -12,6 +13,14 @@ export function formatOfferCountdown(expiresAt: number, now = Date.now()) {
   const hours = Math.floor(totalMin / 60);
   const minutes = totalMin % 60;
   return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
+}
+
+export function offerChipVariant(offer: Offer, isBuyer: boolean, status: OfferStatus): OfferChipVariant {
+  if (status === 'pending') {
+    if (offer.initiator === 'seller') return isBuyer ? 'countered' : 'sent';
+    return isBuyer ? 'sent' : 'pending';
+  }
+  return status as OfferChipVariant;
 }
 
 export function offerFooter(offer: Offer, status: OfferStatus, now = Date.now()): { text: string; warning: boolean } | null {

@@ -139,7 +139,10 @@ export type Order = {
   phone: string;
   deliveryMethod: DeliveryMethod;
   deliveryFee: number;
+  protectionFee?: number;
   itemPrice: number;
+  listedPrice?: number | null;
+  offerId?: string | null;
   total: number;
   fromLiveId: string | null;
   createdAt: string;
@@ -153,13 +156,17 @@ export type CheckoutDraft = {
   liveSessionId: string | null;
   liveStreamProductId?: string | null;
   claimId?: string | null;
+  offerId?: string | null;
   itemPrice?: number;
+  listedPrice?: number | null;
   buyer: string;
   name: string;
   address: string;
   city: string;
+  state: string;
   phone: string;
-  deliveryMethod: DeliveryMethod;
+  deliveryNote: string;
+  deliveryMethod: DeliveryMethod | null;
   expiresAt: number;
 };
 
@@ -172,6 +179,7 @@ export type Offer = {
   buyer: string;
   seller: string;
   amount: number;
+  previousAmount?: number | null;
   status: OfferStatus;
   createdAt: number;
   expiresAt: number;

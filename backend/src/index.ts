@@ -6,6 +6,7 @@ import { startLiveUpcomingWorker } from './jobs/live-upcoming.js';
 import { startOfferExpiryWorker } from './jobs/offer-expiry.js';
 import { startReviewNudgeWorker } from './jobs/review-nudge.js';
 import checkoutRoutes from './routes/checkout.js';
+import paymentRoutes from './routes/payments.js';
 import authRoutes from './routes/auth.js';
 import inboxRoutes from './routes/inbox.js';
 import listingsRoutes from './routes/listings.js';
@@ -34,6 +35,7 @@ app.use('/listings', listingsRoutes);
 app.use('/inbox', inboxRoutes);
 app.use('/live', liveRoutes);
 app.use('/checkout', checkoutRoutes);
+app.use('/checkout', paymentRoutes);
 app.use('/media', mediaRoutes);
 app.use('/notifications', notificationsRoutes);
 

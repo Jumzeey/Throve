@@ -114,6 +114,12 @@ export function shippingFee(value?: string) {
   return shippingOption(value).fee;
 }
 
+/** 5% of item price, ₦300 minimum, ₦2,500 maximum. Never on delivery. */
+export function buyerProtectionFee(itemPrice: number) {
+  const raw = Math.round(itemPrice * 0.05);
+  return Math.min(2500, Math.max(300, raw));
+}
+
 export function categoriesForDepartment(department: string): string[] {
   if (department === 'Women' || department === 'Men' || department === 'Kids') {
     return [...LISTING_CATALOG.categories[department]];

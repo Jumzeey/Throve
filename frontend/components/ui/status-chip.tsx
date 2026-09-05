@@ -45,10 +45,10 @@ const ORDER: Record<OrderChipVariant, ChipConfig> = {
 };
 
 type Props =
-  | { kind: 'listing'; variant: ListingChipVariant; label?: string }
-  | { kind: 'offer'; variant: OfferChipVariant; label?: string }
-  | { kind: 'live'; variant: LiveChipVariant; label?: string }
-  | { kind: 'order'; variant: OrderChipVariant; label?: string };
+  | { kind: 'listing'; variant: ListingChipVariant; label?: string; showDot?: boolean }
+  | { kind: 'offer'; variant: OfferChipVariant; label?: string; showDot?: boolean }
+  | { kind: 'live'; variant: LiveChipVariant; label?: string; showDot?: boolean }
+  | { kind: 'order'; variant: OrderChipVariant; label?: string; showDot?: boolean };
 
 export function StatusChip(props: Props) {
   const cfg =
@@ -61,6 +61,7 @@ export function StatusChip(props: Props) {
           : LIVE[props.variant];
   const text = props.label ?? cfg.label;
   const isLive = props.kind === 'live';
+  const showDot = props.showDot ?? (props.kind === 'offer' && props.variant === 'accepted');
 
   return (
     <View
@@ -70,6 +71,7 @@ export function StatusChip(props: Props) {
         cfg.bg ? { backgroundColor: cfg.bg } : null,
         isLive ? styles.liveChip : null,
       ]}>
+      {showDot ? <View style={[styles.dot, { backgroundColor: cfg.color }]} /> : null}
       <Text style={[styles.text, isLive ? styles.liveText : null, { color: cfg.color }]}>{text}</Text>
     </View>
   );
@@ -86,6 +88,9 @@ export function ModeratorBadge() {
 const styles = StyleSheet.create({
   chip: {
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     borderWidth: 1,
     borderRadius: Radius.xs,
     paddingVertical: 4,
@@ -94,6 +99,11 @@ const styles = StyleSheet.create({
   liveChip: {
     paddingVertical: 4,
     paddingHorizontal: 8,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   text: {
     fontSize: 10.5,

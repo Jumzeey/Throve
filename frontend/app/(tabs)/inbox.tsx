@@ -106,7 +106,7 @@ export default function InboxScreen() {
         ) : conversations.length === 0 && !loadError ? (
           <EmptyState
             title="No messages yet"
-            message="When you message a seller or buyer, conversations will appear here."
+            message="Message a seller from a listing and the conversation appears here."
             style={styles.empty}
           />
         ) : (

@@ -255,13 +255,6 @@ export default function SellerProfileScreen() {
               </Text>
             </>
           )}
-
-          <View style={styles.privacy}>
-            <Text style={styles.privacyTitle}>Never shown publicly</Text>
-            <Text style={styles.privacyBody}>
-              Email address · telephone number · home address · payout or bank details · legal or KYC information
-            </Text>
-          </View>
         </ScrollView>
       )}
 
@@ -682,9 +675,6 @@ const styles = StyleSheet.create({
     fontFamily: Typography.body,
     color: Palette.muted3,
   },
-  privacy: { marginTop: 28, paddingTop: 18, borderTopWidth: 1, borderTopColor: Palette.divider },
-  privacyTitle: { fontSize: 13, fontFamily: Typography.bodySemiBold, color: Palette.espresso, marginBottom: 6 },
-  privacyBody: { fontSize: 12.5, lineHeight: 19, fontFamily: Typography.body, color: Palette.muted },
   toast: {
     position: 'absolute',
     alignSelf: 'center',

@@ -127,6 +127,16 @@ router.post('/conversations', requireAuth, async (req, res) => {
 router.get('/conversations/:id/messages', requireAuth, async (req, res) => {
   const { supabase, userId } = req as AuthedRequest;
 
+  const { data: conv, error: convError } = await supabase
+    .from('conversations')
+    .select('*')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  if (convError) return handleSupabaseError(res, convError);
+  if (!conv || (conv.participant_a !== userId && conv.participant_b !== userId)) {
+    return sendError(res, 403, 'Conversation not available');
+  }
+
   const { data, error } = await supabase
     .from('messages')
     .select('*')
@@ -167,6 +177,36 @@ router.post('/conversations/:id/messages', requireAuth, async (req, res) => {
   const imageUrl = parsed.data.imageUrl?.trim() || null;
   if (!text && !imageUrl) return sendError(res, 400, 'Message required');
 
+  const { data: conv, error: convError } = await supabase
+    .from('conversations')
+    .select('*')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  if (convError) return handleSupabaseError(res, convError);
+  if (!conv || (conv.participant_a !== userId && conv.participant_b !== userId)) {
+    return sendError(res, 403, 'Conversation not available');
+  }
+
+  const otherId = conv.participant_a === userId ? conv.participant_b : conv.participant_a;
+  const meProfile = await getProfileById(supabase, userId);
+  const otherProfile = await getProfileById(supabase, otherId);
+  const meUsername = meProfile?.username ?? '';
+  const otherUsername = otherProfile?.username ?? '';
+
+  const { data: iBlocked } = await supabase
+    .from('blocked_users')
+    .select('user_id')
+    .eq('user_id', userId)
+    .eq('blocked_username', otherUsername)
+    .maybeSingle();
+  const { data: theyBlocked } = await supabase
+    .from('blocked_users')
+    .select('user_id')
+    .eq('user_id', otherId)
+    .eq('blocked_username', meUsername)
+    .maybeSingle();
+  if (iBlocked || theyBlocked) return sendError(res, 403, 'Messaging unavailable');
+
   const { data: message, error } = await supabase
     .from('messages')
     .insert({
@@ -181,33 +221,54 @@ router.post('/conversations/:id/messages', requireAuth, async (req, res) => {
   if (error) return handleSupabaseError(res, error);
 
   const preview = text || 'Sent a photo';
-  const { data: conv } = await supabase.from('conversations').select('*').eq('id', req.params.id).single();
-  if (conv) {
-    await supabase
-      .from('conversations')
-      .update({ last_message: preview, updated_at: new Date().toISOString() })
-      .eq('id', req.params.id);
+  await supabase
+    .from('conversations')
+    .update({ last_message: preview, updated_at: new Date().toISOString() })
+    .eq('id', req.params.id);
 
-    const otherId = conv.participant_a === userId ? conv.participant_b : conv.participant_a;
-    await supabase.from('conversation_unread').upsert({ conversation_id: req.params.id, user_id: otherId });
+  await supabase.from('conversation_unread').upsert({ conversation_id: req.params.id, user_id: otherId });
 
-    const senderProfile = await getProfileById(supabase, userId);
-    queueMessageEmail({
-      conversationId: String(req.params.id),
-      toUserId: otherId,
-      fromUsername: senderProfile?.username ?? 'someone',
-      preview,
-    });
-  }
+  queueMessageEmail({
+    conversationId: String(req.params.id),
+    toUserId: otherId,
+    fromUsername: meUsername || 'someone',
+    preview,
+  });
 
-  const sender = await getProfileById(supabase, userId);
   return res.status(201).json({
     id: message.id,
-    from: sender?.username ?? 'unknown',
+    from: meUsername || 'unknown',
     text: message.text ?? '',
     imageUrl: message.image_url ?? null,
     createdAt: new Date(message.created_at).getTime(),
   });
+});
+
+router.post('/reports', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const parsed = z
+    .object({
+      kind: z.enum(['user', 'message']),
+      targetUsername: z.string().min(1),
+      conversationId: z.string().uuid().optional().nullable(),
+      messageId: z.string().uuid().optional().nullable(),
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, 'Invalid report');
+
+  const { data, error } = await supabase
+    .from('chat_reports')
+    .insert({
+      reporter_id: userId,
+      target_username: parsed.data.targetUsername,
+      conversation_id: parsed.data.conversationId ?? null,
+      message_id: parsed.data.messageId ?? null,
+      kind: parsed.data.kind,
+    })
+    .select('id')
+    .single();
+  if (error) return handleSupabaseError(res, error);
+  return res.status(201).json({ id: data.id, ok: true });
 });
 
 router.get('/offers', requireAuth, async (req, res) => {
@@ -232,6 +293,7 @@ router.get('/offers', requireAuth, async (req, res) => {
         buyer: buyer?.username ?? 'unknown',
         seller: seller?.username ?? 'unknown',
         amount: row.amount,
+        previousAmount: row.previous_amount ?? null,
         status,
         createdAt: new Date(row.created_at).getTime(),
         expiresAt: new Date(row.expires_at).getTime(),
@@ -305,6 +367,7 @@ router.post('/offers', requireAuth, async (req, res) => {
     buyer: parsed.data.buyer,
     seller: parsed.data.seller,
     amount: data.amount,
+    previousAmount: data.previous_amount ?? null,
     status: data.status,
     createdAt: new Date(data.created_at).getTime(),
     expiresAt: new Date(data.expires_at).getTime(),
@@ -314,57 +377,109 @@ router.post('/offers', requireAuth, async (req, res) => {
 
 router.patch('/offers/:id', requireAuth, async (req, res) => {
   const { supabase, userId } = req as AuthedRequest;
-  const parsed = z.object({ action: z.enum(['accept', 'reject', 'withdraw']) }).safeParse(req.body);
+  const parsed = z
+    .object({
+      action: z.enum(['accept', 'reject', 'withdraw', 'counter']),
+      amount: z.number().positive().optional(),
+    })
+    .safeParse(req.body);
   if (!parsed.success) return sendError(res, 400, 'Invalid action');
 
   const { data: offer, error: offerError } = await supabase.from('offers').select('*').eq('id', req.params.id).maybeSingle();
   if (offerError) return handleSupabaseError(res, offerError);
   if (!offer || offer.status !== 'pending') return sendError(res, 400, 'Offer not available');
 
-  let status = offer.status;
-  if (parsed.data.action === 'accept' && offer.seller_id === userId) status = 'accepted';
-  else if (parsed.data.action === 'reject' && offer.seller_id === userId) status = 'rejected';
-  else if (parsed.data.action === 'withdraw' && offer.buyer_id === userId) status = 'withdrawn';
-  else return sendError(res, 403, 'Not allowed');
+  const isBuyer = offer.buyer_id === userId;
+  const isSeller = offer.seller_id === userId;
+  if (!isBuyer && !isSeller) return sendError(res, 403, 'Not allowed');
 
-  const { data, error } = await supabase.from('offers').update({ status }).eq('id', req.params.id).select('*').single();
+  const patch: Record<string, unknown> = {};
+  let status = offer.status as string;
+
+  if (parsed.data.action === 'accept') {
+    if (offer.initiator === 'buyer' && isSeller) status = 'accepted';
+    else if (offer.initiator === 'seller' && isBuyer) status = 'accepted';
+    else return sendError(res, 403, 'Not allowed');
+    patch.status = status;
+  } else if (parsed.data.action === 'reject') {
+    if (offer.initiator === 'buyer' && isSeller) status = 'rejected';
+    else if (offer.initiator === 'seller' && isBuyer) status = 'rejected';
+    else return sendError(res, 403, 'Not allowed');
+    patch.status = status;
+  } else if (parsed.data.action === 'withdraw') {
+    if (offer.initiator === 'buyer' && isBuyer) status = 'withdrawn';
+    else if (offer.initiator === 'seller' && isSeller) status = 'withdrawn';
+    else return sendError(res, 403, 'Not allowed');
+    patch.status = status;
+  } else if (parsed.data.action === 'counter') {
+    if (!isSeller) return sendError(res, 403, 'Not allowed');
+    if (!parsed.data.amount) return sendError(res, 400, 'Counter amount required');
+    patch.previous_amount = offer.amount;
+    patch.amount = parsed.data.amount;
+    patch.initiator = 'seller';
+    patch.expires_at = new Date(Date.now() + OFFER_TTL_MS).toISOString();
+    status = 'pending';
+  } else {
+    return sendError(res, 400, 'Invalid action');
+  }
+
+  const { data, error } = await supabase.from('offers').update(patch).eq('id', req.params.id).select('*').single();
   if (error) return handleSupabaseError(res, error);
 
   const buyer = await getProfileById(supabase, data.buyer_id);
   const seller = await getProfileById(supabase, data.seller_id);
   const title = await listingTitle(supabase, data.listing_id);
 
-  if (status === 'accepted') {
+  if (parsed.data.action === 'counter') {
     queueEmail({
       toUserId: data.buyer_id,
+      preference: 'offers',
+      content: offerReceivedEmail({
+        offerId: data.id,
+        listingTitle: title,
+        amount: data.amount,
+        otherUsername: seller?.username ?? 'seller',
+        expiresAt: data.expires_at,
+      }),
+    });
+  } else if (status === 'accepted') {
+    queueEmail({
+      toUserId: offer.initiator === 'seller' ? data.seller_id : data.buyer_id,
       preference: 'offers',
       content: offerAcceptedEmail({
         offerId: data.id,
         listingTitle: title,
         amount: data.amount,
-        otherUsername: seller?.username ?? 'seller',
+        otherUsername:
+          offer.initiator === 'seller' ? (buyer?.username ?? 'buyer') : (seller?.username ?? 'seller'),
       }),
     });
   } else if (status === 'rejected') {
+    const recipientId = offer.initiator === 'seller' ? data.seller_id : data.buyer_id;
+    const otherUsername =
+      offer.initiator === 'seller' ? (buyer?.username ?? 'buyer') : (seller?.username ?? 'seller');
     queueEmail({
-      toUserId: data.buyer_id,
+      toUserId: recipientId,
       preference: 'offers',
       content: offerRejectedEmail({
         offerId: data.id,
         listingTitle: title,
         amount: data.amount,
-        otherUsername: seller?.username ?? 'seller',
+        otherUsername,
       }),
     });
   } else if (status === 'withdrawn') {
+    const recipientId = offer.initiator === 'seller' ? data.buyer_id : data.seller_id;
+    const otherUsername =
+      offer.initiator === 'seller' ? (seller?.username ?? 'seller') : (buyer?.username ?? 'buyer');
     queueEmail({
-      toUserId: data.seller_id,
+      toUserId: recipientId,
       preference: 'offers',
       content: offerWithdrawnEmail({
         offerId: data.id,
         listingTitle: title,
         amount: data.amount,
-        otherUsername: buyer?.username ?? 'buyer',
+        otherUsername,
       }),
     });
   }
@@ -375,6 +490,7 @@ router.patch('/offers/:id', requireAuth, async (req, res) => {
     buyer: buyer?.username ?? 'unknown',
     seller: seller?.username ?? 'unknown',
     amount: data.amount,
+    previousAmount: data.previous_amount ?? null,
     status: data.status,
     createdAt: new Date(data.created_at).getTime(),
     expiresAt: new Date(data.expires_at).getTime(),

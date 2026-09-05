@@ -5,6 +5,28 @@ import { CHECKOUT_RESERVE_MS, useLive } from '@/context/live-context';
 import type { Href } from 'expo-router';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
+export type PaymentInitResult = {
+  mode: 'simulate' | 'flutterwave';
+  paymentId: string;
+  txRef: string;
+  amount: number;
+  currency: string;
+  breakdown: {
+    itemPrice: number;
+    deliveryFee: number;
+    protectionFee: number;
+    total: number;
+  };
+  checkoutUrl?: string;
+  redirectUrl: string;
+  publicKey?: string | null;
+};
+
+export type PaymentVerifyResult = {
+  status: 'successful' | 'failed' | 'cancelled' | 'pending';
+  order?: Order;
+};
+
 type CheckoutContextValue = {
   draft: CheckoutDraft | null;
   lastOrder: Order | null;
@@ -19,10 +41,25 @@ type CheckoutContextValue = {
     liveSessionId?: string | null;
     liveStreamProductId?: string | null;
     claimId?: string | null;
+    offerId?: string | null;
+    itemPrice?: number;
+    listedPrice?: number | null;
   }) => Promise<boolean>;
-  updateDraft: (patch: Partial<Pick<CheckoutDraft, 'name' | 'address' | 'city' | 'phone' | 'deliveryMethod'>>) => void;
+  updateDraft: (
+    patch: Partial<
+      Pick<CheckoutDraft, 'name' | 'address' | 'city' | 'state' | 'phone' | 'deliveryNote' | 'deliveryMethod'>
+    >,
+  ) => void;
   cancelCheckout: () => Promise<string | null>;
+  /** @deprecated Prefer initPayment + verifyPayment (Flutterwave / simulate). */
   completePayment: () => Promise<Order | null>;
+  initPayment: () => Promise<PaymentInitResult>;
+  verifyPayment: (
+    txRef: string,
+    simulateOutcome?: 'success' | 'failed' | 'cancelled',
+  ) => Promise<PaymentVerifyResult>;
+  getPaymentStatus: (txRef: string) => Promise<{ status: string; orderId?: string | null }>;
+  applyPaidOrder: (order: Order) => Promise<void>;
   getOrder: (id: string) => Order | undefined;
   markDispatched: (id: string, username: string) => Promise<boolean>;
   confirmReceived: (id: string, username: string) => Promise<boolean>;
@@ -88,6 +125,9 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
       liveSessionId?: string | null;
       liveStreamProductId?: string | null;
       claimId?: string | null;
+      offerId?: string | null;
+      itemPrice?: number;
+      listedPrice?: number | null;
     }) => {
       try {
         const started = await apiFetch<CheckoutDraft>('/checkout/start', {
@@ -97,6 +137,7 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
             liveSessionId: input.liveSessionId ?? null,
             liveStreamProductId: input.liveStreamProductId ?? null,
             claimId: input.claimId ?? null,
+            offerId: input.offerId ?? null,
           }),
         });
         setDraft({
@@ -104,13 +145,17 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
           liveSessionId: started.liveSessionId ?? null,
           liveStreamProductId: started.liveStreamProductId ?? input.liveStreamProductId ?? null,
           claimId: started.claimId ?? input.claimId ?? null,
-          itemPrice: started.itemPrice,
+          offerId: started.offerId ?? input.offerId ?? null,
+          itemPrice: started.itemPrice ?? input.itemPrice,
+          listedPrice: started.listedPrice ?? input.listedPrice ?? null,
           buyer: started.buyer,
           name: '',
           address: '',
           city: '',
+          state: 'Lagos',
           phone: '',
-          deliveryMethod: 'Standard',
+          deliveryNote: '',
+          deliveryMethod: null,
           expiresAt: started.expiresAt ?? Date.now() + CHECKOUT_RESERVE_MS,
         });
         setNow(Date.now());
@@ -122,9 +167,16 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const updateDraft = useCallback((patch: Partial<Pick<CheckoutDraft, 'name' | 'address' | 'city' | 'phone' | 'deliveryMethod'>>) => {
-    setDraft((current) => (current ? { ...current, ...patch } : current));
-  }, []);
+  const updateDraft = useCallback(
+    (
+      patch: Partial<
+        Pick<CheckoutDraft, 'name' | 'address' | 'city' | 'state' | 'phone' | 'deliveryNote' | 'deliveryMethod'>
+      >,
+    ) => {
+      setDraft((current) => (current ? { ...current, ...patch } : current));
+    },
+    [],
+  );
 
   const cancelCheckout = useCallback(async () => {
     const liveId = draft?.liveSessionId ?? null;
@@ -141,28 +193,73 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
     return liveId;
   }, [draft, live]);
 
+  const checkoutBody = useCallback(() => {
+    if (!draft || !draft.deliveryMethod) return null;
+    return {
+      listingId: draft.listingId,
+      liveSessionId: draft.liveSessionId,
+      liveStreamProductId: draft.liveStreamProductId,
+      claimId: draft.claimId,
+      offerId: draft.offerId ?? null,
+      name: draft.name,
+      address: draft.address,
+      city: draft.city,
+      state: draft.state,
+      phone: draft.phone,
+      deliveryNote: draft.deliveryNote || null,
+      deliveryMethod: draft.deliveryMethod,
+    };
+  }, [draft]);
+
+  const applyPaidOrder = useCallback(
+    async (order: Order) => {
+      if (draft) await live.completeSale(draft.listingId);
+      setLastOrder(order);
+      setOrders((current) => [order, ...current.filter((item) => item.id !== order.id)]);
+      setDraft(null);
+    },
+    [draft, live],
+  );
+
+  const initPayment = useCallback(async () => {
+    const body = checkoutBody();
+    if (!body) throw new Error('Checkout incomplete');
+    return apiFetch<PaymentInitResult>('/checkout/payments/init', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }, [checkoutBody]);
+
+  const verifyPayment = useCallback(
+    async (txRef: string, simulateOutcome?: 'success' | 'failed' | 'cancelled') => {
+      const result = await apiFetch<PaymentVerifyResult>('/checkout/payments/verify', {
+        method: 'POST',
+        body: JSON.stringify({ txRef, simulateOutcome }),
+      });
+      if (result.status === 'successful' && result.order) {
+        await applyPaidOrder(result.order);
+      }
+      return result;
+    },
+    [applyPaidOrder],
+  );
+
+  const getPaymentStatus = useCallback(async (txRef: string) => {
+    return apiFetch<{ status: string; orderId?: string | null }>(
+      `/checkout/payments/${encodeURIComponent(txRef)}/status`,
+    );
+  }, []);
+
   const completePayment = useCallback(async () => {
-    if (!draft) return null;
+    const body = checkoutBody();
+    if (!body) return null;
     const order = await apiFetch<Order>('/checkout/complete', {
       method: 'POST',
-      body: JSON.stringify({
-        listingId: draft.listingId,
-        liveSessionId: draft.liveSessionId,
-        liveStreamProductId: draft.liveStreamProductId,
-        claimId: draft.claimId,
-        name: draft.name,
-        address: draft.address,
-        city: draft.city,
-        phone: draft.phone,
-        deliveryMethod: draft.deliveryMethod,
-      }),
+      body: JSON.stringify(body),
     });
-    await live.completeSale(draft.listingId);
-    setLastOrder(order);
-    setOrders((current) => [order, ...current]);
-    setDraft(null);
+    await applyPaidOrder(order);
     return order;
-  }, [draft, live]);
+  }, [applyPaidOrder, checkoutBody]);
 
   const getOrder = useCallback(
     (id: string) => orders.find((item) => item.id === id) ?? (lastOrder?.id === id ? lastOrder : undefined),
@@ -186,7 +283,9 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
   const cancelOrder = useCallback(async (id: string, _username: string, reason: string) => {
     const order = orders.find((item) => item.id === id);
     await apiFetch(`/checkout/orders/${id}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) });
-    setOrders((current) => current.map((item) => (item.id === id ? { ...item, status: 'cancelled', cancelReason: reason } : item)));
+    setOrders((current) =>
+      current.map((item) => (item.id === id ? { ...item, status: 'cancelled', cancelReason: reason } : item)),
+    );
     if (order) await live.releaseListing(order.listingId);
     return true;
   }, [live, orders]);
@@ -200,12 +299,6 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
 
   const getReviews = useCallback((username: string) => reviews[username] ?? [], [reviews]);
 
-  const loadReviews = useCallback(async (username: string) => {
-    const data = await apiFetch<{ reviews: Review[]; avg: number; count: number }>(`/checkout/reviews/${encodeURIComponent(username)}`);
-    setReviews((current) => ({ ...current, [username]: data.reviews }));
-    return data;
-  }, []);
-
   const ratingInfo = useCallback(
     (username: string) => {
       const list = reviews[username] ?? [];
@@ -215,10 +308,6 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
     },
     [reviews],
   );
-
-  useEffect(() => {
-    // Preload reviews lazily when orders load
-  }, []);
 
   const value = useMemo(
     () => ({
@@ -233,6 +322,10 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
       updateDraft,
       cancelCheckout,
       completePayment,
+      initPayment,
+      verifyPayment,
+      getPaymentStatus,
+      applyPaidOrder,
       getOrder,
       markDispatched,
       confirmReceived,
@@ -242,13 +335,16 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
       ratingInfo,
     }),
     [
+      applyPaidOrder,
       cancelCheckout,
       cancelOrder,
       completePayment,
       confirmReceived,
       draft,
       getOrder,
+      getPaymentStatus,
       getReviews,
+      initPayment,
       lastOrder,
       loading,
       markDispatched,
@@ -260,6 +356,7 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
       startCheckout,
       submitReview,
       updateDraft,
+      verifyPayment,
     ],
   );
 
@@ -272,7 +369,8 @@ export function useCheckout() {
   return value;
 }
 
-export function deliveryLabel(method: DeliveryMethod) {
+export function deliveryLabel(method: DeliveryMethod | null | undefined) {
+  if (!method) return 'Delivery';
   return `${method} delivery`;
 }
 

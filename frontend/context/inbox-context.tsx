@@ -32,6 +32,13 @@ type InboxContextValue = {
   acceptOffer: (id: string, username: string) => Promise<boolean>;
   rejectOffer: (id: string, username: string) => Promise<boolean>;
   withdrawOffer: (id: string, username: string) => Promise<boolean>;
+  counterOffer: (id: string, amount: number, username: string) => Promise<boolean>;
+  reportChat: (input: {
+    kind: 'user' | 'message';
+    targetUsername: string;
+    conversationId?: string;
+    messageId?: string;
+  }) => Promise<boolean>;
   isBlocked: (username: string) => boolean;
   toggleBlock: (username: string) => Promise<boolean>;
   blockedUsers: string[];
@@ -212,6 +219,31 @@ export function InboxProvider({ children }: { children: ReactNode }) {
     return true;
   }, []);
 
+  const counterOffer = useCallback(async (id: string, amount: number, _username: string) => {
+    const offer = await apiFetch<Offer>(`/inbox/offers/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ action: 'counter', amount }),
+    });
+    setOffers((current) => current.map((item) => (item.id === id ? offer : item)));
+    return true;
+  }, []);
+
+  const reportChat = useCallback(
+    async (input: {
+      kind: 'user' | 'message';
+      targetUsername: string;
+      conversationId?: string;
+      messageId?: string;
+    }) => {
+      await apiFetch<{ ok: boolean }>('/inbox/reports', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      });
+      return true;
+    },
+    [],
+  );
+
   const isBlocked = useCallback((username: string) => blocked.includes(username), [blocked]);
 
   const toggleBlock = useCallback(async (username: string) => {
@@ -257,6 +289,8 @@ export function InboxProvider({ children }: { children: ReactNode }) {
       acceptOffer,
       rejectOffer,
       withdrawOffer,
+      counterOffer,
+      reportChat,
       isBlocked,
       toggleBlock,
       blockedUsers: blocked,
@@ -267,6 +301,7 @@ export function InboxProvider({ children }: { children: ReactNode }) {
       blocked,
       canSellerMessage,
       conversationsFor,
+      counterOffer,
       createOffer,
       getConversation,
       getOffer,
@@ -283,6 +318,8 @@ export function InboxProvider({ children }: { children: ReactNode }) {
       sendMessage,
       toggleBlock,
       withdrawOffer,
+      counterOffer,
+      reportChat,
     ],
   );
 

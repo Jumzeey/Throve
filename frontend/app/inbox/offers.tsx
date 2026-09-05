@@ -9,11 +9,11 @@ import { useAuth } from '@/context/auth-context';
 import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
 import { getListingImageSource } from '@/data/images';
-import type { Offer, OfferStatus } from '@/data/types';
+import type { Offer } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatNaira } from '@/lib/format';
-import { effectiveOfferStatus, offerFooter } from '@/lib/offer-display';
+import { effectiveOfferStatus, offerChipVariant, offerFooter } from '@/lib/offer-display';
 import { Redirect, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -102,13 +102,15 @@ export default function OffersCentreScreen() {
         ) : list.length === 0 && !loadError ? (
           <EmptyState
             title="No offers yet"
-            message="Make an offer from a listing, or wait for a buyer to send you one."
+            message="Offers you send or receive will show here."
             style={styles.empty}
           />
         ) : (
           list.map((offer) => {
             const listing = getListing(offer.listingId);
             const status = effectiveOfferStatus(offer);
+            const isBuyer = offer.buyer === me;
+            const chip = offerChipVariant(offer, isBuyer, status);
             const counterpart =
               tab === 'received'
                 ? offer.initiator === 'buyer'
@@ -127,7 +129,7 @@ export default function OffersCentreScreen() {
                 title={listing?.title ?? 'Listing'}
                 listPrice={listing?.price}
                 direction={direction}
-                status={status}
+                chip={chip}
                 footer={footer}
                 thumb={listing ? getListingImageSource(listing) : null}
                 onPress={() => router.push(`/inbox/offer/${offer.id}`)}
@@ -145,7 +147,7 @@ function OfferRow({
   title,
   listPrice,
   direction,
-  status,
+  chip,
   footer,
   thumb,
   onPress,
@@ -154,7 +156,7 @@ function OfferRow({
   title: string;
   listPrice?: number;
   direction: string;
-  status: OfferStatus;
+  chip: OfferChipVariant;
   footer: ReturnType<typeof offerFooter>;
   thumb: ReturnType<typeof getListingImageSource>;
   onPress: () => void;
@@ -167,7 +169,7 @@ function OfferRow({
           <Text style={styles.title} numberOfLines={1}>
             {title}
           </Text>
-          <StatusChip kind="offer" variant={status as OfferChipVariant} />
+          <StatusChip kind="offer" variant={chip} />
         </View>
         <Text style={styles.direction}>{direction}</Text>
         <Text style={styles.priceLine}>

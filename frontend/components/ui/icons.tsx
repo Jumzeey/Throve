@@ -85,6 +85,16 @@ export function CheckIcon({ size = 17, color = Palette.successText, strokeWidth 
   );
 }
 
+export function InfoCircleIcon({ size = 18, color = Palette.plum, strokeWidth = 1.7 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round">
+      <Circle cx={12} cy={12} r={9} />
+      <Path d="M12 11v5.5" />
+      <Path d="M12 7.6h.01" />
+    </Svg>
+  );
+}
+
 export function AlertCircleIcon({ size = 17, color = Palette.error, strokeWidth = 1.8 }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round">
@@ -169,6 +179,24 @@ export function MoreHorizontalIcon({ size = 16, color = Palette.ivory }: IconPro
   );
 }
 
+export function TicketIcon({ size = 16, color = Palette.plum, strokeWidth = 1.7 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round">
+      <Path d="M4 7.5h16v9H4z" />
+      <Path d="M9 12h6" />
+    </Svg>
+  );
+}
+
+export function ProhibitedIcon({ size = 22, color = Palette.muted, strokeWidth = 1.6 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round">
+      <Circle cx={12} cy={12} r={9} />
+      <Path d="M6 6l12 12" />
+    </Svg>
+  );
+}
+
 export function UserIcon({ size = 17, color = Palette.muted3, strokeWidth = 1.7 }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round">
@@ -217,6 +245,15 @@ export function ShieldIcon({ size = 16, color = Palette.ivory, strokeWidth = 1.7
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round">
       <Path d="M12 3l7 3v5.5c0 4.4-3 8-7 9.5-4-1.5-7-5.1-7-9.5V6z" />
+    </Svg>
+  );
+}
+
+export function LockIcon({ size = 16, color = Palette.plum, strokeWidth = 1.7 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M7 11V8a5 5 0 0 1 10 0v3" />
+      <Path d="M6.5 11h11a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 17.5 21h-11A1.5 1.5 0 0 1 5 19.5v-7A1.5 1.5 0 0 1 6.5 11z" />
     </Svg>
   );
 }

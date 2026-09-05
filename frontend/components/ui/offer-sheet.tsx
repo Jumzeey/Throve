@@ -11,11 +11,12 @@ import { Keyboard, Modal, Pressable, StyleSheet, Text, View } from 'react-native
 type Props = {
   visible: boolean;
   listingPrice: number;
+  title?: string;
   onClose: () => void;
   onSubmit: (amount: number) => void;
 };
 
-export function OfferSheet({ visible, listingPrice, onClose, onSubmit }: Props) {
+export function OfferSheet({ visible, listingPrice, title = 'Make an offer', onClose, onSubmit }: Props) {
   const [amount, setAmount] = useState('');
   const [error, setError] = useState<string | null>(null);
   const min = minOfferAmount(listingPrice);
@@ -46,7 +47,7 @@ export function OfferSheet({ visible, listingPrice, onClose, onSubmit }: Props) 
         <KeyboardSafeSheet onDismiss={close} style={styles.sheet}>
           <Pressable onPress={(event) => event.stopPropagation()}>
             <View style={styles.handle} />
-            <Text style={styles.title}>Make an offer</Text>
+            <Text style={styles.title}>{title}</Text>
             <Text style={styles.sub}>
               Listed at {formatNaira(listingPrice)} · minimum {formatNaira(min)}
             </Text>

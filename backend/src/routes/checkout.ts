@@ -13,7 +13,7 @@ import {
 import { getProfileById, getProfileByUsername } from '../lib/mappers.js';
 import { createServiceClient } from '../lib/supabase.js';
 import { type AuthedRequest, requireAuth } from '../middleware/auth.js';
-import { shippingFee } from '../lib/listing-catalog.js';
+import { buyerProtectionFee, shippingFee } from '../lib/listing-catalog.js';
 
 const router = Router();
 const RESERVE_MS = 10 * 60 * 1000;
@@ -44,7 +44,10 @@ router.get('/orders', requireAuth, async (req, res) => {
         phone: row.phone,
         deliveryMethod: row.delivery_method,
         deliveryFee: row.delivery_fee,
+        protectionFee: row.protection_fee ?? 0,
         itemPrice: row.item_price,
+        listedPrice: row.listed_price ?? null,
+        offerId: row.offer_id ?? null,
         total: row.total,
         fromLiveId: row.from_live_id,
         liveStreamProductId: row.live_stream_product_id ?? undefined,
@@ -82,7 +85,10 @@ router.get('/orders/:id', requireAuth, async (req, res) => {
     phone: data.phone,
     deliveryMethod: data.delivery_method,
     deliveryFee: data.delivery_fee,
+    protectionFee: data.protection_fee ?? 0,
     itemPrice: data.item_price,
+    listedPrice: data.listed_price ?? null,
+    offerId: data.offer_id ?? null,
     total: data.total,
     fromLiveId: data.from_live_id,
     liveStreamProductId: data.live_stream_product_id ?? undefined,
@@ -102,6 +108,7 @@ router.post('/start', requireAuth, async (req, res) => {
       liveSessionId: z.string().nullable().optional(),
       liveStreamProductId: z.string().optional(),
       claimId: z.string().optional(),
+      offerId: z.string().uuid().optional().nullable(),
     })
     .safeParse(req.body);
 
@@ -109,6 +116,8 @@ router.post('/start', requireAuth, async (req, res) => {
 
   let listingId = parsed.data.listingId;
   let itemPrice: number | undefined;
+  let listedPrice: number | undefined;
+  let offerId = parsed.data.offerId ?? null;
   let liveStreamProductId = parsed.data.liveStreamProductId;
   let claimId = parsed.data.claimId;
   let liveSessionId = parsed.data.liveSessionId ?? null;
@@ -150,6 +159,16 @@ router.post('/start', requireAuth, async (req, res) => {
     }
   }
 
+  if (offerId) {
+    const { data: offer, error: offerError } = await supabase.from('offers').select('*').eq('id', offerId).maybeSingle();
+    if (offerError) return handleSupabaseError(res, offerError);
+    if (!offer || offer.status !== 'accepted' || offer.buyer_id !== userId) {
+      return sendError(res, 400, 'Offer not available for checkout');
+    }
+    listingId = offer.listing_id;
+    itemPrice = offer.amount;
+  }
+
   if (!listingId) return sendError(res, 400, 'listingId or liveStreamProductId required');
 
   const { data: listing, error: listingError } = await supabase
@@ -161,6 +180,9 @@ router.post('/start', requireAuth, async (req, res) => {
   if (listingError) return handleSupabaseError(res, listingError);
   if (!listing) return sendError(res, 404, 'Listing not found');
   if (listing.status === 'sold' && !liveStreamProductId) return sendError(res, 400, 'Listing already sold');
+
+  listedPrice = listing.price;
+  if (itemPrice == null) itemPrice = listing.price;
 
   // Non-live path: reserve catalog listing
   if (!liveStreamProductId) {
@@ -184,13 +206,17 @@ router.post('/start', requireAuth, async (req, res) => {
     liveSessionId,
     liveStreamProductId: liveStreamProductId ?? null,
     claimId: claimId ?? null,
-    itemPrice: itemPrice ?? listing.price,
+    offerId,
+    itemPrice,
+    listedPrice: offerId && listedPrice !== itemPrice ? listedPrice : null,
     buyer: buyer?.username ?? 'unknown',
     name: '',
     address: '',
     city: '',
+    state: 'Lagos',
     phone: '',
-    deliveryMethod: 'Standard',
+    deliveryNote: '',
+    deliveryMethod: null,
     expiresAt,
   });
 });
@@ -206,8 +232,11 @@ router.post('/complete', requireAuth, async (req, res) => {
       name: z.string().min(1),
       address: z.string().min(1),
       city: z.string().min(1),
+      state: z.string().min(1).optional(),
       phone: z.string().min(1),
+      deliveryNote: z.string().optional().nullable(),
       deliveryMethod: z.enum(['Standard', 'Express']),
+      offerId: z.string().uuid().optional().nullable(),
     })
     .safeParse(req.body);
 
@@ -223,8 +252,19 @@ router.post('/complete', requireAuth, async (req, res) => {
   if (!listing) return sendError(res, 400, 'Listing unavailable');
 
   let itemPrice = listing.price;
+  const listedPrice = listing.price;
   let claimId = parsed.data.claimId ?? null;
   let liveStreamProductId = parsed.data.liveStreamProductId ?? null;
+  let offerId = parsed.data.offerId ?? null;
+
+  if (offerId) {
+    const { data: offer, error: offerError } = await supabase.from('offers').select('*').eq('id', offerId).maybeSingle();
+    if (offerError) return handleSupabaseError(res, offerError);
+    if (!offer || offer.status !== 'accepted' || offer.buyer_id !== userId || offer.listing_id !== listing.id) {
+      return sendError(res, 400, 'Offer not available for checkout');
+    }
+    itemPrice = offer.amount;
+  }
 
   if (claimId) {
     try {
@@ -273,7 +313,8 @@ router.post('/complete', requireAuth, async (req, res) => {
   }
 
   const deliveryFee = shippingFee(parsed.data.deliveryMethod);
-  const total = itemPrice + deliveryFee;
+  const protectionFee = buyerProtectionFee(itemPrice);
+  const total = itemPrice + deliveryFee + protectionFee;
 
   const { count } = await supabase.from('orders').select('*', { count: 'exact', head: true });
   const orderId = `ORD${1001 + (count ?? 0)}`;
@@ -289,10 +330,15 @@ router.post('/complete', requireAuth, async (req, res) => {
       name: parsed.data.name.trim(),
       address: parsed.data.address.trim(),
       city: parsed.data.city.trim(),
+      state: parsed.data.state?.trim() || null,
       phone: parsed.data.phone.trim(),
+      delivery_note: parsed.data.deliveryNote?.trim() || null,
       delivery_method: parsed.data.deliveryMethod,
       delivery_fee: deliveryFee,
+      protection_fee: protectionFee,
       item_price: itemPrice,
+      listed_price: offerId && listedPrice !== itemPrice ? listedPrice : null,
+      offer_id: offerId,
       total,
       from_live_id: parsed.data.liveSessionId ?? null,
       live_stream_product_id: liveStreamProductId,
@@ -338,7 +384,10 @@ router.post('/complete', requireAuth, async (req, res) => {
     phone: data.phone,
     deliveryMethod: data.delivery_method,
     deliveryFee: data.delivery_fee,
+    protectionFee: data.protection_fee ?? 0,
     itemPrice: data.item_price,
+    listedPrice: data.listed_price ?? null,
+    offerId: data.offer_id ?? null,
     total: data.total,
     fromLiveId: data.from_live_id,
     liveStreamProductId: data.live_stream_product_id ?? undefined,
