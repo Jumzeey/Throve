@@ -1,31 +1,40 @@
+import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { ListingGridSkeleton } from '@/components/ui/loading-skeleton';
-import { OfflineBanner } from '@/components/ui/alert-banner';
+import { PlusIcon } from '@/components/ui/icons';
 import { StatusChip, type ListingChipVariant } from '@/components/ui/status-chip';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
-import { getListingImage } from '@/data/images';
 import { useAuth } from '@/context/auth-context';
 import { useListings } from '@/context/listings-context';
+import { getListingImageSource } from '@/data/images';
 import type { Listing } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatNaira } from '@/lib/format';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useScreenInsets } from '@/hooks/use-screen-insets';
 
-const TABS = ['draft', 'available', 'sold', 'hidden'] as const;
-type Tab = (typeof TABS)[number];
+const FILTERS = ['all', 'draft', 'available', 'reserved', 'sold', 'hidden'] as const;
+type Filter = (typeof FILTERS)[number];
 
-function matchesTab(listing: Listing, tab: Tab) {
-  if (tab === 'available') return listing.status === 'available' || listing.status === 'reserved';
-  return listing.status === tab;
+const FILTER_LABEL: Record<Filter, string> = {
+  all: 'All',
+  draft: 'Draft',
+  available: 'Available',
+  reserved: 'Reserved',
+  sold: 'Sold',
+  hidden: 'Hidden',
+};
+
+function isFilter(value?: string): value is Filter {
+  return FILTERS.includes(value as Filter);
 }
 
-function isTab(value?: string): value is Tab {
-  return TABS.includes(value as Tab);
+function matchesFilter(listing: Listing, filter: Filter) {
+  if (filter === 'all') return true;
+  return listing.status === filter;
 }
 
 export default function SellScreen() {
@@ -33,12 +42,15 @@ export default function SellScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ tab?: string }>();
   const { session } = useAuth();
-  const { listingsForSeller, resetForm, loadFormFromListing, loading } = useListings();
+  const { listingsForSeller, resetForm, loadFormFromListing, loading, refresh } = useListings();
   const { isConnected } = useNetworkStatus();
-  const [tab, setTab] = useState<Tab>(isTab(params.tab) ? params.tab : 'available');
+  const initial = params.tab === 'available' || !params.tab ? 'all' : isFilter(params.tab) ? params.tab : 'all';
+  const [filter, setFilter] = useState<Filter>(initial);
+  const [loadError, setLoadError] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    if (isTab(params.tab)) setTab(params.tab);
+    if (isFilter(params.tab)) setFilter(params.tab === 'available' ? 'all' : params.tab);
   }, [params.tab]);
 
   const mine = useMemo(() => {
@@ -46,11 +58,23 @@ export default function SellScreen() {
     return listingsForSeller(session.username).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [listingsForSeller, session]);
 
-  const visible = mine.filter((listing) => matchesTab(listing, tab));
+  const counts = useMemo(() => {
+    const next = { all: mine.length, draft: 0, available: 0, reserved: 0, sold: 0, hidden: 0 };
+    for (const listing of mine) {
+      if (listing.status in next) next[listing.status as Exclude<Filter, 'all'>] += 1;
+    }
+    return next;
+  }, [mine]);
 
-  function goLive() {
-    router.push(session?.canHostLive ? '/live/prepare' : '/live/host-access');
-  }
+  const visible = mine.filter((listing) => matchesFilter(listing, filter));
+
+  const reload = useCallback(async () => {
+    setRefreshing(true);
+    setLoadError(false);
+    const ok = await refresh();
+    if (!ok) setLoadError(true);
+    setRefreshing(false);
+  }, [refresh]);
 
   function openNew() {
     resetForm();
@@ -66,57 +90,82 @@ export default function SellScreen() {
     router.push(`/sell/${listing.id}`);
   }
 
+  const emptyTitle = filter === 'all' ? 'Nothing listed yet' : `No ${FILTER_LABEL[filter].toLowerCase()} listings`;
+  const emptyMessage =
+    filter === 'all'
+      ? 'List your first piece to start selling on Throve.'
+      : filter === 'draft'
+        ? 'Drafts you save while creating a listing will appear here.'
+        : `You don't have any ${FILTER_LABEL[filter].toLowerCase()} listings right now.`;
+
   return (
     <View style={[styles.screen, { paddingTop: top }]}>
       <View style={styles.header}>
-        <Text style={styles.title}>My listings</Text>
-        <Button label="+ New listing" onPress={openNew} style={styles.newBtn} />
+        <View style={styles.headerCopy}>
+          <Text style={styles.title}>My listings</Text>
+          <Text style={styles.subtitle}>
+            {counts.all} listing{counts.all === 1 ? '' : 's'}
+          </Text>
+        </View>
+        <Pressable onPress={openNew} style={styles.newBtn} accessibilityRole="button" accessibilityLabel="New listing">
+          <PlusIcon size={16} color={Palette.ivory} />
+          <Text style={styles.newLabel}>New</Text>
+        </Pressable>
       </View>
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: tabScrollBottom }]} showsVerticalScrollIndicator={false}>
+
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.filters}
+        style={styles.filtersScroll}>
+        {FILTERS.map((item) => {
+          const active = filter === item;
+          const count = counts[item];
+          const label = item === 'all' ? 'All' : `${FILTER_LABEL[item]} · ${count}`;
+          return (
+            <Pressable
+              key={item}
+              onPress={() => setFilter(item)}
+              style={[styles.filterChip, active ? styles.filterChipOn : styles.filterChipOff]}>
+              <Text style={[styles.filterLabel, active ? styles.filterLabelOn : styles.filterLabelOff]}>{label}</Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+
+      <ScrollView
+        contentContainerStyle={[styles.body, { paddingBottom: tabScrollBottom }]}
+        showsVerticalScrollIndicator={false}>
         {!isConnected ? (
-          <View style={styles.offline}>
-            <OfflineBanner message="Reconnect to publish or update listings." />
+          <View style={styles.banner}>
+            <OfflineBanner title="No connection" message="Reconnect to see your listings." />
+          </View>
+        ) : null}
+        {loadError ? (
+          <View style={styles.banner}>
+            <AlertBanner
+              variant="error"
+              title="We couldn't load your listings"
+              message="Please try again in a moment."
+            />
+            <Button label="Try again" variant="secondary" loading={refreshing} onPress={() => void reload()} style={styles.retry} />
           </View>
         ) : null}
 
-        <Pressable onPress={goLive} style={styles.goLive}>
-          <Text style={styles.goLiveLabel}>● Go Live</Text>
-        </Pressable>
-        <View style={styles.tabs}>
-          {TABS.map((item) => {
-            const active = tab === item;
-            return (
-              <Pressable key={item} onPress={() => setTab(item)} style={[styles.tab, active ? styles.tabOn : null]}>
-                <Text style={[styles.tabLabel, active ? styles.tabLabelOn : null]}>
-                  {item[0].toUpperCase() + item.slice(1)}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        {loading ? (
-          <ListingGridSkeleton count={4} />
-        ) : visible.length === 0 ? (
+        {loading && mine.length === 0 ? (
+          <MyListingsSkeleton />
+        ) : visible.length === 0 && !loadError ? (
           <EmptyState
-            title="Nothing here yet"
-            message={
-              tab === 'draft'
-                ? 'Drafts you save while creating a listing will appear here.'
-                : `You don't have any ${tab} listings right now.`
-            }
-            actionLabel={tab === 'draft' ? 'Create listing' : undefined}
-            onAction={tab === 'draft' ? openNew : undefined}
+            title={emptyTitle}
+            message={emptyMessage}
+            actionLabel={filter === 'all' || filter === 'draft' ? 'Create listing' : undefined}
+            onAction={filter === 'all' || filter === 'draft' ? openNew : undefined}
             style={styles.empty}
           />
         ) : (
-          <View style={styles.grid}>
-            {chunk(visible, 2).map((row, rowIndex) => (
-              <View key={rowIndex} style={styles.row}>
-                {row.map((listing) => (
-                  <ListingThumb key={listing.id} listing={listing} onPress={() => openListing(listing)} />
-                ))}
-                {row.length === 1 ? <View style={styles.cell} /> : null}
-              </View>
+          <View style={styles.list}>
+            {visible.map((listing) => (
+              <ListingRow key={listing.id} listing={listing} onPress={() => openListing(listing)} />
             ))}
           </View>
         )}
@@ -125,37 +174,47 @@ export default function SellScreen() {
   );
 }
 
-function ListingThumb({ listing, onPress }: { listing: Listing; onPress: () => void }) {
+function ListingRow({ listing, onPress }: { listing: Listing; onPress: () => void }) {
+  const draft = listing.status === 'draft';
   const chipVariant: ListingChipVariant =
     listing.status === 'reserved' ? 'reserved' : (listing.status as ListingChipVariant);
 
   return (
-    <Pressable onPress={onPress} style={styles.cell}>
-      <View style={styles.imageWrap}>
-        <AppImage source={getListingImage(listing.id)} style={styles.image} />
-        <View style={styles.badge}>
-          <StatusChip kind="listing" variant={chipVariant} />
-        </View>
+    <Pressable onPress={onPress} style={styles.row}>
+      <AppImage source={getListingImageSource(listing)} style={styles.thumb} />
+      <View style={styles.rowCopy}>
+        <Text style={styles.rowTitle} numberOfLines={2}>
+          {listing.title === 'Untitled draft' ? 'Untitled draft' : listing.title}
+        </Text>
+        <Text style={styles.rowPrice}>{listing.price > 0 ? formatNaira(listing.price) : '—'}</Text>
+        <StatusChip kind="listing" variant={chipVariant} />
       </View>
-      <Text style={styles.cardTitle} numberOfLines={2}>
-        {listing.title}
-      </Text>
-      <Text style={styles.cardPrice}>{formatNaira(listing.price)}</Text>
+      <Pressable onPress={onPress} style={styles.manageBtn} hitSlop={6}>
+        <Text style={styles.manageLabel}>{draft ? 'Continue' : 'Manage'}</Text>
+      </Pressable>
     </Pressable>
   );
 }
 
-function chunk<T>(items: T[], size: number) {
-  const rows: T[][] = [];
-  for (let i = 0; i < items.length; i += size) rows.push(items.slice(i, i + size));
-  return rows;
+function MyListingsSkeleton() {
+  return (
+    <View style={styles.skeletonList}>
+      {Array.from({ length: 4 }).map((_, index) => (
+        <View key={index} style={styles.skeletonRow}>
+          <View style={styles.skeletonThumb} />
+          <View style={styles.skeletonCopy}>
+            <View style={[styles.skeletonLine, { width: '72%' }]} />
+            <View style={[styles.skeletonLine, { width: '40%', marginTop: 10 }]} />
+            <View style={[styles.skeletonChip, { marginTop: 10 }]} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: Palette.ivory,
-  },
+  screen: { flex: 1, backgroundColor: Palette.ivory },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -164,103 +223,106 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.lg,
     paddingBottom: Spacing.sm,
   },
+  headerCopy: { flex: 1, minWidth: 0, paddingRight: 12 },
   title: {
     fontSize: 28,
     fontFamily: Typography.display,
     color: Palette.espresso,
     letterSpacing: -0.3,
   },
+  subtitle: {
+    marginTop: 2,
+    fontSize: 13,
+    fontFamily: Typography.body,
+    color: Palette.muted,
+  },
   newBtn: {
-    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 38,
     paddingHorizontal: 14,
     borderRadius: Radius.pill,
+    backgroundColor: Palette.plum,
   },
-  body: {
+  newLabel: {
+    fontSize: 14,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.ivory,
+  },
+  filtersScroll: { flexGrow: 0 },
+  filters: {
     paddingHorizontal: Spacing.xl,
-    paddingBottom: Spacing.xxl,
-  },
-  offline: {
-    marginBottom: Spacing.md,
-  },
-  goLive: {
-    height: 46,
-    borderWidth: 1,
-    borderColor: Palette.liveRed,
-    borderRadius: Radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Palette.ivoryElevated,
-    marginBottom: Spacing.lg,
-  },
-  goLiveLabel: {
-    fontSize: 13,
-    fontFamily: Typography.bodySemiBold,
-    color: Palette.liveRed,
-  },
-  tabs: {
-    flexDirection: 'row',
-    borderBottomWidth: 1,
-    borderBottomColor: Palette.divider,
-    marginBottom: Spacing.lg,
-  },
-  tab: {
-    flex: 1,
     paddingVertical: 10,
-    alignItems: 'center',
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+    gap: 8,
   },
-  tabOn: {
-    borderBottomColor: Palette.plum,
+  filterChip: {
+    height: 34,
+    paddingHorizontal: 14,
+    borderRadius: Radius.pill,
+    justifyContent: 'center',
   },
-  tabLabel: {
-    fontSize: 12,
-    fontFamily: Typography.bodySemiBold,
-    color: Palette.muted3,
+  filterChipOn: { backgroundColor: Palette.plum },
+  filterChipOff: {
+    backgroundColor: Palette.ivoryElevated,
+    borderWidth: 1,
+    borderColor: Palette.border,
   },
-  tabLabelOn: {
-    color: Palette.plum,
-  },
-  empty: {
-    marginTop: Spacing.xl,
-  },
-  grid: {
-    gap: 14,
-  },
+  filterLabel: { fontSize: 12.5, fontFamily: Typography.bodySemiBold },
+  filterLabelOn: { color: Palette.ivory },
+  filterLabelOff: { color: Palette.espresso },
+  body: { paddingHorizontal: Spacing.xl, paddingTop: 4 },
+  banner: { marginBottom: Spacing.md },
+  retry: { marginTop: 10 },
+  empty: { marginTop: Spacing.md },
+  list: { gap: 12 },
   row: {
     flexDirection: 'row',
-    gap: 14,
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 4,
   },
-  cell: {
-    flex: 1,
-  },
-  imageWrap: {
-    position: 'relative',
+  thumb: {
+    width: 72,
+    height: 72,
     borderRadius: Radius.sm,
-    overflow: 'hidden',
     backgroundColor: Palette.sand,
   },
-  image: {
-    width: '100%',
-    aspectRatio: 0.82,
-    borderRadius: Radius.sm,
-  },
-  badge: {
-    position: 'absolute',
-    top: 9,
-    left: 9,
-  },
-  cardTitle: {
-    marginTop: 9,
-    fontSize: 13,
-    lineHeight: 18,
-    fontFamily: Typography.body,
-    color: Palette.espresso,
-  },
-  cardPrice: {
-    marginTop: 4,
-    fontSize: 15,
+  rowCopy: { flex: 1, minWidth: 0, gap: 5 },
+  rowTitle: {
+    fontSize: 14,
+    lineHeight: 19,
     fontFamily: Typography.bodySemiBold,
     color: Palette.espresso,
   },
+  rowPrice: {
+    fontSize: 14,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.espresso,
+  },
+  manageBtn: {
+    minHeight: 34,
+    paddingHorizontal: 14,
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+    borderColor: Palette.plum,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  manageLabel: {
+    fontSize: 12.5,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.plum,
+  },
+  skeletonList: { gap: 14 },
+  skeletonRow: { flexDirection: 'row', gap: 12, alignItems: 'center' },
+  skeletonThumb: {
+    width: 72,
+    height: 72,
+    borderRadius: Radius.sm,
+    backgroundColor: Palette.skeleton,
+  },
+  skeletonCopy: { flex: 1 },
+  skeletonLine: { height: 11, borderRadius: 5, backgroundColor: Palette.skeleton },
+  skeletonChip: { width: 72, height: 22, borderRadius: 4, backgroundColor: Palette.skeleton },
 });

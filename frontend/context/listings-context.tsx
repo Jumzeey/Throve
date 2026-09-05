@@ -27,7 +27,7 @@ type ListingsContextValue = {
   listings: Listing[];
   loading: boolean;
   form: ListingForm;
-  refresh: () => Promise<void>;
+  refresh: () => Promise<boolean>;
   getListing: (id: string) => Listing | undefined;
   listingsForSeller: (username: string) => Listing[];
   setForm: (patch: Partial<ListingForm>) => void;
@@ -79,15 +79,26 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await apiFetch<Listing[]>('/listings');
-      setListings(data);
+      const catalog = await apiFetch<Listing[]>('/listings');
+      let mine: Listing[] = [];
+      if (session) {
+        try {
+          mine = await apiFetch<Listing[]>('/listings/mine');
+        } catch {
+          mine = [];
+        }
+      }
+      const username = session?.username;
+      const others = username ? catalog.filter((item) => item.seller !== username) : catalog;
+      setListings(username ? [...mine, ...others] : catalog);
       void fetchListingCatalog().catch(() => undefined);
+      return true;
     } catch {
-      // Backend offline or misconfigured — keep empty catalog; screens show offline/empty states
+      return false;
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [session]);
 
   useEffect(() => {
     if (!isReady) return;

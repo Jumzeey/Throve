@@ -9,11 +9,11 @@ export type OrderChipVariant = 'paid' | 'dispatched' | 'in_transit' | 'completed
 type ChipConfig = { label: string; color: string; bg?: string; border: string };
 
 const LISTING: Record<ListingChipVariant, ChipConfig> = {
-  draft: { label: 'Draft', color: Palette.plum, border: '#C9A9BD' },
-  available: { label: 'Available', color: Palette.successText, border: Palette.successBorder },
-  reserved: { label: 'Reserved', color: Palette.warningText, border: '#E9CFA6', bg: Palette.warningBg },
-  sold: { label: 'Sold', color: Palette.ivory, border: Palette.espresso, bg: Palette.espresso },
-  hidden: { label: 'Hidden', color: Palette.muted, border: '#D4C7BE' },
+  draft: { label: 'DRAFT', color: Palette.plum, border: '#C9A9BD' },
+  available: { label: 'AVAILABLE', color: Palette.successText, border: Palette.successBorder },
+  reserved: { label: 'RESERVED', color: Palette.warningText, border: '#E9CFA6', bg: Palette.warningBg },
+  sold: { label: 'SOLD', color: Palette.ivory, border: Palette.espresso, bg: Palette.espresso },
+  hidden: { label: 'HIDDEN', color: Palette.muted, border: '#D4C7BE' },
 };
 
 const OFFER: Record<OfferChipVariant, ChipConfig> = {

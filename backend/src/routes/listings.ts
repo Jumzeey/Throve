@@ -180,6 +180,19 @@ router.get('/saved/me', requireAuth, async (req, res) => {
   return res.json(listings);
 });
 
+router.get('/mine', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const { data, error } = await supabase
+    .from('listings')
+    .select('*')
+    .eq('seller_id', userId)
+    .order('created_at', { ascending: false });
+  if (error) return handleSupabaseError(res, error);
+
+  const listings = await enrichListings(supabase, data ?? [], userId);
+  return res.json(listings);
+});
+
 router.get('/seller/:username', optionalAuth, async (req, res) => {
   const supabase = (req as AuthedRequest).supabase ?? (await import('../lib/supabase.js')).createSupabaseClient();
   const userId = (req as AuthedRequest).userId;
