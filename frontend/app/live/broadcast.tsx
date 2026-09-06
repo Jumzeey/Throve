@@ -12,7 +12,7 @@ import { PinnedProductCard, type PinnedProductVariant } from '@/components/live/
 import { AppImage } from '@/components/ui/app-image';
 import { SpinnerArcIcon } from '@/components/ui/icons';
 import { Palette, Radius, Typography } from '@/constants/theme';
-import type { LiveComment, LiveConnection, LiveKitCredentials, LiveStreamProduct } from '@/data/types';
+import type { LiveComment, LiveConnection, LiveMediaCredentials, LiveStreamProduct } from '@/data/types';
 import { useAuth } from '@/context/auth-context';
 import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
@@ -43,7 +43,7 @@ export default function LiveBroadcastScreen() {
   const { getListing } = useListings();
   const inbox = useInbox();
   const live = useLive();
-  const [credentials, setCredentials] = useState<LiveKitCredentials | null>(null);
+  const [credentials, setCredentials] = useState<LiveMediaCredentials | null>(null);
   const [endOpen, setEndOpen] = useState(false);
   const [ending, setEnding] = useState(false);
   const [modsOpen, setModsOpen] = useState(false);
@@ -80,7 +80,7 @@ export default function LiveBroadcastScreen() {
   useEffect(() => {
     if (!liveSession?.id) return;
     live
-      .fetchLiveKitToken(liveSession.id)
+      .fetchLiveMedia(liveSession.id)
       .then(setCredentials)
       .catch(() => setCredentials(null));
   }, [live, liveSession?.id]);

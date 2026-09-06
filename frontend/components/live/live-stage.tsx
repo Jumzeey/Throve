@@ -13,14 +13,14 @@ import {
 } from '@/components/ui/icons';
 import { SimulatedStage } from '@/components/ui/simulated-stage';
 import { Palette, Radius, Typography } from '@/constants/theme';
-import type { LiveConnection, LiveComment, LiveKitCredentials } from '@/data/types';
+import type { LiveConnection, LiveComment, LiveMediaCredentials } from '@/data/types';
 import { loadLiveKitNative, type LiveKitNative } from '@/lib/livekit-native';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { memo, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 type Props = {
-  credentials: LiveKitCredentials | null;
+  credentials: LiveMediaCredentials | null;
   isHost: boolean;
   onConnectionChange?: (state: LiveConnection) => void;
   children?: ReactNode;
@@ -34,8 +34,7 @@ const LIVE_IVORY_62 = 'rgba(255,247,240,0.62)';
 const LIVE_IVORY_16 = 'rgba(255,247,240,0.16)';
 
 /**
- * LiveKit video stage. Falls back to SimulatedStage when credentials are missing
- * or native modules are unavailable (Expo Go).
+ * Media stage adapter. LiveKit today; IVS later; SimulatedStage when creds/native missing.
  */
 export function LiveStage({ credentials, isHost, onConnectionChange, children }: Props) {
   return (
@@ -53,7 +52,40 @@ const LiveVideoLayer = memo(function LiveVideoLayer({
   isHost,
   onConnectionChange,
 }: {
-  credentials: LiveKitCredentials | null;
+  credentials: LiveMediaCredentials | null;
+  isHost: boolean;
+  onConnectionChange?: (state: LiveConnection) => void;
+}) {
+  const provider = credentials?.provider ?? 'livekit';
+
+  if (!credentials || provider === 'simulated') {
+    return (
+      <View style={styles.videoLayer}>
+        <SimulatedStage />
+      </View>
+    );
+  }
+
+  if (provider === 'ivs') {
+    return (
+      <View style={styles.placeholder}>
+        <VideoIcon size={34} color="rgba(255,247,240,0.28)" />
+        <Text style={styles.placeholderText}>IVS playback coming soon</Text>
+      </View>
+    );
+  }
+
+  return (
+    <LiveKitVideoLayer credentials={credentials} isHost={isHost} onConnectionChange={onConnectionChange} />
+  );
+});
+
+const LiveKitVideoLayer = memo(function LiveKitVideoLayer({
+  credentials,
+  isHost,
+  onConnectionChange,
+}: {
+  credentials: LiveMediaCredentials;
   isHost: boolean;
   onConnectionChange?: (state: LiveConnection) => void;
 }) {
@@ -63,7 +95,7 @@ const LiveVideoLayer = memo(function LiveVideoLayer({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!credentials?.token || !credentials.url) {
+      if (!credentials.token || !credentials.url) {
         setFailed(true);
         return;
       }
@@ -79,13 +111,13 @@ const LiveVideoLayer = memo(function LiveVideoLayer({
     return () => {
       cancelled = true;
     };
-  }, [credentials?.token, credentials?.url]);
+  }, [credentials.token, credentials.url]);
 
   const onConnected = useCallback(() => onConnectionChange?.('live'), [onConnectionChange]);
   const onDisconnected = useCallback(() => onConnectionChange?.('lost'), [onConnectionChange]);
   const onError = useCallback(() => onConnectionChange?.('reconnecting'), [onConnectionChange]);
 
-  if (failed || !credentials) {
+  if (failed) {
     return (
       <View style={styles.videoLayer}>
         <SimulatedStage />
@@ -107,8 +139,8 @@ const LiveVideoLayer = memo(function LiveVideoLayer({
   return (
     <View style={styles.videoLayer} pointerEvents="none">
       <LiveKitRoom
-        token={credentials.token}
-        serverUrl={credentials.url}
+        token={credentials.token!}
+        serverUrl={credentials.url!}
         connect
         audio={isHost}
         video={isHost}

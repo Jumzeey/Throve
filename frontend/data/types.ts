@@ -127,12 +127,26 @@ export type LiveSessionSummary = {
   endedReason?: 'host' | 'connection';
 };
 
-export type LiveKitCredentials = {
+export type LiveMediaProvider = 'livekit' | 'ivs' | 'simulated';
+
+/** Provider-agnostic media join credentials (LiveKit now; IVS later). */
+export type LiveMediaCredentials = {
+  provider: LiveMediaProvider;
+  role: 'host' | 'viewer';
+  canPublish: boolean;
+  token?: string;
+  url?: string;
+  roomName?: string;
+  ingestEndpoint?: string;
+  streamKey?: string;
+  playbackUrl?: string;
+};
+
+/** @deprecated Use LiveMediaCredentials */
+export type LiveKitCredentials = LiveMediaCredentials & {
   token: string;
   url: string;
   roomName: string;
-  role: 'host' | 'viewer';
-  canPublish: boolean;
 };
 
 export type Review = {

@@ -9,7 +9,7 @@ import {
 } from '@/components/live/live-stage';
 import { PinnedProductCard, type PinnedProductVariant } from '@/components/live/pinned-product-card';
 import { Palette, Typography } from '@/constants/theme';
-import type { LiveConnection, LiveKitCredentials } from '@/data/types';
+import type { LiveConnection, LiveMediaCredentials } from '@/data/types';
 import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
 import { useLive, useLiveClock } from '@/context/live-context';
@@ -32,7 +32,7 @@ export default function LiveViewerScreen() {
   const checkout = useCheckout();
   const [draft, setDraft] = useState('');
   const [note, setNote] = useState<string | null>(null);
-  const [credentials, setCredentials] = useState<LiveKitCredentials | null>(null);
+  const [credentials, setCredentials] = useState<LiveMediaCredentials | null>(null);
   const [claimError, setClaimError] = useState<string | null>(null);
   const [claiming, setClaiming] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
@@ -56,7 +56,7 @@ export default function LiveViewerScreen() {
       return;
     }
     live
-      .fetchLiveKitToken(sessionId)
+      .fetchLiveMedia(sessionId)
       .then(setCredentials)
       .catch(() => setCredentials(null));
   }, [live, sessionId, viewSession?.status]);

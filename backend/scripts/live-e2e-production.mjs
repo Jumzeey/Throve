@@ -123,15 +123,18 @@ function liveKitHttpHost(wsUrl) {
 }
 
 async function assertLiveKitRealtime(hostToken, viewerToken, sessionId) {
-  const hostCreds = await api(hostToken, `/live/sessions/${sessionId}/token`, { method: 'POST', body: {} });
+  const hostCreds = await api(hostToken, `/live/sessions/${sessionId}/media`, { method: 'POST', body: {} });
   assert(
     'livekit.host_token',
-    hostCreds.status === 200 && Boolean(hostCreds.json?.token) && Boolean(hostCreds.json?.url),
+    hostCreds.status === 200 &&
+      hostCreds.json?.provider === 'livekit' &&
+      Boolean(hostCreds.json?.token) &&
+      Boolean(hostCreds.json?.url),
     hostCreds.status === 503 ? 'LiveKit unavailable' : hostCreds.json?.message || String(hostCreds.status),
   );
   if (hostCreds.status !== 200 || !hostCreds.json?.token) return;
 
-  const viewerCreds = await api(viewerToken, `/live/sessions/${sessionId}/token`, { method: 'POST', body: {} });
+  const viewerCreds = await api(viewerToken, `/live/sessions/${sessionId}/media`, { method: 'POST', body: {} });
   assert(
     'livekit.viewer_token',
     viewerCreds.status === 200 && Boolean(viewerCreds.json?.token),
@@ -312,10 +315,10 @@ async function main() {
     body: { viewers: 2 },
   });
   assert('live.join', join.status === 200 && join.json?.ok === true, join.json?.message || String(join.status));
-  const lk = await api(viewer.token, `/live/sessions/${sessionId}/token`, { method: 'POST', body: {} });
+  const lk = await api(viewer.token, `/live/sessions/${sessionId}/media`, { method: 'POST', body: {} });
   assert(
     'live.token',
-    lk.status === 200 && Boolean(lk.json?.token),
+    lk.status === 200 && Boolean(lk.json?.token) && lk.json?.provider === 'livekit',
     lk.status === 503 ? 'LiveKit unavailable' : lk.json?.message || String(lk.status),
   );
 

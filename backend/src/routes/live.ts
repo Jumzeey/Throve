@@ -16,7 +16,7 @@ import {
   removeModerator,
 } from '../lib/live-moderators.js';
 import { mapLiveClaim, mapLiveSession, mapLiveStreamProduct } from '../lib/live-mappers.js';
-import { createLiveKitToken, getLiveKitUrl, isLiveKitConfigured } from '../lib/livekit.js';
+import { createSessionMediaCredentials } from '../lib/live-media.js';
 import { getProfileById, mapListing } from '../lib/mappers.js';
 import { notifyUser } from '../lib/notify.js';
 import { createServiceClient, createSupabaseClient } from '../lib/supabase.js';
@@ -575,11 +575,8 @@ router.post('/sessions/:id/viewers', requireAuth, async (req, res) => {
   return res.json({ ok: true, peakViewers: peak });
 });
 
-router.post('/sessions/:id/token', requireAuth, async (req, res) => {
+router.post('/sessions/:id/media', requireAuth, async (req, res) => {
   const { supabase, userId } = req as AuthedRequest;
-  if (!isLiveKitConfigured()) {
-    return sendError(res, 503, 'LiveKit is not configured', 'LIVEKIT_UNAVAILABLE');
-  }
 
   const { data: session, error } = await supabase.from('live_sessions').select('*').eq('id', req.params.id).maybeSingle();
   if (error) return handleSupabaseError(res, error);
@@ -591,21 +588,58 @@ router.post('/sessions/:id/token', requireAuth, async (req, res) => {
   const roomName = session.livekit_room_name ?? `live_${session.id}`;
 
   try {
-    const token = await createLiveKitToken({
+    const credentials = await createSessionMediaCredentials({
+      sessionId: String(session.id),
+      userId,
+      username: profile?.username ?? undefined,
+      isHost,
       roomName,
-      identity: userId,
-      name: profile?.username ?? userId,
-      canPublish: isHost,
-      canSubscribe: true,
     });
-    return res.json({
-      token,
-      url: getLiveKitUrl(),
+    return res.json(credentials);
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === 'LIVEKIT_UNAVAILABLE' || code === 'MEDIA_PROVIDER_UNAVAILABLE') {
+      return sendError(res, 503, err instanceof Error ? err.message : 'Media unavailable', code);
+    }
+    return sendError(res, 500, err instanceof Error ? err.message : 'Media credentials failed');
+  }
+});
+
+/** @deprecated Prefer POST /sessions/:id/media — kept for older clients / E2E. */
+router.post('/sessions/:id/token', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+
+  const { data: session, error } = await supabase.from('live_sessions').select('*').eq('id', req.params.id).maybeSingle();
+  if (error) return handleSupabaseError(res, error);
+  if (!session) return sendError(res, 404, 'Session not found');
+  if (session.status === 'ended') return sendError(res, 400, 'Session ended');
+
+  const isHost = session.host_id === userId;
+  const profile = await getProfileById(supabase, userId);
+  const roomName = session.livekit_room_name ?? `live_${session.id}`;
+
+  try {
+    const credentials = await createSessionMediaCredentials({
+      sessionId: String(session.id),
+      userId,
+      username: profile?.username ?? undefined,
+      isHost,
       roomName,
-      role: isHost ? 'host' : 'viewer',
-      canPublish: isHost,
+    });
+    // Legacy shape (LiveKit-only fields) for older clients.
+    return res.json({
+      provider: credentials.provider,
+      token: credentials.token,
+      url: credentials.url,
+      roomName: credentials.roomName,
+      role: credentials.role,
+      canPublish: credentials.canPublish,
     });
   } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === 'LIVEKIT_UNAVAILABLE' || code === 'MEDIA_PROVIDER_UNAVAILABLE') {
+      return sendError(res, 503, err instanceof Error ? err.message : 'LiveKit is not configured', code);
+    }
     return sendError(res, 500, err instanceof Error ? err.message : 'Token failed');
   }
 });

@@ -8,6 +8,7 @@ import type {
   LiveComment,
   LiveConnection,
   LiveKitCredentials,
+  LiveMediaCredentials,
   LiveSession,
   LiveSessionSummary,
   LiveStreamProduct,
@@ -61,6 +62,9 @@ type LiveContextValue = {
   beginCheckoutReservation: (listingId: string, username: string, sessionId: string) => Promise<boolean>;
   completeSale: (listingId: string) => Promise<void>;
   releaseListing: (listingId: string) => Promise<void>;
+  /** Provider-agnostic media credentials (LiveKit now; IVS later). */
+  fetchLiveMedia: (sessionId: string) => Promise<LiveMediaCredentials>;
+  /** @deprecated Prefer fetchLiveMedia */
   fetchLiveKitToken: (sessionId: string) => Promise<LiveKitCredentials>;
   startLive: (input: StartLiveInput) => Promise<LiveSession>;
   /** Promote an upcoming session to live (host only). */
@@ -497,9 +501,14 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     }
   }, [claimsBySession, releaseClaim]);
 
-  const fetchLiveKitToken = useCallback(async (sessionId: string) => {
-    return apiFetch<LiveKitCredentials>(`/live/sessions/${sessionId}/token`, { method: 'POST' });
+  const fetchLiveMedia = useCallback(async (sessionId: string) => {
+    return apiFetch<LiveMediaCredentials>(`/live/sessions/${sessionId}/media`, { method: 'POST' });
   }, []);
+
+  const fetchLiveKitToken = useCallback(async (sessionId: string) => {
+    const media = await fetchLiveMedia(sessionId);
+    return media as LiveKitCredentials;
+  }, [fetchLiveMedia]);
 
   const startLive = useCallback(async (input: StartLiveInput) => {
     const listings = input.featuredListingIds;
@@ -666,6 +675,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       beginCheckoutReservation,
       completeSale,
       releaseListing,
+      fetchLiveMedia,
       fetchLiveKitToken,
       startLive,
       goLiveNow,
@@ -686,6 +696,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       claimProduct,
       completeSale,
       endLive,
+      fetchLiveMedia,
       fetchLiveKitToken,
       getClaim,
       getComments,
