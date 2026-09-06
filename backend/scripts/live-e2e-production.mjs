@@ -289,7 +289,7 @@ async function main() {
       department: 'Women',
       category: 'Tops',
       description: 'Automated production E2E',
-      products: [{ listingId, livePrice: 7500, stock: 2, isPinned: true }],
+      products: [{ listingId, livePrice: 7500, stock: 3, isPinned: true }],
       moderatorUsernames: [mod.username],
     },
   });
@@ -363,23 +363,194 @@ async function main() {
   const rmNotif = await notificationsSince(viewer.token, tRm, ['live_comment_removed']);
   assert('comment.removed_notif', rmNotif.items.length >= 1, rmNotif.items[0]?.title || 'none');
 
-  // --- Claim ---
-  const tClaim = Date.now();
+  // --- Mid-live add product + pin ---
+  const midDraft = await api(hostToken, '/listings/draft', {
+    method: 'POST',
+    body: {
+      title: 'E2E Mid-Live Pin Tee',
+      brand: 'Throve',
+      price: 6200,
+      size: 'M',
+      condition: 'Good',
+      department: 'Women',
+      category: 'Tops',
+      description: 'Added during live',
+      photoUrls: ['https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=800'],
+      shipping: 'Lagos',
+    },
+  });
+  const midListingId = midDraft.json?.id;
+  const midPub = midListingId
+    ? await api(hostToken, `/listings/${midListingId}/publish`, { method: 'POST', body: {} })
+    : { status: 0, json: {} };
+  assert('listing.mid.publish', midPub.status === 200 && midPub.json?.status === 'available', midPub.json?.status || midPub.json?.message);
+
+  const added = await api(hostToken, `/live/sessions/${sessionId}/products`, {
+    method: 'POST',
+    body: { listingId: midListingId, livePrice: 5900, stock: 2, isPinned: true },
+  });
+  const product2Id = added.json?.id;
+  assert('product.add_mid_live', added.status === 201 || added.status === 200, product2Id || added.json?.message);
+  const pin = product2Id
+    ? await api(hostToken, `/live/sessions/${sessionId}/products/${product2Id}/pin`, { method: 'POST', body: {} })
+    : { status: 0, json: {} };
+  assert('product.pin', pin.status === 200 && (pin.json?.isPinned === true || pin.json?.id), pin.json?.message || String(pin.status));
+
+  const patch = product2Id
+    ? await api(hostToken, `/live/sessions/${sessionId}/products/${product2Id}`, {
+        method: 'PATCH',
+        body: { livePrice: 5800, stock: 2 },
+      })
+    : { status: 0, json: {} };
+  assert('product.patch', patch.status === 200 && patch.json?.livePrice === 5800, `price=${patch.json?.livePrice}`);
+
+  // --- Claim release ---
   if (!productId) {
     fail('claim', 'no productId on session');
   } else {
-    const claim = await api(viewer.token, `/live/sessions/${sessionId}/products/${productId}/claim`, {
+    const tClaim = Date.now();
+    const claim1 = await api(viewer.token, `/live/sessions/${sessionId}/products/${productId}/claim`, {
       method: 'POST',
       body: { quantity: 1 },
     });
-    assert('claim.create', claim.status === 200, claim.json?.id || claim.json?.message || claim.json?.error);
-    await new Promise((r) => setTimeout(r, 1500));
-    const claimerNotifs = await notificationsSince(viewer.token, tClaim, ['live_claim_reserved']);
-    assert('claim.viewer_notif', claimerNotifs.items.length >= 1, claimerNotifs.items[0]?.title || 'none');
-    const hostClaimNotifs = await notificationsSince(hostToken, tClaim, ['live_claim_host']);
-    assert('claim.host_notif', hostClaimNotifs.items.length >= 1, hostClaimNotifs.items[0]?.title || 'none');
+    assert('claim.create', claim1.status === 200, claim1.json?.id || claim1.json?.message || claim1.json?.error);
+    const claim1Id = claim1.json?.id;
+    await new Promise((r) => setTimeout(r, 1200));
+    assert(
+      'claim.viewer_notif',
+      (await notificationsSince(viewer.token, tClaim, ['live_claim_reserved'])).items.length >= 1,
+    );
+    assert(
+      'claim.host_notif',
+      (await notificationsSince(hostToken, tClaim, ['live_claim_host'])).items.length >= 1,
+    );
 
-    // End with open claim
+    const released = await api(viewer.token, `/live/sessions/${sessionId}/products/${productId}/release`, {
+      method: 'POST',
+      body: { claimId: claim1Id },
+    });
+    assert(
+      'claim.release',
+      released.status === 200 && released.json?.status === 'released',
+      released.json?.status || released.json?.message || String(released.status),
+    );
+
+    // --- Claim → checkout (simulate payment) ---
+    const tCheckout = Date.now();
+    const claim2 = await api(viewer.token, `/live/sessions/${sessionId}/products/${productId}/claim`, {
+      method: 'POST',
+      body: { quantity: 1 },
+    });
+    assert('claim.for_checkout', claim2.status === 200, claim2.json?.id || claim2.json?.message);
+    const claim2Id = claim2.json?.id;
+    const listingForCheckout = claim2.json?.listingId || listingId;
+
+    const started = await api(viewer.token, '/checkout/start', {
+      method: 'POST',
+      body: {
+        claimId: claim2Id,
+        liveSessionId: sessionId,
+        liveStreamProductId: productId,
+        listingId: listingForCheckout,
+      },
+    });
+    assert('checkout.start', started.status === 200 && started.json?.claimId, started.json?.message || String(started.status));
+
+    const payInit = await api(viewer.token, '/checkout/payments/init', {
+      method: 'POST',
+      body: {
+        listingId: listingForCheckout,
+        liveSessionId: sessionId,
+        liveStreamProductId: productId,
+        claimId: claim2Id,
+        name: 'Dorcas E2E',
+        address: '12 Test Street',
+        city: 'Lagos',
+        state: 'Lagos',
+        phone: '08012345678',
+        deliveryMethod: 'Standard',
+      },
+    });
+    assert(
+      'checkout.pay_init',
+      payInit.status === 201 || payInit.status === 200,
+      payInit.json?.txRef || payInit.json?.message || String(payInit.status),
+    );
+    const txRef = payInit.json?.txRef;
+    const payVerify = txRef
+      ? await api(viewer.token, '/checkout/payments/verify', {
+          method: 'POST',
+          body: { txRef, simulateOutcome: 'success' },
+        })
+      : { status: 0, json: {} };
+    assert(
+      'checkout.pay_verify',
+      payVerify.status === 200 && payVerify.json?.status === 'successful' && Boolean(payVerify.json?.order?.id),
+      payVerify.json?.status || payVerify.json?.message || String(payVerify.status),
+    );
+    const orderId = payVerify.json?.order?.id;
+    ok('checkout.order', orderId || 'missing');
+    await new Promise((r) => setTimeout(r, 1500));
+    assert(
+      'checkout.buyer_order_notif',
+      (await notificationsSince(viewer.token, tCheckout, ['order_placed'])).items.length >= 1,
+    );
+    assert(
+      'checkout.seller_order_notif',
+      (await notificationsSince(hostToken, tCheckout, ['order_placed_seller'])).items.length >= 1,
+    );
+
+    // --- Claim expiry (force expires_at past; Railway worker notifies) ---
+    if (product2Id) {
+      const expClaim = await api(viewer.token, `/live/sessions/${sessionId}/products/${product2Id}/claim`, {
+        method: 'POST',
+        body: { quantity: 1 },
+      });
+      assert('claim.for_expiry', expClaim.status === 200, expClaim.json?.id || expClaim.json?.message);
+      const expClaimId = expClaim.json?.id;
+      if (expClaimId) {
+        const past = new Date(Date.now() - 60_000).toISOString();
+        const { error: expErr } = await admin
+          .from('live_claims')
+          .update({ expires_at: past })
+          .eq('id', expClaimId)
+          .eq('status', 'active');
+        assert('claim.force_expire_row', !expErr, expErr?.message || 'updated');
+
+        // Wait for Railway claim-expiry worker (30s tick) to expire + notify.
+        const tExp = Date.now();
+        let gotExpiryNotif = false;
+        let activeGone = false;
+        for (let i = 0; i < 12; i++) {
+          await new Promise((r) => setTimeout(r, 5000));
+          const meClaims = await api(viewer.token, `/live/sessions/${sessionId}/claims/me`);
+          activeGone =
+            !Array.isArray(meClaims.json) ||
+            !meClaims.json.some((c) => c.id === expClaimId && c.status === 'active');
+          const notifs = await notificationsSince(viewer.token, tExp - 5_000, ['live_claim_expired']);
+          if (notifs.items.length >= 1) gotExpiryNotif = true;
+          if (activeGone && gotExpiryNotif) break;
+        }
+        // Fallback: run RPC if worker lagged on status (notif may still arrive later)
+        if (!activeGone) {
+          await admin.rpc('expire_stale_live_claims');
+          const meClaims = await api(viewer.token, `/live/sessions/${sessionId}/claims/me`);
+          activeGone =
+            !Array.isArray(meClaims.json) ||
+            !meClaims.json.some((c) => c.id === expClaimId && c.status === 'active');
+        }
+        assert('claim.expired_status', activeGone, 'claim still active');
+        assert('claim.expired_notif', gotExpiryNotif, gotExpiryNotif ? 'ok' : 'worker did not notify within ~60s');
+      }
+    }
+
+    // --- End with a fresh open claim ---
+    const endClaim = await api(viewer.token, `/live/sessions/${sessionId}/products/${productId}/claim`, {
+      method: 'POST',
+      body: { quantity: 1 },
+    });
+    assert('claim.for_end', endClaim.status === 200, endClaim.json?.id || endClaim.json?.message);
+
     const tEnd = Date.now();
     const end = await api(hostToken, `/live/sessions/${sessionId}/end`, {
       method: 'POST',
