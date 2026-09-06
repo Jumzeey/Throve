@@ -3,10 +3,13 @@
  * Production live E2E against Railway only.
  * Host: app email/password via Supabase Auth.
  * Other roles: mint sessions via service-role generateLink + verifyOtp (no passwords).
+ * LiveKit: Room.connect so Cloud Sessions shows real participants.
  */
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { writeFileSync } from 'fs';
+import { RoomServiceClient } from 'livekit-server-sdk';
+import { Room, dispose } from '@livekit/rtc-node';
 
 const API = 'https://throve-production.up.railway.app';
 const HOST_EMAIL = process.env.THROVE_E2E_HOST_EMAIL || 'adeogun64@gmail.com';
@@ -106,9 +109,89 @@ async function notificationsSince(token, sinceMs, types) {
   return { status, items, all: json };
 }
 
+async function connectLiveKitRoom(label, url, token) {
+  const room = new Room();
+  await room.connect(url, token, { autoSubscribe: true });
+  const name = room.name || room.info?.name || '(connected)';
+  console.log(`  livekit.${label}.connected room=${name}`);
+  return room;
+}
+
+function liveKitHttpHost(wsUrl) {
+  // wss://xxx.livekit.cloud → https://xxx.livekit.cloud
+  return String(wsUrl).replace(/^ws/i, 'http');
+}
+
+async function assertLiveKitRealtime(hostToken, viewerToken, sessionId) {
+  const hostCreds = await api(hostToken, `/live/sessions/${sessionId}/token`, { method: 'POST', body: {} });
+  assert(
+    'livekit.host_token',
+    hostCreds.status === 200 && Boolean(hostCreds.json?.token) && Boolean(hostCreds.json?.url),
+    hostCreds.status === 503 ? 'LiveKit unavailable' : hostCreds.json?.message || String(hostCreds.status),
+  );
+  if (hostCreds.status !== 200 || !hostCreds.json?.token) return;
+
+  const viewerCreds = await api(viewerToken, `/live/sessions/${sessionId}/token`, { method: 'POST', body: {} });
+  assert(
+    'livekit.viewer_token',
+    viewerCreds.status === 200 && Boolean(viewerCreds.json?.token),
+    viewerCreds.json?.message || String(viewerCreds.status),
+  );
+  if (viewerCreds.status !== 200 || !viewerCreds.json?.token) return;
+
+  const url = hostCreds.json.url;
+  const roomName = hostCreds.json.roomName || `live_${sessionId}`;
+  let hostRoom;
+  let viewerRoom;
+  try {
+    hostRoom = await connectLiveKitRoom('host', url, hostCreds.json.token);
+    viewerRoom = await connectLiveKitRoom('viewer', url, viewerCreds.json.token);
+    assert('livekit.host_connected', Boolean(hostRoom.localParticipant || hostRoom.isConnected !== false), roomName);
+    assert('livekit.viewer_connected', Boolean(viewerRoom.localParticipant || viewerRoom.isConnected !== false), roomName);
+
+    // Hold connection so LiveKit Cloud records a session with participants.
+    await new Promise((r) => setTimeout(r, 4000));
+
+    const apiKey = process.env.LIVEKIT_API_KEY;
+    const apiSecret = process.env.LIVEKIT_API_SECRET;
+    if (apiKey && apiSecret) {
+      const svc = new RoomServiceClient(liveKitHttpHost(url), apiKey, apiSecret);
+      const participants = await svc.listParticipants(roomName);
+      assert(
+        'livekit.participants_listed',
+        Array.isArray(participants) && participants.length >= 2,
+        `count=${participants?.length ?? 0} room=${roomName}`,
+      );
+    } else {
+      ok('livekit.participants_listed', 'skipped (no LIVEKIT_API_KEY in env)');
+    }
+  } catch (err) {
+    fail('livekit.connect', err instanceof Error ? err.message : String(err));
+  } finally {
+    try {
+      await viewerRoom?.disconnect();
+    } catch {
+      /* ignore */
+    }
+    try {
+      await hostRoom?.disconnect();
+    } catch {
+      /* ignore */
+    }
+    try {
+      await dispose();
+    } catch {
+      /* ignore */
+    }
+    ok('livekit.disconnected');
+  }
+}
+
 async function endOpenLives(hostToken, hostUsername) {
   const { json } = await api(hostToken, '/live/sessions?status=live');
-  const lives = Array.isArray(json) ? json.filter((s) => s.host === hostUsername || s.hostUsername === hostUsername) : [];
+  const lives = Array.isArray(json)
+    ? json.filter((s) => s.host === hostUsername || s.hostUsername === hostUsername)
+    : [];
   for (const s of lives) {
     await api(hostToken, `/live/sessions/${s.id}/end`, { method: 'POST', body: { reason: 'host' } });
     console.log(`ended leftover live ${s.id}`);
@@ -235,6 +318,9 @@ async function main() {
     lk.status === 200 && Boolean(lk.json?.token),
     lk.status === 503 ? 'LiveKit unavailable' : lk.json?.message || String(lk.status),
   );
+
+  // Actually join LiveKit Cloud (not just mint JWT) so Sessions dashboard records participants.
+  await assertLiveKitRealtime(hostToken, viewer.token, sessionId);
 
   // --- Comments + moderator remove ---
   const viewerComment = await api(viewer.token, `/live/sessions/${sessionId}/comments`, {
