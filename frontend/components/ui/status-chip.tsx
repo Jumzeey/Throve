@@ -4,7 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 export type ListingChipVariant = 'draft' | 'available' | 'reserved' | 'sold' | 'hidden' | 'removed';
 export type OfferChipVariant = 'sent' | 'received' | 'pending' | 'accepted' | 'rejected' | 'countered' | 'withdrawn' | 'expired';
 export type LiveChipVariant = 'available' | 'reserved' | 'your_claim' | 'sold' | 'pinned';
-export type OrderChipVariant = 'paid' | 'dispatched' | 'in_transit' | 'completed' | 'cancelled';
+export type OrderChipVariant = 'paid' | 'dispatched' | 'in_transit' | 'delivered' | 'completed' | 'cancelled';
 
 type ChipConfig = { label: string; color: string; bg?: string; border: string };
 
@@ -37,11 +37,12 @@ const LIVE: Record<LiveChipVariant, ChipConfig> = {
 };
 
 const ORDER: Record<OrderChipVariant, ChipConfig> = {
-  paid: { label: 'Paid', color: Palette.plum, border: '#C9A9BD', bg: Palette.ivoryElevated },
-  dispatched: { label: 'Dispatched', color: Palette.warningText, border: '#E9CFA6', bg: Palette.warningBg },
-  in_transit: { label: 'In transit', color: Palette.warningText, border: '#E9CFA6', bg: Palette.warningBg },
-  completed: { label: 'Completed', color: Palette.successText, border: Palette.successBorder, bg: Palette.successBg },
-  cancelled: { label: 'Cancelled', color: Palette.error, border: Palette.errorBorder, bg: Palette.errorBg },
+  paid: { label: 'PAID', color: Palette.plum, border: '#C9A9BD' },
+  dispatched: { label: 'DISPATCHED', color: Palette.plum, border: '#C9A9BD' },
+  in_transit: { label: 'IN TRANSIT', color: Palette.plum, border: '#C9A9BD' },
+  delivered: { label: 'DELIVERED', color: '#3F5A3C', border: '#B9CDB4' },
+  completed: { label: 'COMPLETED', color: '#3F5A3C', border: '#4F6B4C' },
+  cancelled: { label: 'CANCELLED', color: Palette.errorText, border: Palette.errorBorder },
 };
 
 type Props =

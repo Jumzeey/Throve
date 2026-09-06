@@ -48,7 +48,7 @@ router.put('/me', requireAuth, async (req, res) => {
     .maybeSingle();
 
   if (taken.error) return handleSupabaseError(res, taken.error);
-  if (taken.data) return sendError(res, 409, 'That username is unavailable', 'USERNAME_TAKEN');
+  if (taken.data) return sendError(res, 409, 'That username is taken. Try another.', 'USERNAME_TAKEN');
 
   const patch: Record<string, string | null> = {
     name: parsed.data.name.trim(),
@@ -95,7 +95,7 @@ router.post('/me/setup', requireAuth, async (req, res) => {
     .maybeSingle();
 
   if (taken.error) return handleSupabaseError(res, taken.error);
-  if (taken.data) return sendError(res, 409, 'That username is unavailable', 'USERNAME_TAKEN');
+  if (taken.data) return sendError(res, 409, 'That username is taken. Try another.', 'USERNAME_TAKEN');
 
   const setupPatch: Record<string, string | boolean | null> = {
     username: parsed.data.username.trim(),

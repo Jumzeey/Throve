@@ -25,7 +25,7 @@ const CONFIG: Record<Variant, { bg: string; border: string; titleColor: string; 
     border: Palette.warningBorder,
     titleColor: Palette.warningText,
     bodyColor: Palette.muted,
-    Icon: WifiOffIcon,
+    Icon: AlertCircleIcon,
     iconColor: Palette.warning,
   },
   success: {
@@ -66,8 +66,24 @@ export function ErrorBanner({ message, title = "We couldn't complete that" }: { 
   return <AlertBanner variant="error" title={title} message={message} />;
 }
 
-export function OfflineBanner({ message = 'Reconnect to continue.', title = 'No connection' }: { message?: string; title?: string }) {
-  return <AlertBanner variant="warning" title={title} message={message} />;
+export function OfflineBanner({
+  message = 'Reconnect to continue.',
+  title = 'No connection',
+  style,
+}: {
+  message?: string;
+  title?: string;
+  style?: ViewStyle;
+}) {
+  return (
+    <View style={[styles.box, { backgroundColor: Palette.warningBg, borderColor: Palette.warningBorder }, style]}>
+      <WifiOffIcon color={Palette.warning} />
+      <View style={styles.textWrap}>
+        <Text style={[styles.title, { color: Palette.warningText }]}>{title}</Text>
+        <Text style={[styles.message, { color: Palette.muted }]}>{message}</Text>
+      </View>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({

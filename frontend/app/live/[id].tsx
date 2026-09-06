@@ -7,7 +7,7 @@ import {
   LiveViewerTopBar,
 } from '@/components/live/live-stage';
 import { PinnedProductCard, type PinnedProductVariant } from '@/components/live/pinned-product-card';
-import { Palette } from '@/constants/theme';
+import { Palette, Typography } from '@/constants/theme';
 import type { LiveConnection, LiveKitCredentials } from '@/data/types';
 import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
@@ -42,17 +42,21 @@ export default function LiveViewerScreen() {
   const viewSession = liveSession ?? heldSession.current;
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || viewSession?.status === 'ended') return;
     return live.subscribeSession(sessionId);
-  }, [live, sessionId]);
+  }, [live, sessionId, viewSession?.status]);
 
   useEffect(() => {
     if (!sessionId) return;
+    if (viewSession?.status === 'ended') {
+      setCredentials(null);
+      return;
+    }
     live
       .fetchLiveKitToken(sessionId)
       .then(setCredentials)
       .catch(() => setCredentials(null));
-  }, [live, sessionId]);
+  }, [live, sessionId, viewSession?.status]);
 
   useEffect(() => {
     if (live.roomNotice) setNote(live.roomNotice);
@@ -89,6 +93,45 @@ export default function LiveViewerScreen() {
   }
   if (!viewSession) {
     return <Redirect href="/(tabs)/live" />;
+  }
+
+  if (viewSession.status === 'ended') {
+    return (
+      <View style={[styles.screen, styles.endedScreen, { paddingTop: top + 24, paddingBottom: sheetBottom + 24 }]}>
+        <StatusBar style="light" />
+        <View style={styles.endedCard}>
+          <View style={styles.endedTop}>
+            <View style={styles.endedThumb} />
+            <View style={styles.endedMeta}>
+              <Text style={styles.endedTitle}>{viewSession.title}</Text>
+              <Text style={styles.endedHost}>{viewSession.host}</Text>
+            </View>
+            <View style={styles.endedBadge}>
+              <Text style={styles.endedBadgeText}>ENDED</Text>
+            </View>
+          </View>
+          <View style={styles.endedWatchBtn}>
+            <Text style={styles.endedWatchLabel}>Watch · unavailable</Text>
+          </View>
+          <Text style={styles.endedHint}>
+            Ended sessions can't be entered. View the seller's profile instead.
+          </Text>
+        </View>
+        <View style={styles.endedActions}>
+          <Text
+            style={styles.endedProfileLink}
+            onPress={() =>
+              router.push({ pathname: '/seller/[username]', params: { username: viewSession.host } })
+            }
+          >
+            View seller profile
+          </Text>
+          <Text style={styles.endedBackLink} onPress={() => router.replace('/(tabs)/live')}>
+            Back to Live
+          </Text>
+        </View>
+      </View>
+    );
   }
 
   const activeSession = viewSession;
@@ -278,5 +321,88 @@ const styles = StyleSheet.create({
   composerWrap: {
     paddingHorizontal: 16,
     paddingTop: 14,
+  },
+  endedScreen: {
+    paddingHorizontal: 20,
+    justifyContent: 'center',
+  },
+  endedCard: {
+    backgroundColor: Palette.liveDarkAlt,
+    borderRadius: 16,
+    padding: 14,
+  },
+  endedTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  endedThumb: {
+    width: 44,
+    height: 44,
+    borderRadius: 6,
+    backgroundColor: '#463038',
+  },
+  endedMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  endedTitle: {
+    fontSize: 14,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.ivory,
+  },
+  endedHost: {
+    marginTop: 3,
+    fontSize: 12,
+    fontFamily: Typography.body,
+    color: 'rgba(255,247,240,0.6)',
+  },
+  endedBadge: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,247,240,0.28)',
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  endedBadgeText: {
+    fontSize: 9.5,
+    fontFamily: Typography.bodyBold,
+    letterSpacing: 0.8,
+    color: 'rgba(255,247,240,0.6)',
+  },
+  endedWatchBtn: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,247,240,0.22)',
+    borderRadius: 22,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  endedWatchLabel: {
+    fontSize: 13,
+    fontFamily: Typography.bodySemiBold,
+    color: 'rgba(255,247,240,0.38)',
+  },
+  endedHint: {
+    marginTop: 10,
+    fontSize: 11,
+    lineHeight: 16,
+    fontFamily: Typography.body,
+    color: 'rgba(255,247,240,0.55)',
+  },
+  endedActions: {
+    marginTop: 20,
+    alignItems: 'center',
+    gap: 12,
+  },
+  endedProfileLink: {
+    fontSize: 14,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.ivory,
+  },
+  endedBackLink: {
+    fontSize: 13,
+    fontFamily: Typography.body,
+    color: 'rgba(255,247,240,0.6)',
   },
 });

@@ -150,14 +150,14 @@ export default function ShippingDetailsScreen() {
             <LocationField
               label="Delivery address"
               mode="address"
-              placeholder="Search Google Maps"
+              placeholder="Search for a place"
               value={
                 draft.address
                   ? [draft.address, draft.city, draft.state].filter(Boolean).join(', ')
                   : ''
               }
               error={fieldErrors.address || fieldErrors.city || fieldErrors.state}
-              hint="Search and pick the exact delivery place. City and state fill in automatically."
+              hint="Search or type the delivery address. City and state fill in when available."
               onSelect={(place) => {
                 checkout.updateDraft({
                   address: place.addressLine || place.formattedAddress,

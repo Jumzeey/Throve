@@ -46,7 +46,7 @@ type Props = {
 export function LocationField({
   label = 'Location',
   value,
-  placeholder = 'Search Google Maps',
+  placeholder = 'Search for a place',
   hint,
   error,
   regionCode = 'NG',
@@ -90,6 +90,48 @@ export function LocationField({
   );
 }
 
+function placeFromManual(text: string, mode: 'profile' | 'address'): ResolvedPlace {
+  const trimmed = text.trim();
+  const parts = trimmed.split(',').map((part) => part.trim()).filter(Boolean);
+  if (mode === 'profile') {
+    return {
+      placeId: `manual:${trimmed}`,
+      label: trimmed,
+      formattedAddress: trimmed,
+      addressLine: trimmed,
+      city: parts[0] ?? '',
+      state: parts[1] ?? '',
+      country: parts[2] ?? '',
+      postalCode: null,
+      lat: null,
+      lng: null,
+    };
+  }
+  return {
+    placeId: `manual:${trimmed}`,
+    label: trimmed,
+    formattedAddress: trimmed,
+    addressLine: parts[0] ?? trimmed,
+    city: parts[1] ?? '',
+    state: parts[2] ?? '',
+    country: 'Nigeria',
+    postalCode: null,
+    lat: null,
+    lng: null,
+  };
+}
+
+function friendlyPlacesError(err: unknown) {
+  const raw = err instanceof Error ? err.message : '';
+  if (/not configured|GOOGLE_MAPS|503|API key/i.test(raw)) {
+    return 'Place search is unavailable right now. You can type your location instead.';
+  }
+  if (/network|fetch|failed/i.test(raw)) {
+    return 'We couldn’t reach place search. Check your connection, or type your location.';
+  }
+  return 'We couldn’t load places. Try again, or type your location.';
+}
+
 function LocationPickerModal({
   visible,
   mode,
@@ -125,7 +167,9 @@ function LocationPickerModal({
     setPreview(null);
     setMapUri(null);
     setError(null);
-    void placesEnabled().then(setEnabled);
+    void placesEnabled()
+      .then((ok) => setEnabled(ok))
+      .catch(() => setEnabled(false));
     void createPlacesSession()
       .then(setSessionToken)
       .catch(() => setSessionToken(undefined));
@@ -133,6 +177,7 @@ function LocationPickerModal({
 
   const runSearch = useCallback(
     async (text: string, token?: string) => {
+      if (!enabled) return;
       if (text.trim().length < 2) {
         setSuggestions([]);
         return;
@@ -144,16 +189,20 @@ function LocationPickerModal({
         setSuggestions(results);
       } catch (err) {
         setSuggestions([]);
-        setError(err instanceof Error ? err.message : 'Search failed');
+        const message = friendlyPlacesError(err);
+        if (/unavailable right now|type your location/i.test(message)) {
+          setEnabled(false);
+        }
+        setError(message);
       } finally {
         setLoading(false);
       }
     },
-    [regionCode],
+    [enabled, regionCode],
   );
 
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || !enabled) return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       void runSearch(query, sessionToken);
@@ -161,7 +210,7 @@ function LocationPickerModal({
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [query, runSearch, sessionToken, visible]);
+  }, [enabled, query, runSearch, sessionToken, visible]);
 
   async function pickSuggestion(item: PlaceSuggestion) {
     setResolvingId(item.placeId);
@@ -176,7 +225,7 @@ function LocationPickerModal({
         setMapUri(null);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load place');
+      setError(friendlyPlacesError(err));
     } finally {
       setResolvingId(null);
     }
@@ -188,7 +237,7 @@ function LocationPickerModal({
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
       if (!permission.granted) {
-        setError('Location permission is required to use your current position.');
+        setError('Allow location access to use your current position, or type your location below.');
         return;
       }
       const position = await Location.getCurrentPositionAsync({
@@ -201,7 +250,8 @@ function LocationPickerModal({
         setMapUri(await fetchStaticMapDataUri(place.lat, place.lng));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not get current location');
+      setError(friendlyPlacesError(err));
+      setEnabled(false);
     } finally {
       setLocating(false);
     }
@@ -210,6 +260,15 @@ function LocationPickerModal({
   function confirmPreview() {
     if (!preview) return;
     onSelect(preview);
+  }
+
+  function confirmManual() {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setError('Enter a location to continue.');
+      return;
+    }
+    onSelect(placeFromManual(trimmed, mode));
   }
 
   return (
@@ -222,98 +281,104 @@ function LocationPickerModal({
           </Pressable>
         </View>
 
+        <View style={styles.searchRow}>
+          <SearchIcon size={16} color={Palette.muted} />
+          <TextInput
+            value={query}
+            onChangeText={(text) => {
+              setQuery(text);
+              setPreview(null);
+              setMapUri(null);
+              setError(null);
+            }}
+            placeholder={
+              mode === 'address'
+                ? enabled
+                  ? 'Street, area, or landmark'
+                  : 'Type your delivery address'
+                : enabled
+                  ? 'City, area, or landmark'
+                  : 'Type your city or area'
+            }
+            placeholderTextColor={Palette.disabled}
+            style={styles.searchInput}
+            autoFocus
+            returnKeyType={enabled ? 'search' : 'done'}
+            onSubmitEditing={() => {
+              if (!enabled) confirmManual();
+            }}
+          />
+          {loading ? <ActivityIndicator color={Palette.plum} /> : null}
+        </View>
+
+        {enabled ? (
+          <Pressable
+            onPress={() => void useCurrentLocation()}
+            disabled={locating}
+            style={({ pressed }) => [styles.currentBtn, pressed && styles.pressed]}>
+            {locating ? <ActivityIndicator color={Palette.plum} /> : <MapPinIcon size={15} color={Palette.plum} />}
+            <Text style={styles.currentLabel}>{locating ? 'Finding you…' : 'Use current location'}</Text>
+          </Pressable>
+        ) : (
+          <Text style={styles.manualHint}>Type your location, then confirm below.</Text>
+        )}
+
+        {error ? <Text style={styles.modalError}>{error}</Text> : null}
+
         {!enabled ? (
-          <View style={styles.disabledBox}>
-            <Text style={styles.disabledTitle}>Google Maps isn’t configured yet</Text>
-            <Text style={styles.disabledBody}>
-              Add GOOGLE_MAPS_API_KEY on the backend (Places API New, Geocoding, Maps Static) to enable live place
-              search.
+          <Pressable
+            onPress={confirmManual}
+            style={({ pressed }) => [styles.primaryAction, styles.manualConfirm, pressed && styles.pressed]}>
+            <Text style={styles.primaryActionLabel}>Use this location</Text>
+          </Pressable>
+        ) : preview ? (
+          <View style={styles.previewCard}>
+            {mapUri ? <Image source={{ uri: mapUri }} style={styles.map} resizeMode="cover" /> : null}
+            <Text style={styles.previewTitle}>
+              {mode === 'profile' ? preview.label : preview.formattedAddress}
             </Text>
+            {mode === 'profile' && preview.formattedAddress !== preview.label ? (
+              <Text style={styles.previewSub}>{preview.formattedAddress}</Text>
+            ) : null}
+            <View style={styles.previewActions}>
+              <Pressable
+                onPress={() => void Linking.openURL(googleMapsAppUrl(preview))}
+                style={styles.secondaryAction}>
+                <Text style={styles.secondaryActionLabel}>Open in Maps</Text>
+              </Pressable>
+              <Pressable onPress={confirmPreview} style={styles.primaryAction}>
+                <Text style={styles.primaryActionLabel}>Use this location</Text>
+              </Pressable>
+            </View>
           </View>
         ) : (
-          <>
-            <View style={styles.searchRow}>
-              <SearchIcon size={16} color={Palette.muted} />
-              <TextInput
-                value={query}
-                onChangeText={(text) => {
-                  setQuery(text);
-                  setPreview(null);
-                  setMapUri(null);
-                }}
-                placeholder={mode === 'address' ? 'Search address on Google Maps' : 'City, area, or landmark'}
-                placeholderTextColor={Palette.disabled}
-                style={styles.searchInput}
-                autoFocus
-                returnKeyType="search"
-              />
-              {loading ? <ActivityIndicator color={Palette.plum} /> : null}
-            </View>
-
-            <Pressable
-              onPress={() => void useCurrentLocation()}
-              disabled={locating}
-              style={({ pressed }) => [styles.currentBtn, pressed && styles.pressed]}>
-              {locating ? (
-                <ActivityIndicator color={Palette.plum} />
+          <FlatList
+            data={suggestions}
+            keyExtractor={(item) => item.placeId}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.list}
+            ListEmptyComponent={
+              query.trim().length >= 2 && !loading ? (
+                <Text style={styles.empty}>No matching places. Try a nearby landmark or street.</Text>
               ) : (
-                <MapPinIcon size={15} color={Palette.plum} />
-              )}
-              <Text style={styles.currentLabel}>{locating ? 'Finding you…' : 'Use current location'}</Text>
-            </Pressable>
-
-            {error ? <Text style={styles.modalError}>{error}</Text> : null}
-
-            {preview ? (
-              <View style={styles.previewCard}>
-                {mapUri ? <Image source={{ uri: mapUri }} style={styles.map} resizeMode="cover" /> : null}
-                <Text style={styles.previewTitle}>
-                  {mode === 'profile' ? preview.label : preview.formattedAddress}
-                </Text>
-                {mode === 'profile' && preview.formattedAddress !== preview.label ? (
-                  <Text style={styles.previewSub}>{preview.formattedAddress}</Text>
-                ) : null}
-                <View style={styles.previewActions}>
-                  <Pressable
-                    onPress={() => void Linking.openURL(googleMapsAppUrl(preview))}
-                    style={styles.secondaryAction}>
-                    <Text style={styles.secondaryActionLabel}>Open in Google Maps</Text>
-                  </Pressable>
-                  <Pressable onPress={confirmPreview} style={styles.primaryAction}>
-                    <Text style={styles.primaryActionLabel}>Use this location</Text>
-                  </Pressable>
+                <Text style={styles.empty}>Search for a place to select.</Text>
+              )
+            }
+            renderItem={({ item }) => (
+              <Pressable
+                onPress={() => void pickSuggestion(item)}
+                style={({ pressed }) => [styles.suggestion, pressed && styles.pressed]}>
+                <MapPinIcon size={16} color={Palette.plum} />
+                <View style={styles.suggestionCopy}>
+                  <Text style={styles.suggestionPrimary}>{item.primaryText}</Text>
+                  {item.secondaryText ? (
+                    <Text style={styles.suggestionSecondary}>{item.secondaryText}</Text>
+                  ) : null}
                 </View>
-              </View>
-            ) : (
-              <FlatList
-                data={suggestions}
-                keyExtractor={(item) => item.placeId}
-                keyboardShouldPersistTaps="handled"
-                contentContainerStyle={styles.list}
-                ListEmptyComponent={
-                  query.trim().length >= 2 && !loading ? (
-                    <Text style={styles.empty}>No matching places. Try a nearby landmark or street.</Text>
-                  ) : (
-                    <Text style={styles.empty}>Search Google Maps for a real place to select.</Text>
-                  )
-                }
-                renderItem={({ item }) => (
-                  <Pressable
-                    onPress={() => void pickSuggestion(item)}
-                    style={({ pressed }) => [styles.suggestion, pressed && styles.pressed]}>
-                    <MapPinIcon size={16} color={Palette.plum} />
-                    <View style={styles.suggestionCopy}>
-                      <Text style={styles.suggestionPrimary}>{item.primaryText}</Text>
-                      {item.secondaryText ? (
-                        <Text style={styles.suggestionSecondary}>{item.secondaryText}</Text>
-                      ) : null}
-                    </View>
-                    {resolvingId === item.placeId ? <ActivityIndicator color={Palette.plum} /> : null}
-                  </Pressable>
-                )}
-              />
+                {resolvingId === item.placeId ? <ActivityIndicator color={Palette.plum} /> : null}
+              </Pressable>
             )}
-          </>
+          />
         )}
       </View>
     </Modal>
@@ -423,6 +488,17 @@ const styles = StyleSheet.create({
     fontFamily: Typography.bodySemiBold,
     color: Palette.plum,
   },
+  manualHint: {
+    marginTop: 12,
+    fontSize: 13,
+    lineHeight: 19,
+    fontFamily: Typography.body,
+    color: Palette.muted,
+  },
+  manualConfirm: {
+    marginTop: 16,
+    alignSelf: 'stretch',
+  },
   modalError: {
     marginTop: 10,
     fontSize: 12.5,
@@ -519,26 +595,6 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     fontFamily: Typography.bodySemiBold,
     color: Palette.ivory,
-  },
-  disabledBox: {
-    marginTop: 24,
-    padding: 16,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: Palette.warningBorder,
-    backgroundColor: Palette.warningBg,
-    gap: 6,
-  },
-  disabledTitle: {
-    fontSize: 14,
-    fontFamily: Typography.bodySemiBold,
-    color: Palette.warningText,
-  },
-  disabledBody: {
-    fontSize: 12.5,
-    lineHeight: 18,
-    fontFamily: Typography.body,
-    color: Palette.muted,
   },
   pressed: { opacity: 0.88 },
 });

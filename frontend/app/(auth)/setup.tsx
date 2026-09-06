@@ -189,9 +189,9 @@ export default function SetupScreen() {
               <View onLayout={onFieldLayout('location')}>
                 <LocationField
                   label="Location"
-                  placeholder="Search Google Maps"
+                  placeholder="Search for a place"
                   value={location}
-                  hint="Pick a real city or area from Google Maps."
+                  hint="Search or type your city or area."
                   onFocus={() => onFieldFocus('location')}
                   onSelect={(place) => setLocation(place.label || place.formattedAddress)}
                 />

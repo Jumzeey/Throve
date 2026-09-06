@@ -32,7 +32,9 @@ type LiveContextValue = {
   activeBroadcastId: string | null;
   liveNow: LiveSession[];
   upcoming: LiveSession[];
+  recentlyEnded: LiveSession[];
   loading: boolean;
+  loadError: boolean;
   roomNotice: string | null;
   refresh: () => Promise<void>;
   hydrateSession: (sessionId: string) => Promise<LiveSession | null>;
@@ -93,6 +95,8 @@ function mapProductRow(row: Record<string, unknown>): LiveStreamProduct {
       : Array.isArray(row.photoUrls)
         ? (row.photoUrls as string[])
         : undefined,
+    category: row.category ? String(row.category) : undefined,
+    department: row.department ? String(row.department) : undefined,
   };
 }
 
@@ -106,6 +110,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [activeBroadcastId, setActiveBroadcastId] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [roomNotice, setRoomNotice] = useState<string | null>(null);
   const [prepareModerators, setPrepareModerators] = useState<string[]>([]);
   const [moderatorsBySession, setModeratorsBySession] = useState<Record<string, string[]>>({});
@@ -114,9 +119,17 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await apiFetch<{ liveNow: LiveSession[]; upcoming: LiveSession[]; all: LiveSession[] }>('/live/sessions');
-      const all = data.all ?? [...data.liveNow, ...data.upcoming];
+      const data = await apiFetch<{
+        liveNow: LiveSession[];
+        upcoming: LiveSession[];
+        recentlyEnded?: LiveSession[];
+        all: LiveSession[];
+      }>('/live/sessions');
+      const all =
+        data.all ??
+        [...data.liveNow, ...data.upcoming, ...(data.recentlyEnded ?? [])];
       setSessions(all);
+      setLoadError(false);
       setModeratorsBySession((current) => {
         const next = { ...current };
         for (const session of all) {
@@ -125,7 +138,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         return next;
       });
     } catch {
-      // Backend offline — live tab handles empty/offline UI
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -143,6 +156,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   const liveNow = useMemo(() => sessions.filter((session) => session.status === 'live'), [sessions]);
   const upcoming = useMemo(() => sessions.filter((session) => session.status === 'upcoming'), [sessions]);
+  const recentlyEnded = useMemo(() => sessions.filter((session) => session.status === 'ended'), [sessions]);
 
   const getSession = useCallback((id: string) => sessions.find((session) => session.id === id), [sessions]);
 
@@ -576,7 +590,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       activeBroadcastId,
       liveNow,
       upcoming,
+      recentlyEnded,
       loading,
+      loadError,
       roomNotice,
       refresh,
       hydrateSession,
@@ -629,9 +645,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       hydrateSession,
       listingStatus,
       liveNow,
+      loadError,
       loading,
       pinListing,
       pinProduct,
+      recentlyEnded,
       refresh,
       releaseClaim,
       releaseListing,

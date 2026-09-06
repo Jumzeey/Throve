@@ -1,5 +1,5 @@
 import { AppImage } from '@/components/ui/app-image';
-import { AlertBanner } from '@/components/ui/alert-banner';
+import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
 import { CalendarIcon, EyeIcon, ImagePlaceholderIcon, UserIcon, VideoIcon } from '@/components/ui/icons';
 import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
@@ -7,41 +7,56 @@ import { Palette, Radius, Typography } from '@/constants/theme';
 import { getLiveImage } from '@/data/images';
 import { useLive } from '@/context/live-context';
 import type { LiveSession } from '@/data/types';
+import { formatLiveSchedule, formatNaira } from '@/lib/format';
+import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
-import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 
 const IVORY_60 = 'rgba(255,247,240,0.6)';
 const IVORY_55 = 'rgba(255,247,240,0.55)';
 const IVORY_12 = 'rgba(255,247,240,0.12)';
 
+function sessionMedia(session: LiveSession) {
+  if (session.thumbnailUrl?.startsWith('http')) return session.thumbnailUrl;
+  return getLiveImage(session.id);
+}
+
+function categoryLine(session: LiveSession, includeCategory = true) {
+  const parts: string[] = [];
+  if (session.department) parts.push(session.department);
+  if (includeCategory && session.category) parts.push(session.category);
+  return parts.join(' · ') || 'Live';
+}
+
 export default function LiveDiscoveryScreen() {
   const { top, tabScrollBottom } = useScreenInsets();
   const router = useRouter();
-  const { liveNow, upcoming, loading, refresh } = useLive();
-  const [error, setError] = useState<string | null>(null);
+  const { liveNow, upcoming, recentlyEnded, loading, loadError, refresh } = useLive();
+  const { isConnected } = useNetworkStatus();
 
   useFocusEffect(
     useCallback(() => {
       setStatusBarStyle('light');
+      void refresh();
       return () => setStatusBarStyle('dark');
-    }, []),
+    }, [refresh]),
   );
 
   const pullTask = useCallback(async () => {
-    setError(null);
-    try {
-      await refresh();
-    } catch {
-      setError("We couldn't load live sessions");
-    }
+    await refresh();
   }, [refresh]);
   const { refreshing, onRefresh } = usePullRefresh(pullTask);
 
   const featured = liveNow[0];
   const moreLive = liveNow.slice(1);
+  const showOffline = !isConnected;
+  const showError = isConnected && loadError && !loading;
+  const hasCached = liveNow.length > 0 || upcoming.length > 0 || recentlyEnded.length > 0;
+  const showSkeleton = loading && !refreshing && !hasCached;
+  const showContent = (!loading || refreshing || hasCached) && !(showError && !hasCached);
 
   return (
     <View style={[styles.screen, { paddingTop: top }]}>
@@ -56,18 +71,34 @@ export default function LiveDiscoveryScreen() {
         onRefresh={onRefresh}
         contentContainerStyle={[styles.body, { paddingBottom: tabScrollBottom }]}
       >
-        {error ? (
-          <AlertBanner variant="error" title={error} message="Please try again in a moment." style={styles.banner} />
+        {showOffline ? (
+          <OfflineBanner
+            title="No connection"
+            message="Reconnect to watch live sessions."
+            style={styles.banner}
+          />
         ) : null}
 
-        {loading && !refreshing ? (
+        {showError ? (
+          <AlertBanner
+            variant="error"
+            title="We couldn't load live sessions"
+            message="Please try again in a moment."
+            style={styles.banner}
+          />
+        ) : null}
+
+        {showSkeleton ? (
           <View style={styles.loadingCard}>
-            <ActivityIndicator color={Palette.blush} />
             <View style={styles.loadingHero} />
-            <View style={styles.loadingLine} />
-            <View style={styles.loadingLineShort} />
+            <View style={styles.loadingLines}>
+              <View style={styles.loadingLine} />
+              <View style={styles.loadingLineShort} />
+            </View>
           </View>
-        ) : (
+        ) : null}
+
+        {showContent ? (
           <>
             <View style={styles.liveNowHeader}>
               <View style={styles.liveNowBadge}>
@@ -114,14 +145,30 @@ export default function LiveDiscoveryScreen() {
                 <UpcomingRow
                   key={session.id}
                   session={session}
-                  onPress={() => router.push({ pathname: '/seller/[username]', params: { username: session.host } })}
+                  onPress={() =>
+                    router.push({ pathname: '/seller/[username]', params: { username: session.host } })
+                  }
                 />
               ))
             )}
-          </>
-        )}
 
-        {error ? (
+            {recentlyEnded.length > 0 ? (
+              <View style={styles.endedSection}>
+                {recentlyEnded.map((session) => (
+                  <EndedSessionCard
+                    key={session.id}
+                    session={session}
+                    onOpenHost={() =>
+                      router.push({ pathname: '/seller/[username]', params: { username: session.host } })
+                    }
+                  />
+                ))}
+              </View>
+            ) : null}
+          </>
+        ) : null}
+
+        {showError ? (
           <Button label="Try again" variant="secondary" onPress={onRefresh} style={styles.retryBtn} />
         ) : null}
       </LiquidRefreshScrollView>
@@ -139,14 +186,18 @@ function FeaturedLiveCard({
   onOpenHost: () => void;
 }) {
   const pinned = session.products?.find((p) => p.isPinned) ?? session.products?.[0];
+  const productThumb = pinned?.photoUrls?.find((url) => url.startsWith('http'));
+
   return (
     <Pressable onPress={onWatch} style={styles.featuredCard}>
-      <AppImage source={getLiveImage(session.id)} style={styles.featuredImage} />
-      <View style={styles.featuredOverlay} />
-      <View style={styles.featuredPlaceholder}>
-        <VideoIcon size={30} color="rgba(255,247,240,0.3)" />
-        <Text style={styles.featuredPlaceholderLabel}>Live video</Text>
-      </View>
+      <AppImage source={sessionMedia(session)} style={styles.featuredImage} />
+      <View style={styles.featuredScrim} />
+      {!session.thumbnailUrl ? (
+        <View style={styles.featuredPlaceholder} pointerEvents="none">
+          <VideoIcon size={30} color="rgba(255,247,240,0.3)" />
+          <Text style={styles.featuredPlaceholderLabel}>Live video</Text>
+        </View>
+      ) : null}
       <View style={styles.featuredTop}>
         <View style={styles.livePill}>
           <Text style={styles.livePillText}>LIVE</Text>
@@ -159,28 +210,45 @@ function FeaturedLiveCard({
       <View style={styles.featuredBottom}>
         <Text style={styles.featuredTitle}>{session.title}</Text>
         <View style={styles.hostRow}>
-          <Pressable onPress={(e) => { e.stopPropagation(); onOpenHost(); }} style={styles.hostAvatar}>
-            <UserIcon size={15} color={Palette.muted3} />
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation();
+              onOpenHost();
+            }}
+            style={styles.hostAvatar}
+          >
+            {session.hostPhotoUrl ? (
+              <AppImage source={session.hostPhotoUrl} style={styles.hostAvatarImage} />
+            ) : (
+              <UserIcon size={15} color={Palette.muted3} />
+            )}
           </Pressable>
-          <View style={styles.hostMeta}>
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation();
+              onOpenHost();
+            }}
+            style={styles.hostMeta}
+          >
             <Text style={styles.hostName}>{session.host}</Text>
-            <Text style={styles.hostDept}>
-              {session.department ?? 'Live'}
-              {pinned?.title ? ` · ${pinned.title.split(' ').slice(-1)[0]}` : ''}
-            </Text>
-          </View>
+            <Text style={styles.hostDept}>{categoryLine(session)}</Text>
+          </Pressable>
           <View style={styles.watchBtn}>
             <Text style={styles.watchBtnLabel}>Watch</Text>
           </View>
         </View>
         {pinned ? (
           <View style={styles.nowShowing}>
-            <View style={styles.nowShowingThumb} />
+            {productThumb ? (
+              <AppImage source={productThumb} style={styles.nowShowingThumb} />
+            ) : (
+              <View style={styles.nowShowingThumb} />
+            )}
             <View style={styles.nowShowingMeta}>
               <Text style={styles.nowShowingLabel} numberOfLines={1}>
                 Now showing · {pinned.title ?? 'Featured item'}
               </Text>
-              <Text style={styles.nowShowingPrice}>₦{Math.round(pinned.livePrice).toLocaleString('en-NG')}</Text>
+              <Text style={styles.nowShowingPrice}>{formatNaira(pinned.livePrice)}</Text>
             </View>
           </View>
         ) : null}
@@ -193,7 +261,7 @@ function CompactLiveCard({ session, onPress }: { session: LiveSession; onPress: 
   return (
     <Pressable onPress={onPress} style={styles.compactCard}>
       <View style={styles.compactThumbWrap}>
-        <AppImage source={getLiveImage(session.id)} style={styles.compactThumb} />
+        <AppImage source={sessionMedia(session)} style={styles.compactThumb} />
         <View style={styles.compactLiveBadge}>
           <Text style={styles.compactLiveText}>LIVE</Text>
         </View>
@@ -203,31 +271,67 @@ function CompactLiveCard({ session, onPress }: { session: LiveSession; onPress: 
         {session.title}
       </Text>
       <Text style={styles.compactSub}>
-        {session.host} · {session.department ?? 'Live'}
+        {session.host} · {categoryLine(session, false)}
       </Text>
     </Pressable>
   );
 }
 
 function UpcomingRow({ session, onPress }: { session: LiveSession; onPress: () => void }) {
+  const when = formatLiveSchedule(session.scheduledAt);
   return (
     <Pressable onPress={onPress} style={styles.upcomingRow}>
       <View style={styles.upcomingThumb}>
-        <ImagePlaceholderIcon size={16} color="rgba(255,247,240,0.3)" />
+        {session.thumbnailUrl ? (
+          <AppImage source={session.thumbnailUrl} style={styles.upcomingThumbImage} />
+        ) : (
+          <ImagePlaceholderIcon size={16} color="rgba(255,247,240,0.3)" />
+        )}
       </View>
       <View style={styles.upcomingMeta}>
         <Text style={styles.upcomingName}>{session.title}</Text>
         <Text style={styles.upcomingHost}>
-          {session.host} · {session.department ?? 'Live'}
+          {session.host} · {categoryLine(session)}
         </Text>
-        {session.scheduledAt ? (
+        {when ? (
           <View style={styles.scheduleRow}>
             <CalendarIcon size={12} color={Palette.blush} />
-            <Text style={styles.upcomingWhen}>{session.scheduledAt}</Text>
+            <Text style={styles.upcomingWhen}>{when}</Text>
           </View>
         ) : null}
       </View>
     </Pressable>
+  );
+}
+
+function EndedSessionCard({ session, onOpenHost }: { session: LiveSession; onOpenHost: () => void }) {
+  return (
+    <View style={styles.endedCard}>
+      <View style={styles.endedTop}>
+        <View style={styles.endedThumb}>
+          {session.thumbnailUrl ? (
+            <AppImage source={session.thumbnailUrl} style={styles.endedThumbImage} />
+          ) : (
+            <ImagePlaceholderIcon size={14} color="rgba(255,247,240,0.3)" />
+          )}
+        </View>
+        <View style={styles.endedMeta}>
+          <Text style={styles.endedTitle}>{session.title}</Text>
+          <Pressable onPress={onOpenHost}>
+            <Text style={styles.endedHost}>{session.host}</Text>
+          </Pressable>
+        </View>
+        <View style={styles.endedBadge}>
+          <Text style={styles.endedBadgeText}>ENDED</Text>
+        </View>
+      </View>
+      <View style={styles.endedWatchBtn}>
+        <Text style={styles.endedWatchLabel}>Watch · unavailable</Text>
+      </View>
+      <Text style={styles.endedHint}>
+        Ended sessions can't be entered. View the seller's profile instead.
+      </Text>
+    </View>
   );
 }
 
@@ -264,24 +368,27 @@ const styles = StyleSheet.create({
   loadingCard: {
     backgroundColor: Palette.liveDarkAlt,
     borderRadius: Radius.lg,
-    padding: 12,
-    alignItems: 'center',
-    gap: 10,
+    overflow: 'hidden',
+    marginBottom: 14,
   },
   loadingHero: {
     width: '100%',
     aspectRatio: 4 / 5,
-    borderRadius: Radius.sm,
     backgroundColor: '#33232A',
   },
+  loadingLines: {
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    gap: 8,
+  },
   loadingLine: {
-    width: '100%',
+    width: '62%',
     height: 10,
     borderRadius: 4,
     backgroundColor: '#33232A',
   },
   loadingLineShort: {
-    width: '46%',
+    width: '38%',
     height: 9,
     borderRadius: 4,
     backgroundColor: '#33232A',
@@ -342,17 +449,15 @@ const styles = StyleSheet.create({
   featuredImage: {
     ...StyleSheet.absoluteFillObject,
   },
-  featuredOverlay: {
+  featuredScrim: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'transparent',
-    // gradient simulated with layered views in RN - use dark overlays
+    backgroundColor: 'rgba(27,17,19,0.28)',
   },
   featuredPlaceholder: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-    backgroundColor: 'rgba(27,17,19,0.35)',
   },
   featuredPlaceholderLabel: {
     fontSize: 9.5,
@@ -417,11 +522,16 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 15,
+    overflow: 'hidden',
     backgroundColor: Palette.border,
     borderWidth: 1,
     borderColor: Palette.borderSoft,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  hostAvatarImage: {
+    width: 30,
+    height: 30,
   },
   hostMeta: {
     flex: 1,
@@ -465,6 +575,7 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 4,
     backgroundColor: '#5C4650',
+    overflow: 'hidden',
   },
   nowShowingMeta: {
     flex: 1,
@@ -575,6 +686,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#463038',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  upcomingThumbImage: {
+    width: 52,
+    height: 62,
   },
   upcomingMeta: {
     flex: 1,
@@ -601,6 +717,81 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     fontFamily: Typography.body,
     color: Palette.blush,
+  },
+  endedSection: {
+    marginTop: 18,
+    gap: 12,
+  },
+  endedCard: {
+    backgroundColor: Palette.liveDarkAlt,
+    borderRadius: Radius.lg,
+    padding: 14,
+  },
+  endedTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  endedThumb: {
+    width: 44,
+    height: 44,
+    borderRadius: 6,
+    backgroundColor: '#463038',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  endedThumbImage: {
+    width: 44,
+    height: 44,
+  },
+  endedMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  endedTitle: {
+    fontSize: 14,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.ivory,
+  },
+  endedHost: {
+    marginTop: 3,
+    fontSize: 12,
+    fontFamily: Typography.body,
+    color: IVORY_60,
+  },
+  endedBadge: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,247,240,0.28)',
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  endedBadgeText: {
+    fontSize: 9.5,
+    fontFamily: Typography.bodyBold,
+    letterSpacing: 0.8,
+    color: IVORY_60,
+  },
+  endedWatchBtn: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,247,240,0.22)',
+    borderRadius: 22,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  endedWatchLabel: {
+    fontSize: 13,
+    fontFamily: Typography.bodySemiBold,
+    color: 'rgba(255,247,240,0.38)',
+  },
+  endedHint: {
+    marginTop: 10,
+    fontSize: 11,
+    lineHeight: 16,
+    fontFamily: Typography.body,
+    color: IVORY_55,
   },
   retryBtn: {
     marginTop: 12,

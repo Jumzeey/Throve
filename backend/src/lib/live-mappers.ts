@@ -13,6 +13,8 @@ export type LiveStreamProductDto = {
   sortOrder: number;
   title?: string;
   photoUrls?: string[];
+  category?: string;
+  department?: string;
 };
 
 export type LiveClaimDto = {
@@ -43,6 +45,8 @@ export function mapLiveStreamProduct(row: DbRow, listing?: DbRow | null): LiveSt
     sortOrder: Number(row.sort_order ?? 0),
     title: listing?.title ? String(listing.title) : undefined,
     photoUrls: Array.isArray(listing?.photo_urls) ? (listing.photo_urls as string[]) : undefined,
+    category: listing?.category ? String(listing.category) : undefined,
+    department: listing?.department ? String(listing.department) : undefined,
   };
 }
 
@@ -59,22 +63,31 @@ export function mapLiveClaim(row: DbRow, username: string): LiveClaimDto {
   };
 }
 
-export function mapLiveSession(row: DbRow, host: string, products?: LiveStreamProductDto[], moderators: string[] = []) {
-  const pinned = products?.find((p) => p.isPinned);
+export function mapLiveSession(
+  row: DbRow,
+  host: string,
+  products?: LiveStreamProductDto[],
+  moderators: string[] = [],
+  hostPhotoUrl?: string | null,
+) {
+  const pinned = products?.find((p) => p.isPinned) ?? products?.[0];
+  const category = pinned?.category ?? undefined;
   return {
     id: row.id,
     host,
+    hostPhotoUrl: hostPhotoUrl ?? undefined,
     title: row.title,
     status: row.status,
     viewers: row.viewers ?? undefined,
     scheduledAt: row.scheduled_at ?? undefined,
     pinnedListingId: pinned?.listingId ?? row.pinned_listing_id ?? undefined,
     pinnedProductId: pinned?.id,
-    department: row.department ?? undefined,
+    department: row.department ?? pinned?.department ?? undefined,
+    category,
     description: row.description ?? undefined,
     featuredListingIds: row.featured_listing_ids ?? products?.map((p) => p.listingId) ?? [],
     livekitRoomName: row.livekit_room_name ?? undefined,
-    thumbnailUrl: row.thumbnail_url ?? undefined,
+    thumbnailUrl: row.thumbnail_url ?? pinned?.photoUrls?.[0] ?? undefined,
     startedAt: row.started_at ?? undefined,
     endedAt: row.ended_at ?? undefined,
     products: products ?? [],

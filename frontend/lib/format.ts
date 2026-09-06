@@ -2,6 +2,18 @@ export function formatNaira(amount: number) {
   return `₦${Math.round(amount).toLocaleString('en-NG')}`;
 }
 
+/** Live discovery schedule: "Saturday, 7:00 pm" */
+export function formatLiveSchedule(iso?: string | null) {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const weekday = date.toLocaleDateString('en-US', { weekday: 'long' });
+  const time = date
+    .toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+    .toLowerCase();
+  return `${weekday}, ${time}`;
+}
+
 export function formatCountdown(ms: number) {
   const total = Math.max(0, Math.ceil(ms / 1000));
   const minutes = Math.floor(total / 60);

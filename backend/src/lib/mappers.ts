@@ -15,6 +15,7 @@ type ProfileRow = {
   notif_messages: boolean;
   preferred_login_method?: 'password' | 'magic_link' | null;
   has_password?: boolean | null;
+  payout_verified?: boolean | null;
 };
 
 type ListingRow = {
@@ -66,6 +67,7 @@ export function mapProfile(row: ProfileRow, sellerUsername?: string) {
     notifMessages: row.notif_messages,
     preferredLoginMethod: row.preferred_login_method === 'magic_link' ? 'magic_link' : 'password',
     hasPassword: Boolean(row.has_password),
+    payoutVerified: Boolean(row.payout_verified),
     sellerUsername,
   };
 }

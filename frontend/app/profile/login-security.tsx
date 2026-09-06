@@ -1,22 +1,25 @@
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
+import { Dialog } from '@/components/ui/dialog';
+import { LockIcon, MailIcon, SpinnerArcIcon } from '@/components/ui/icons';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import type { PreferredLoginMethod } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { getDeviceLoginPreference } from '@/lib/login-preference';
-import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+
+type Phase = 'idle' | 'confirm' | 'working' | 'done' | 'error';
 
 export default function LoginSecurityScreen() {
   const router = useRouter();
   const { session, updatePreferredLoginMethod } = useAuth();
   const { isConnected } = useNetworkStatus();
   const [method, setMethod] = useState<PreferredLoginMethod>('password');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState<PreferredLoginMethod | null>(null);
+  const [phase, setPhase] = useState<Phase>('idle');
 
   useEffect(() => {
     let cancelled = false;
@@ -29,121 +32,187 @@ export default function LoginSecurityScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (session?.preferredLoginMethod) setMethod(session.preferredLoginMethod);
+  }, [session?.preferredLoginMethod]);
+
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
   }
 
   const hasPassword = Boolean(session.hasPassword);
+  const isMagic = method === 'magic_link';
 
-  async function onSelectMethod(next: PreferredLoginMethod) {
-    if (!isConnected || busy || next === method) return;
-
+  function requestSwitch(next: PreferredLoginMethod) {
+    if (!isConnected || phase === 'working' || next === method) return;
     if (next === 'password' && !hasPassword) {
       router.push({
         pathname: '/(auth)/set-password',
-        params: { email: session!.email, purpose: 'setup' },
+        params: { email: session.email, purpose: 'setup' },
       });
       return;
     }
+    setPending(next);
+    setPhase('confirm');
+  }
 
-    setBusy(true);
-    setError(null);
+  async function onConfirm() {
+    if (!isConnected || !pending || phase === 'working') return;
+    setPhase('working');
     try {
-      await updatePreferredLoginMethod(next);
-      setMethod(next);
+      await updatePreferredLoginMethod(pending);
+      setMethod(pending);
+      setPending(null);
+      setPhase('done');
     } catch {
-      setError('Could not update your sign-in preference.');
-    } finally {
-      setBusy(false);
+      setPhase('error');
     }
   }
 
+  const target = pending ?? (isMagic ? 'password' : 'magic_link');
+  const confirmCopy =
+    target === 'password'
+      ? {
+          title: 'Switch to password sign-in?',
+          body: `Next time you log in, you'll use your email and password for ${session.email}.`,
+          confirm: 'Use password',
+        }
+      : {
+          title: 'Switch to email link sign-in?',
+          body: `Next time you log in, Throve will send a sign-in link to ${session.email}.`,
+          confirm: 'Use email link',
+        };
+
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="Login & security" onBack={() => router.back()} />
-      <ScrollView contentContainerStyle={styles.body}>
-        {!isConnected ? <OfflineBanner message="Reconnect to manage sign-in settings." /> : null}
-        {error ? <AlertBanner variant="error" title="Something went wrong" message={error} /> : null}
+      <ScreenHeader title="Sign-in and security" onBack={() => router.back()} />
+      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        {!isConnected ? (
+          <OfflineBanner title="No connection" message="Reconnect to change your account settings." />
+        ) : null}
 
-        <Text style={styles.sectionTitle}>Preferred sign-in</Text>
+        {phase === 'error' ? (
+          <AlertBanner
+            variant="error"
+            title="We couldn't update sign-in"
+            message="Your preference is unchanged. Please try again in a moment."
+          />
+        ) : null}
+
+        {phase === 'done' ? (
+          <AlertBanner
+            variant="success"
+            title="Sign-in preference updated"
+            message={
+              isMagic
+                ? 'Next time, Throve will send you an email link.'
+                : 'Next time, you can sign in with your email and password.'
+            }
+          />
+        ) : null}
+
         <Text style={styles.lead}>
-          Choose how you usually sign in on this device. Email and password is the default. This is saved on your phone
-          for next time you log in.
+          Choose how you usually sign in on this device. This is saved for the next time you log in.
         </Text>
 
-        <View style={styles.group}>
-          <MethodRow
+        <View style={styles.card}>
+          <View style={styles.current}>
+            {isMagic ? <MailIcon size={18} color={Palette.plum} /> : <LockIcon size={18} color={Palette.plum} />}
+            <View style={styles.currentCopy}>
+              <Text style={styles.currentTitle}>
+                {isMagic ? 'You sign in with an email link' : 'You sign in with a password'}
+              </Text>
+              <Text style={styles.currentBody}>
+                {isMagic
+                  ? `Throve sends a sign-in link to ${session.email}.`
+                  : `You use your email and password for ${session.email}.`}
+              </Text>
+            </View>
+          </View>
+
+          <MethodOption
             title="Email & password"
             hint="Sign in with your email and a password"
-            selected={method === 'password'}
-            onPress={() => onSelectMethod('password')}
-            disabled={!isConnected || busy}
+            selected={!isMagic}
+            icon={<LockIcon size={16} color={Palette.plum} />}
+            disabled={!isConnected || phase === 'working'}
+            onPress={() => requestSwitch('password')}
           />
-          <MethodRow
-            title="Magic link"
+          <MethodOption
+            title="Email link"
             hint="We’ll email you a one-tap sign-in link"
-            selected={method === 'magic_link'}
-            onPress={() => onSelectMethod('magic_link')}
-            disabled={!isConnected || busy}
+            selected={isMagic}
+            icon={<MailIcon size={16} color={Palette.plum} />}
+            disabled={!isConnected || phase === 'working'}
+            onPress={() => requestSwitch('magic_link')}
             last
           />
         </View>
 
-        <Text style={styles.sectionTitle}>Password</Text>
-        <View style={styles.group}>
-          {hasPassword ? (
-            <Pressable
-              style={[styles.row, styles.rowLast]}
-              disabled={!isConnected}
-              onPress={() =>
-                router.push({
-                  pathname: '/(auth)/set-password',
-                  params: { email: session.email, purpose: 'change' },
-                })
-              }
-            >
-              <View style={styles.copy}>
-                <Text style={styles.rowLabel}>Change password</Text>
-                <Text style={styles.rowHint}>Verify with a code, then choose a new password</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={16} color={Palette.muted2} />
-            </Pressable>
-          ) : (
-            <Pressable
-              style={[styles.row, styles.rowLast]}
-              disabled={!isConnected}
-              onPress={() =>
-                router.push({
-                  pathname: '/(auth)/set-password',
-                  params: { email: session.email, purpose: 'setup' },
-                })
-              }
-            >
-              <View style={styles.copy}>
-                <Text style={styles.rowLabel}>Set up password</Text>
-                <Text style={styles.rowHint}>Required to use email and password sign-in</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={16} color={Palette.muted2} />
-            </Pressable>
-          )}
-        </View>
-
-        {!hasPassword ? (
-          <AlertBanner
-            variant="info"
-            title="Password not set yet"
-            message="This account was created with a magic link. Set a password to use email and password as your default."
-          />
+        {phase === 'working' ? (
+          <View style={styles.working}>
+            <SpinnerArcIcon size={16} color={Palette.plum} />
+            <Text style={styles.workingText}>Updating sign-in…</Text>
+          </View>
         ) : null}
+
+        <Text style={styles.sectionLabel}>Password</Text>
+        <View style={styles.card}>
+          <Pressable
+            style={styles.passwordRow}
+            disabled={!isConnected || phase === 'working'}
+            onPress={() =>
+              router.push({
+                pathname: '/(auth)/set-password',
+                params: { email: session.email, purpose: hasPassword ? 'change' : 'setup' },
+              })
+            }
+          >
+            <View style={styles.currentCopy}>
+              <Text style={styles.rowLabel}>{hasPassword ? 'Change password' : 'Set up password'}</Text>
+              <Text style={styles.rowHint}>
+                {hasPassword
+                  ? 'Verify with a code, then choose a new password'
+                  : 'Required before you can switch to password sign-in'}
+              </Text>
+            </View>
+          </Pressable>
+        </View>
       </ScrollView>
+
+      <Dialog
+        visible={phase === 'confirm'}
+        title={confirmCopy.title}
+        body={confirmCopy.body}
+        onClose={() => {
+          setPending(null);
+          setPhase('idle');
+        }}
+        actions={[
+          {
+            label: 'Cancel',
+            variant: 'secondary',
+            onPress: () => {
+              setPending(null);
+              setPhase('idle');
+            },
+          },
+          {
+            label: confirmCopy.confirm,
+            variant: 'primary',
+            onPress: () => void onConfirm(),
+          },
+        ]}
+      />
     </View>
   );
 }
 
-function MethodRow({
+function MethodOption({
   title,
   hint,
   selected,
+  icon,
   onPress,
   disabled,
   last,
@@ -151,13 +220,19 @@ function MethodRow({
   title: string;
   hint: string;
   selected: boolean;
+  icon: ReactNode;
   onPress: () => void;
   disabled?: boolean;
   last?: boolean;
 }) {
   return (
-    <Pressable onPress={onPress} disabled={disabled} style={[styles.row, last ? styles.rowLast : null]}>
-      <View style={styles.copy}>
+    <Pressable
+      onPress={onPress}
+      disabled={disabled || selected}
+      style={[styles.option, last ? styles.optionLast : null, selected ? styles.optionSelected : null]}
+    >
+      {icon}
+      <View style={styles.currentCopy}>
         <Text style={styles.rowLabel}>{title}</Text>
         <Text style={styles.rowHint}>{hint}</Text>
       </View>
@@ -174,46 +249,54 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.ivory,
   },
   body: {
+    paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing.xxxl,
     gap: Spacing.lg,
   },
-  sectionTitle: {
-    paddingHorizontal: Spacing.xl,
-    fontSize: 20,
-    fontFamily: Typography.display,
-    color: Palette.espresso,
-    letterSpacing: -0.2,
-  },
   lead: {
-    paddingHorizontal: Spacing.xl,
-    marginTop: -8,
     fontSize: 13.5,
     lineHeight: 20,
     fontFamily: Typography.body,
     color: Palette.body,
   },
-  group: {
-    paddingHorizontal: Spacing.xl,
+  card: {
+    borderWidth: 1,
+    borderColor: Palette.border,
     backgroundColor: Palette.ivoryElevated,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: Palette.divider,
+    borderRadius: Radius.sm,
+    overflow: 'hidden',
   },
-  row: {
+  current: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: Spacing.md,
+    gap: 11,
+    padding: 15,
     borderBottomWidth: 1,
     borderBottomColor: Palette.divider,
-    gap: Spacing.md,
   },
-  rowLast: {
-    borderBottomWidth: 0,
+  currentCopy: { flex: 1, gap: 2 },
+  currentTitle: {
+    fontSize: 13,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.espresso,
   },
-  copy: {
-    flex: 1,
-    gap: 2,
+  currentBody: {
+    fontSize: 11.5,
+    lineHeight: 18,
+    fontFamily: Typography.body,
+    color: Palette.body,
+  },
+  option: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    paddingVertical: 14,
+    paddingHorizontal: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: Palette.divider,
+  },
+  optionLast: { borderBottomWidth: 0 },
+  optionSelected: {
+    backgroundColor: Palette.ivory,
   },
   rowLabel: {
     fontSize: 14,
@@ -243,5 +326,27 @@ const styles = StyleSheet.create({
     height: 12,
     borderRadius: Radius.pill,
     backgroundColor: Palette.plum,
+  },
+  working: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  workingText: {
+    fontSize: 12.5,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.plum,
+  },
+  sectionLabel: {
+    fontSize: 10.5,
+    letterSpacing: 0.9,
+    textTransform: 'uppercase',
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.muted2,
+    marginTop: 4,
+  },
+  passwordRow: {
+    paddingVertical: 14,
+    paddingHorizontal: 15,
   },
 });

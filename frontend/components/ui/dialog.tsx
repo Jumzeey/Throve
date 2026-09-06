@@ -7,16 +7,18 @@ type Props = {
   visible: boolean;
   title: string;
   body?: string;
+  /** Danger tone tints the title (e.g. delete account). */
+  tone?: 'default' | 'danger';
   actions: Action[];
   onClose: () => void;
 };
 
-export function Dialog({ visible, title, body, actions, onClose }: Props) {
+export function Dialog({ visible, title, body, tone = 'default', actions, onClose }: Props) {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.overlay} onPress={onClose}>
         <Pressable style={styles.card} onPress={(e) => e.stopPropagation()}>
-          <Text style={styles.title}>{title}</Text>
+          <Text style={[styles.title, tone === 'danger' ? styles.titleDanger : null]}>{title}</Text>
           {body ? <Text style={styles.body}>{body}</Text> : null}
           <View style={styles.actions}>
             {actions.map((action) => {
@@ -62,33 +64,34 @@ const styles = StyleSheet.create({
   },
   card: {
     width: '100%',
-    maxWidth: 320,
+    maxWidth: 340,
     backgroundColor: Palette.ivoryElevated,
     borderRadius: Radius.lg,
     borderWidth: 1,
     borderColor: Palette.border,
-    paddingHorizontal: 22,
-    paddingTop: 22,
-    paddingBottom: 18,
-    gap: 10,
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 16,
+    gap: 8,
   },
   title: {
-    fontSize: 20,
-    lineHeight: 26,
+    fontSize: 18,
+    lineHeight: 24,
     fontFamily: Typography.display,
     color: Palette.espresso,
-    textAlign: 'center',
+  },
+  titleDanger: {
+    color: Palette.errorText,
   },
   body: {
-    fontSize: 13.5,
+    fontSize: 12,
     fontFamily: Typography.body,
     color: Palette.body,
-    textAlign: 'center',
-    lineHeight: 21,
+    lineHeight: 20,
   },
   actions: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 9,
     marginTop: 10,
   },
   btn: {
@@ -105,13 +108,11 @@ const styles = StyleSheet.create({
   },
   btnSecondary: {
     borderWidth: 1,
-    borderColor: Palette.border,
-    backgroundColor: Palette.ivory,
+    borderColor: Palette.plum,
+    backgroundColor: Palette.ivoryElevated,
   },
   btnDanger: {
-    backgroundColor: Palette.errorBg,
-    borderWidth: 1,
-    borderColor: Palette.errorBorder,
+    backgroundColor: Palette.errorText,
   },
   btnLabel: {
     fontSize: 13.5,
@@ -122,9 +123,9 @@ const styles = StyleSheet.create({
     color: Palette.ivory,
   },
   btnLabelSecondary: {
-    color: Palette.espresso,
+    color: Palette.plum,
   },
   btnLabelDanger: {
-    color: Palette.errorText,
+    color: Palette.ivory,
   },
 });

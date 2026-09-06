@@ -87,11 +87,14 @@ export type LiveStreamProduct = {
   sortOrder: number;
   title?: string;
   photoUrls?: string[];
+  category?: string;
+  department?: string;
 };
 
 export type LiveSession = {
   id: string;
   host: string;
+  hostPhotoUrl?: string;
   title: string;
   status: LiveStatus;
   viewers?: number;
@@ -99,6 +102,7 @@ export type LiveSession = {
   pinnedListingId?: string;
   pinnedProductId?: string;
   department?: Department;
+  category?: string;
   description?: string;
   featuredListingIds?: string[];
   livekitRoomName?: string;
@@ -125,7 +129,39 @@ export type Review = {
 };
 
 export type DeliveryMethod = 'Standard' | 'Express';
-export type OrderStatus = 'paid' | 'dispatched' | 'in_transit' | 'completed' | 'cancelled';
+export type OrderStatus = 'paid' | 'dispatched' | 'in_transit' | 'delivered' | 'completed' | 'cancelled';
+
+export type PayoutStatus =
+  | 'not_yet_eligible'
+  | 'eligible'
+  | 'processing'
+  | 'paid_out'
+  | 'on_hold'
+  | 'failed';
+
+export type DisputeStatus = 'open' | 'under_review' | 'resolved_buyer' | 'resolved_seller' | 'closed';
+
+export type OrderDispute = {
+  id: string;
+  orderId: string;
+  reason: string;
+  status: DisputeStatus;
+  buyerNote: string;
+  sellerResponse: string;
+  evidenceUrls: string[];
+  createdAt: string;
+  resolvedAt?: string | null;
+};
+
+export type OrderPayout = {
+  itemSalePrice: number;
+  commissionRate: number;
+  commission: number;
+  processingFee: number;
+  netPayout: number;
+  status: PayoutStatus;
+  verificationRequired: boolean;
+};
 
 export type Order = {
   id: string;
@@ -150,6 +186,18 @@ export type Order = {
   status: OrderStatus;
   reviewed: boolean;
   cancelReason?: string;
+  trackingNumber?: string | null;
+  trackingCarrier?: string | null;
+  paidAt?: string | null;
+  dispatchedAt?: string | null;
+  inTransitAt?: string | null;
+  deliveredAt?: string | null;
+  completedAt?: string | null;
+  cancelledAt?: string | null;
+  autoCompleteAt?: string | null;
+  payoutStatus?: PayoutStatus;
+  dispute?: OrderDispute | null;
+  payout?: OrderPayout;
 };
 
 export type CheckoutDraft = {

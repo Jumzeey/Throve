@@ -14,12 +14,15 @@ import { getProfileById, getProfileByUsername } from '../lib/mappers.js';
 import { createServiceClient } from '../lib/supabase.js';
 import { type AuthedRequest, requireAuth } from '../middleware/auth.js';
 import { buyerProtectionFee, shippingFee } from '../lib/listing-catalog.js';
+import { autoCompleteAtFrom, mapOrderJson, runAutoCompleteDueOrders } from '../lib/order-map.js';
 
 const router = Router();
 const RESERVE_MS = 10 * 60 * 1000;
 
 router.get('/orders', requireAuth, async (req, res) => {
   const { supabase, userId } = req as AuthedRequest;
+  await runAutoCompleteDueOrders(createServiceClient());
+
   const { data, error } = await supabase
     .from('orders')
     .select('*')
@@ -30,34 +33,12 @@ router.get('/orders', requireAuth, async (req, res) => {
 
   const mapped = await Promise.all(
     (data ?? []).map(async (row: DbRow) => {
-      const buyer = await getProfileById(supabase, row.buyer_id);
-      const seller = await getProfileById(supabase, row.seller_id);
-      return {
-        id: row.id,
-        listingId: row.listing_id,
-        listingTitle: row.listing_title,
-        buyer: buyer?.username ?? 'unknown',
-        seller: seller?.username ?? 'unknown',
-        name: row.name,
-        address: row.address,
-        city: row.city,
-        state: row.state ?? null,
-        phone: row.phone,
-        deliveryMethod: row.delivery_method,
-        deliveryFee: row.delivery_fee,
-        protectionFee: row.protection_fee ?? 0,
-        itemPrice: row.item_price,
-        listedPrice: row.listed_price ?? null,
-        offerId: row.offer_id ?? null,
-        total: row.total,
-        fromLiveId: row.from_live_id,
-        liveStreamProductId: row.live_stream_product_id ?? undefined,
-        claimId: row.claim_id ?? undefined,
-        createdAt: row.created_at,
-        status: row.status,
-        reviewed: row.reviewed,
-        cancelReason: row.cancel_reason ?? undefined,
-      };
+      const isSeller = row.seller_id === userId;
+      const seller = isSeller ? await getProfileById(supabase, userId) : null;
+      return mapOrderJson(supabase, row, {
+        includeSellerFinance: isSeller,
+        sellerPayoutVerified: Boolean(seller?.payout_verified),
+      });
     }),
   );
 
@@ -66,40 +47,21 @@ router.get('/orders', requireAuth, async (req, res) => {
 
 router.get('/orders/:id', requireAuth, async (req, res) => {
   const { supabase, userId } = req as AuthedRequest;
+  await runAutoCompleteDueOrders(createServiceClient());
+
   const { data, error } = await supabase.from('orders').select('*').eq('id', req.params.id).maybeSingle();
   if (error) return handleSupabaseError(res, error);
   if (!data) return sendError(res, 404, 'Order not found');
   if (data.buyer_id !== userId && data.seller_id !== userId) return sendError(res, 403, 'Forbidden');
 
-  const buyer = await getProfileById(supabase, data.buyer_id);
-  const seller = await getProfileById(supabase, data.seller_id);
-
-  return res.json({
-    id: data.id,
-    listingId: data.listing_id,
-    listingTitle: data.listing_title,
-    buyer: buyer?.username ?? 'unknown',
-    seller: seller?.username ?? 'unknown',
-    name: data.name,
-    address: data.address,
-    city: data.city,
-    state: data.state ?? null,
-    phone: data.phone,
-    deliveryMethod: data.delivery_method,
-    deliveryFee: data.delivery_fee,
-    protectionFee: data.protection_fee ?? 0,
-    itemPrice: data.item_price,
-    listedPrice: data.listed_price ?? null,
-    offerId: data.offer_id ?? null,
-    total: data.total,
-    fromLiveId: data.from_live_id,
-    liveStreamProductId: data.live_stream_product_id ?? undefined,
-    claimId: data.claim_id ?? undefined,
-    createdAt: data.created_at,
-    status: data.status,
-    reviewed: data.reviewed,
-    cancelReason: data.cancel_reason ?? undefined,
-  });
+  const isSeller = data.seller_id === userId;
+  const seller = isSeller ? await getProfileById(supabase, userId) : null;
+  return res.json(
+    await mapOrderJson(supabase, data, {
+      includeSellerFinance: isSeller,
+      sellerPayoutVerified: Boolean(seller?.payout_verified),
+    }),
+  );
 });
 
 router.post('/start', requireAuth, async (req, res) => {
@@ -346,6 +308,8 @@ router.post('/complete', requireAuth, async (req, res) => {
       live_stream_product_id: liveStreamProductId,
       claim_id: claimId,
       status: 'paid',
+      paid_at: new Date().toISOString(),
+      payout_status: 'not_yet_eligible',
     })
     .select('*')
     .single();
@@ -403,9 +367,10 @@ router.post('/complete', requireAuth, async (req, res) => {
 
 router.post('/orders/:id/dispatch', requireAuth, async (req, res) => {
   const { supabase, userId } = req as AuthedRequest;
+  const now = new Date().toISOString();
   const { data, error } = await supabase
     .from('orders')
-    .update({ status: 'dispatched' })
+    .update({ status: 'dispatched', dispatched_at: now })
     .eq('id', req.params.id)
     .eq('seller_id', userId)
     .eq('status', 'paid')
@@ -426,18 +391,90 @@ router.post('/orders/:id/dispatch', requireAuth, async (req, res) => {
   return res.json({ ok: true });
 });
 
+router.post('/orders/:id/tracking', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const parsed = z
+    .object({
+      trackingNumber: z.string().min(3).max(80),
+      carrier: z.string().max(80).optional(),
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, 'Tracking number required');
+
+  const { data: order, error: orderError } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  if (orderError) return handleSupabaseError(res, orderError);
+  if (!order || order.seller_id !== userId) return sendError(res, 403, 'Forbidden');
+  if (!['paid', 'dispatched', 'in_transit', 'delivered'].includes(order.status)) {
+    return sendError(res, 400, 'Order not eligible');
+  }
+
+  const now = new Date().toISOString();
+  const patch: Record<string, unknown> = {
+    tracking_number: parsed.data.trackingNumber.trim(),
+    tracking_carrier: parsed.data.carrier?.trim() || null,
+  };
+  if (order.status === 'paid') {
+    patch.status = 'in_transit';
+    patch.dispatched_at = order.dispatched_at ?? now;
+    patch.in_transit_at = now;
+  } else if (order.status === 'dispatched') {
+    patch.status = 'in_transit';
+    patch.in_transit_at = now;
+  }
+
+  const { error } = await supabase.from('orders').update(patch).eq('id', order.id);
+  if (error) return handleSupabaseError(res, error);
+  return res.json({ ok: true });
+});
+
+router.post('/orders/:id/mark-delivered', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const { data: order, error: orderError } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  if (orderError) return handleSupabaseError(res, orderError);
+  if (!order || order.seller_id !== userId) return sendError(res, 403, 'Forbidden');
+  if (!['dispatched', 'in_transit'].includes(order.status)) {
+    return sendError(res, 400, 'Order not eligible');
+  }
+
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from('orders')
+    .update({
+      status: 'delivered',
+      delivered_at: now,
+      auto_complete_at: autoCompleteAtFrom(now),
+    })
+    .eq('id', order.id);
+  if (error) return handleSupabaseError(res, error);
+  return res.json({ ok: true });
+});
+
 router.post('/orders/:id/confirm-received', requireAuth, async (req, res) => {
   const { supabase, userId } = req as AuthedRequest;
+  const now = new Date().toISOString();
   const { data, error } = await supabase
     .from('orders')
-    .update({ status: 'completed' })
+    .update({
+      status: 'completed',
+      completed_at: now,
+      auto_complete_at: null,
+      payout_status: 'eligible',
+    })
     .eq('id', req.params.id)
     .eq('buyer_id', userId)
-    .in('status', ['dispatched', 'in_transit'])
+    .eq('status', 'delivered')
     .select('*')
     .single();
   if (error) return handleSupabaseError(res, error);
-  if (!data) return sendError(res, 400, 'Order not eligible');
+  if (!data) return sendError(res, 400, 'Order not eligible — confirm after delivery');
 
   const buyer = await getProfileById(supabase, userId);
   queueEmail({
@@ -463,9 +500,15 @@ router.post('/orders/:id/cancel', requireAuth, async (req, res) => {
   if (!order || order.status !== 'paid') return sendError(res, 400, 'Order not eligible');
   if (order.buyer_id !== userId && order.seller_id !== userId) return sendError(res, 403, 'Forbidden');
 
+  const now = new Date().toISOString();
   const { error } = await supabase
     .from('orders')
-    .update({ status: 'cancelled', cancel_reason: parsed.data.reason })
+    .update({
+      status: 'cancelled',
+      cancel_reason: parsed.data.reason,
+      cancelled_at: now,
+      payout_status: 'not_yet_eligible',
+    })
     .eq('id', req.params.id);
   if (error) return handleSupabaseError(res, error);
 
@@ -484,6 +527,93 @@ router.post('/orders/:id/cancel', requireAuth, async (req, res) => {
     }),
   });
 
+  return res.json({ ok: true });
+});
+
+router.post('/orders/:id/dispute', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const parsed = z
+    .object({
+      reason: z.string().min(3).max(120),
+      note: z.string().max(1000).optional(),
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, 'Dispute reason required');
+
+  const { data: order, error: orderError } = await supabase.from('orders').select('*').eq('id', req.params.id).maybeSingle();
+  if (orderError) return handleSupabaseError(res, orderError);
+  if (!order || order.buyer_id !== userId) return sendError(res, 403, 'Forbidden');
+  if (order.status !== 'delivered') {
+    return sendError(res, 400, 'Disputes can be opened once the order is Delivered');
+  }
+  if (!order.delivered_at) return sendError(res, 400, 'Delivery time missing');
+
+  const windowMs = 48 * 60 * 60 * 1000;
+  if (Date.now() - new Date(order.delivered_at).getTime() > windowMs) {
+    return sendError(res, 400, 'Dispute window has closed (48 hours after delivery)');
+  }
+
+  const { data: existing } = await supabase.from('order_disputes').select('id').eq('order_id', order.id).maybeSingle();
+  if (existing) return sendError(res, 409, 'A dispute is already open for this order', 'DISPUTE_EXISTS');
+
+  const { data: dispute, error } = await supabase
+    .from('order_disputes')
+    .insert({
+      order_id: order.id,
+      opened_by: userId,
+      reason: parsed.data.reason.trim(),
+      buyer_note: parsed.data.note?.trim() ?? '',
+      status: 'under_review',
+    })
+    .select('*')
+    .single();
+  if (error) return handleSupabaseError(res, error);
+
+  await supabase
+    .from('orders')
+    .update({ payout_status: 'on_hold', auto_complete_at: null })
+    .eq('id', order.id);
+
+  return res.json({ ok: true, disputeId: dispute.id });
+});
+
+router.post('/orders/:id/dispute/respond', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const parsed = z.object({ response: z.string().min(1).max(2000) }).safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, 'Response required');
+
+  const { data: order } = await supabase.from('orders').select('*').eq('id', req.params.id).maybeSingle();
+  if (!order || order.seller_id !== userId) return sendError(res, 403, 'Forbidden');
+
+  const { data: dispute } = await supabase.from('order_disputes').select('*').eq('order_id', order.id).maybeSingle();
+  if (!dispute || !['open', 'under_review'].includes(dispute.status)) {
+    return sendError(res, 400, 'No open dispute');
+  }
+
+  const { error } = await supabase
+    .from('order_disputes')
+    .update({ seller_response: parsed.data.response.trim(), status: 'under_review' })
+    .eq('id', dispute.id);
+  if (error) return handleSupabaseError(res, error);
+  return res.json({ ok: true });
+});
+
+router.post('/orders/:id/dispute/evidence', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const parsed = z.object({ evidenceUrls: z.array(z.string().url()).min(1).max(8) }).safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, 'Evidence URLs required');
+
+  const { data: order } = await supabase.from('orders').select('*').eq('id', req.params.id).maybeSingle();
+  if (!order || (order.buyer_id !== userId && order.seller_id !== userId)) return sendError(res, 403, 'Forbidden');
+
+  const { data: dispute } = await supabase.from('order_disputes').select('*').eq('order_id', order.id).maybeSingle();
+  if (!dispute || !['open', 'under_review'].includes(dispute.status)) {
+    return sendError(res, 400, 'No open dispute');
+  }
+
+  const merged = [...(dispute.evidence_urls ?? []), ...parsed.data.evidenceUrls].slice(0, 12);
+  const { error } = await supabase.from('order_disputes').update({ evidence_urls: merged }).eq('id', dispute.id);
+  if (error) return handleSupabaseError(res, error);
   return res.json({ ok: true });
 });
 

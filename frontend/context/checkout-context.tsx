@@ -32,6 +32,7 @@ type CheckoutContextValue = {
   lastOrder: Order | null;
   orders: Order[];
   loading: boolean;
+  loadError: boolean;
   now: number;
   remaining: number;
   refresh: (options?: { silent?: boolean }) => Promise<void>;
@@ -62,8 +63,13 @@ type CheckoutContextValue = {
   applyPaidOrder: (order: Order) => Promise<void>;
   getOrder: (id: string) => Order | undefined;
   markDispatched: (id: string, username: string) => Promise<boolean>;
+  updateTracking: (id: string, trackingNumber: string, carrier?: string) => Promise<boolean>;
+  markDelivered: (id: string) => Promise<boolean>;
   confirmReceived: (id: string, username: string) => Promise<boolean>;
   cancelOrder: (id: string, username: string, reason: string) => Promise<boolean>;
+  openDispute: (id: string, reason: string, note?: string) => Promise<boolean>;
+  respondToDispute: (id: string, response: string) => Promise<boolean>;
+  submitDisputeEvidence: (id: string, evidenceUrls: string[]) => Promise<boolean>;
   submitReview: (id: string, username: string, rating: number, comment: string) => Promise<boolean>;
   getReviews: (username: string) => Review[];
   ratingInfo: (username: string) => { avg: number; count: number };
@@ -79,6 +85,7 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [reviews, setReviews] = useState<Record<string, Review[]>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [now, setNow] = useState(Date.now());
 
   const refresh = useCallback(async (options?: { silent?: boolean }) => {
@@ -86,8 +93,9 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
     try {
       const data = await apiFetch<Order[]>('/checkout/orders');
       setOrders(data);
+      setLoadError(false);
     } catch {
-      // Backend offline — orders screens handle empty/offline UI
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -97,6 +105,7 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
     if (!isReady) return;
     if (!session) {
       setOrders([]);
+      setLoadError(false);
       setLoading(false);
       return;
     }
@@ -268,34 +277,86 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
 
   const markDispatched = useCallback(async (id: string, _username: string) => {
     await apiFetch(`/checkout/orders/${id}/dispatch`, { method: 'POST' });
-    setOrders((current) => current.map((order) => (order.id === id ? { ...order, status: 'dispatched' } : order)));
-    setLastOrder((current) => (current?.id === id ? { ...current, status: 'dispatched' } : current));
+    await refresh({ silent: true });
     return true;
-  }, []);
+  }, [refresh]);
+
+  const updateTracking = useCallback(
+    async (id: string, trackingNumber: string, carrier?: string) => {
+      await apiFetch(`/checkout/orders/${id}/tracking`, {
+        method: 'POST',
+        body: JSON.stringify({ trackingNumber, carrier }),
+      });
+      await refresh({ silent: true });
+      return true;
+    },
+    [refresh],
+  );
+
+  const markDelivered = useCallback(
+    async (id: string) => {
+      await apiFetch(`/checkout/orders/${id}/mark-delivered`, { method: 'POST' });
+      await refresh({ silent: true });
+      return true;
+    },
+    [refresh],
+  );
 
   const confirmReceived = useCallback(async (id: string, _username: string) => {
     await apiFetch(`/checkout/orders/${id}/confirm-received`, { method: 'POST' });
-    setOrders((current) => current.map((order) => (order.id === id ? { ...order, status: 'completed' } : order)));
-    setLastOrder((current) => (current?.id === id ? { ...current, status: 'completed' } : current));
+    await refresh({ silent: true });
     return true;
-  }, []);
+  }, [refresh]);
 
   const cancelOrder = useCallback(async (id: string, _username: string, reason: string) => {
     const order = orders.find((item) => item.id === id);
     await apiFetch(`/checkout/orders/${id}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) });
-    setOrders((current) =>
-      current.map((item) => (item.id === id ? { ...item, status: 'cancelled', cancelReason: reason } : item)),
-    );
     if (order) await live.releaseListing(order.listingId);
+    await refresh({ silent: true });
     return true;
-  }, [live, orders]);
+  }, [live, orders, refresh]);
+
+  const openDispute = useCallback(
+    async (id: string, reason: string, note?: string) => {
+      await apiFetch(`/checkout/orders/${id}/dispute`, {
+        method: 'POST',
+        body: JSON.stringify({ reason, note }),
+      });
+      await refresh({ silent: true });
+      return true;
+    },
+    [refresh],
+  );
+
+  const respondToDispute = useCallback(
+    async (id: string, response: string) => {
+      await apiFetch(`/checkout/orders/${id}/dispute/respond`, {
+        method: 'POST',
+        body: JSON.stringify({ response }),
+      });
+      await refresh({ silent: true });
+      return true;
+    },
+    [refresh],
+  );
+
+  const submitDisputeEvidence = useCallback(
+    async (id: string, evidenceUrls: string[]) => {
+      await apiFetch(`/checkout/orders/${id}/dispute/evidence`, {
+        method: 'POST',
+        body: JSON.stringify({ evidenceUrls }),
+      });
+      await refresh({ silent: true });
+      return true;
+    },
+    [refresh],
+  );
 
   const submitReview = useCallback(async (id: string, _username: string, rating: number, comment: string) => {
     await apiFetch(`/checkout/orders/${id}/review`, { method: 'POST', body: JSON.stringify({ rating, comment }) });
-    setOrders((current) => current.map((order) => (order.id === id ? { ...order, reviewed: true } : order)));
-    setLastOrder((current) => (current?.id === id ? { ...current, reviewed: true } : current));
+    await refresh({ silent: true });
     return true;
-  }, []);
+  }, [refresh]);
 
   const getReviews = useCallback((username: string) => reviews[username] ?? [], [reviews]);
 
@@ -315,6 +376,7 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
       lastOrder,
       orders,
       loading,
+      loadError,
       now,
       remaining,
       refresh,
@@ -328,8 +390,13 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
       applyPaidOrder,
       getOrder,
       markDispatched,
+      updateTracking,
+      markDelivered,
       confirmReceived,
       cancelOrder,
+      openDispute,
+      respondToDispute,
+      submitDisputeEvidence,
       submitReview,
       getReviews,
       ratingInfo,
@@ -347,15 +414,21 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
       initPayment,
       lastOrder,
       loading,
+      loadError,
+      markDelivered,
       markDispatched,
       now,
+      openDispute,
       orders,
       ratingInfo,
       refresh,
       remaining,
+      respondToDispute,
       startCheckout,
+      submitDisputeEvidence,
       submitReview,
       updateDraft,
+      updateTracking,
       verifyPayment,
     ],
   );
@@ -378,14 +451,28 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   paid: 'Paid',
   dispatched: 'Dispatched',
   in_transit: 'In transit',
+  delivered: 'Delivered',
   completed: 'Completed',
   cancelled: 'Cancelled',
 };
 
+/** List/chip label aligned with backend status + buyer/seller role. */
+export function orderStatusChipLabel(status: OrderStatus, role: 'purchase' | 'sale') {
+  if (status === 'paid' && role === 'sale') return 'AWAITING DISPATCH';
+  if (status === 'paid') return 'PAID';
+  if (status === 'dispatched') return 'DISPATCHED';
+  if (status === 'in_transit') return 'IN TRANSIT';
+  if (status === 'delivered') return 'DELIVERED';
+  if (status === 'completed') return 'COMPLETED';
+  return 'CANCELLED';
+}
+
 export function orderStatusColor(status: OrderStatus) {
-  if (status === 'cancelled') return '#8a2e2e';
-  if (status === 'completed') return '#2e6b2e';
-  return '#77746e';
+  if (status === 'cancelled') return '#9E2B2B';
+  if (status === 'completed') return '#3F5A3C';
+  if (status === 'delivered') return '#3F5A3C';
+  if (status === 'paid') return '#8F5D1F';
+  return '#5A1F45';
 }
 
 export function leaveCheckout(router: { replace: (href: Href) => void }, liveId: string | null, listingId?: string) {

@@ -1,158 +1,432 @@
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
+import { LockIcon, MailIcon, SpinnerArcIcon } from '@/components/ui/icons';
 import { ScreenHeader } from '@/components/ui/screen-header';
-import { Palette, Spacing, Typography } from '@/constants/theme';
+import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
+import type { PreferredLoginMethod } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { getDeviceLoginPreference } from '@/lib/login-preference';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, useRouter } from 'expo-router';
-import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+
+type ConfirmKind = 'logout' | 'delete' | 'switch' | null;
+type ActionPhase = 'idle' | 'working' | 'done' | 'error';
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { session, logout, deactivateAccount, updateSettings } = useAuth();
+  const { session, logout, deactivateAccount, updatePreferredLoginMethod } = useAuth();
   const inbox = useInbox();
   const { hideActiveForSeller } = useListings();
   const { isConnected } = useNetworkStatus();
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [prefsBusy, setPrefsBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+
+  const [confirm, setConfirm] = useState<ConfirmKind>(null);
+  const [pendingMethod, setPendingMethod] = useState<PreferredLoginMethod | null>(null);
+  const [method, setMethod] = useState<PreferredLoginMethod>('password');
+  const [logoutPhase, setLogoutPhase] = useState<ActionPhase>('idle');
+  const [deletePhase, setDeletePhase] = useState<ActionPhase>('idle');
+  const [switchPhase, setSwitchPhase] = useState<ActionPhase>('idle');
+  const [farewell, setFarewell] = useState<'logout' | 'delete' | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const preferred = await getDeviceLoginPreference();
+      if (!cancelled) setMethod(preferred);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.preferredLoginMethod]);
+
+  useEffect(() => {
+    if (session?.preferredLoginMethod) setMethod(session.preferredLoginMethod);
+  }, [session?.preferredLoginMethod]);
+
+  useEffect(() => {
+    if (!farewell || session) return;
+    const timer = setTimeout(() => {
+      router.replace('/(auth)/welcome');
+    }, 1100);
+    return () => clearTimeout(timer);
+  }, [farewell, router, session]);
+
+  if (farewell === 'logout') {
+    return (
+      <View style={styles.screen}>
+        <ScreenHeader title="Settings and account" />
+        <View style={styles.farewell}>
+          {session ? (
+            <Button label="Logging out…" loading disabled />
+          ) : (
+            <AlertBanner variant="success" title="Logged out" message="Returning to Welcome." />
+          )}
+        </View>
+      </View>
+    );
+  }
+
+  if (farewell === 'delete') {
+    return (
+      <View style={styles.screen}>
+        <ScreenHeader title="Settings and account" />
+        <View style={styles.farewell}>
+          {session ? (
+            <Pressable style={[styles.deleteSolid, styles.deleteWorking]} disabled>
+              <SpinnerArcIcon size={16} color={Palette.ivory} />
+              <Text style={styles.deleteSolidLabel}>Deactivating account…</Text>
+            </Pressable>
+          ) : (
+            <View style={styles.deactivatedBox}>
+              <Text style={styles.deactivatedTitle}>Your account has been deactivated</Text>
+              <Text style={styles.deactivatedBody}>
+                You've been signed out and your listings are hidden. Returning to Welcome.
+              </Text>
+            </View>
+          )}
+        </View>
+      </View>
+    );
+  }
 
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
   }
 
-  const username = session.username;
   const blockedCount = inbox.blockedUsers.length;
-  const notifOffers = session.notifOffers !== false;
-  const notifMessages = session.notifMessages !== false;
+  const hasPassword = Boolean(session.hasPassword);
+  const isMagic = method === 'magic_link';
+  const busy = logoutPhase === 'working' || deletePhase === 'working' || switchPhase === 'working';
 
-  async function onLogout() {
-    if (!isConnected) return;
-    setError(null);
+  function openSwitch(next: PreferredLoginMethod) {
+    if (!isConnected || busy || next === method) return;
+    if (next === 'password' && !hasPassword) {
+      router.push({
+        pathname: '/(auth)/set-password',
+        params: { email: session!.email, purpose: 'setup' },
+      });
+      return;
+    }
+    setPendingMethod(next);
+    setConfirm('switch');
+    setSwitchPhase('idle');
+  }
+
+  async function onConfirmLogout() {
+    if (!isConnected || busy) return;
+    setConfirm(null);
+    setLogoutPhase('working');
+    setFarewell('logout');
     try {
       await logout();
+      setLogoutPhase('done');
     } catch {
-      setError('Could not log out. Check your connection and try again.');
+      setFarewell(null);
+      setLogoutPhase('error');
     }
   }
 
-  async function onTogglePref(key: 'notifOffers' | 'notifMessages', value: boolean) {
-    if (!isConnected || prefsBusy) return;
-    setPrefsBusy(true);
-    setError(null);
+  async function onConfirmDelete() {
+    if (!isConnected || busy) return;
+    setConfirm(null);
+    setDeletePhase('working');
+    setFarewell('delete');
     try {
-      await updateSettings({ [key]: value });
-    } catch {
-      setError('Could not update notification preferences.');
-    } finally {
-      setPrefsBusy(false);
-    }
-  }
-
-  async function onConfirmDeactivate() {
-    if (!isConnected) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await hideActiveForSeller(username);
+      await hideActiveForSeller(session!.username);
       await deactivateAccount();
+      setDeletePhase('done');
     } catch {
-      setError('Could not deactivate account. Please try again.');
-      setBusy(false);
+      setFarewell(null);
+      setDeletePhase('error');
     }
   }
+
+  async function onConfirmSwitch() {
+    if (!isConnected || busy || !pendingMethod) return;
+    setConfirm(null);
+    setSwitchPhase('working');
+    try {
+      await updatePreferredLoginMethod(pendingMethod);
+      setMethod(pendingMethod);
+      setSwitchPhase('done');
+      setPendingMethod(null);
+    } catch {
+      setSwitchPhase('error');
+    }
+  }
+
+  const switchTarget = pendingMethod ?? (isMagic ? 'password' : 'magic_link');
+  const switchConfirmCopy =
+    switchTarget === 'password'
+      ? {
+          title: 'Switch to password sign-in?',
+          body: `Next time you log in, you'll use your email and password for ${session.email}.`,
+          confirm: 'Use password',
+        }
+      : {
+          title: 'Switch to email link sign-in?',
+          body: `Next time you log in, Throve will send a sign-in link to ${session.email}. You can still use your password later if you switch back.`,
+          confirm: 'Use email link',
+        };
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title="Settings" onBack={() => router.back()} />
-      <ScrollView contentContainerStyle={styles.body}>
-        {!isConnected ? <OfflineBanner message="Reconnect to manage your account." /> : null}
-        {error ? <AlertBanner variant="error" title="Something went wrong" message={error} /> : null}
-        <Text style={styles.sectionTitle}>Account</Text>
-        <View style={styles.group}>
-          <SettingsRow label="Edit profile" onPress={() => router.push('/profile/edit')} />
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Email address</Text>
-            <Text style={styles.rowValue}>{session.email}</Text>
-          </View>
-          <SettingsRow label="Login & security" onPress={() => router.push('/profile/login-security')} />
-          <SettingsRow
-            label={`Blocked users${blockedCount > 0 ? ` (${blockedCount})` : ''}`}
-            onPress={() => router.push('/profile/blocked')}
+      <ScreenHeader title="Settings and account" onBack={() => router.back()} />
+      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        {!isConnected ? (
+          <OfflineBanner title="No connection" message="Reconnect to change your account settings." />
+        ) : null}
+
+        {logoutPhase === 'error' ? (
+          <AlertBanner
+            variant="error"
+            title="We couldn't log you out"
+            message="Please try again in a moment."
           />
-        </View>
-        <Text style={styles.sectionTitle}>Email notifications</Text>
-        <View style={styles.group}>
-          <View style={[styles.row, styles.rowLast]}>
-            <View style={styles.toggleCopy}>
-              <Text style={styles.rowLabel}>Offer updates</Text>
-              <Text style={styles.rowHint}>New offers, accepts, and expiries</Text>
-            </View>
-            <Switch
-              value={notifOffers}
-              onValueChange={(value) => onTogglePref('notifOffers', value)}
-              disabled={!isConnected || prefsBusy}
-              trackColor={{ false: Palette.border, true: Palette.blush }}
-              thumbColor={notifOffers ? Palette.plum : Palette.ivoryElevated}
-            />
-          </View>
-          <View style={styles.row}>
-            <View style={styles.toggleCopy}>
-              <Text style={styles.rowLabel}>Messages</Text>
-              <Text style={styles.rowHint}>New chat messages from buyers and sellers</Text>
-            </View>
-            <Switch
-              value={notifMessages}
-              onValueChange={(value) => onTogglePref('notifMessages', value)}
-              disabled={!isConnected || prefsBusy}
-              trackColor={{ false: Palette.border, true: Palette.blush }}
-              thumbColor={notifMessages ? Palette.plum : Palette.ivoryElevated}
-            />
-          </View>
-        </View>
-        <Text style={styles.sectionTitle}>Prototype</Text>
-        <AlertBanner
-          variant="info"
-          title="Working prototype"
-          message="Accounts are real, but purchases and payments are simulated. Order emails always send."
-        />
-        <Text style={styles.sectionTitle}>More</Text>
-        <View style={styles.moreGroup}>
-          <Button label="Log out" variant="secondary" onPress={onLogout} disabled={!isConnected} />
-          <Button
-            label="Delete account"
-            variant="ghost"
-            onPress={() => setConfirmDelete(true)}
-            disabled={!isConnected || busy}
+        ) : null}
+
+        {deletePhase === 'error' ? (
+          <AlertBanner
+            variant="error"
+            title="We couldn't complete that"
+            message="Your account is unchanged. Please try again in a moment."
           />
+        ) : null}
+
+        {switchPhase === 'error' ? (
+          <AlertBanner
+            variant="error"
+            title="We couldn't update sign-in"
+            message="Your preference is unchanged. Please try again in a moment."
+          />
+        ) : null}
+
+        {switchPhase === 'done' ? (
+          <AlertBanner
+            variant="success"
+            title="Sign-in preference updated"
+            message={
+              isMagic
+                ? 'Next time, Throve will send you an email link.'
+                : 'Next time, you can sign in with your email and password.'
+            }
+          />
+        ) : null}
+
+        <Section label="Profile">
+          <Pressable style={styles.linkRow} onPress={() => router.push('/profile/edit')}>
+            <Text style={styles.linkLabel}>Edit profile</Text>
+            <Ionicons name="chevron-forward" size={15} color={Palette.muted2} />
+          </Pressable>
+        </Section>
+
+        <Section label="Account details">
+          <View style={styles.detailCard}>
+            <View style={[styles.detailRow, styles.detailDivider]}>
+              <Text style={styles.detailKey}>Name</Text>
+              <Text style={styles.detailValue} numberOfLines={1}>
+                {session.name}
+              </Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailKey}>Email</Text>
+              <Text style={styles.detailValue} numberOfLines={1}>
+                {session.email}
+              </Text>
+            </View>
+          </View>
+        </Section>
+
+        <Section label="Sign-in and security">
+          <View style={styles.signInCard}>
+            <View style={styles.signInTop}>
+              {isMagic ? (
+                <MailIcon size={18} color={Palette.plum} />
+              ) : (
+                <LockIcon size={18} color={Palette.plum} />
+              )}
+              <View style={styles.signInCopy}>
+                <Text style={styles.signInTitle}>
+                  {isMagic ? 'You sign in with an email link' : 'You sign in with a password'}
+                </Text>
+                <Text style={styles.signInBody}>
+                  {isMagic
+                    ? `Throve sends a sign-in link to ${session.email}. There's no password to manage on this device.`
+                    : `You use your email and password for ${session.email}. Magic link is available if you switch.`}
+                </Text>
+              </View>
+            </View>
+
+            {switchPhase === 'working' ? (
+              <View style={styles.workingRow}>
+                <SpinnerArcIcon size={16} color={Palette.plum} />
+                <Text style={styles.workingText}>Updating sign-in…</Text>
+              </View>
+            ) : (
+              <View style={styles.signInActions}>
+                {hasPassword ? (
+                  <Pressable
+                    disabled={!isConnected || busy}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/(auth)/set-password',
+                        params: { email: session.email, purpose: 'change' },
+                      })
+                    }
+                  >
+                    <Text style={styles.signInAction}>Change password</Text>
+                  </Pressable>
+                ) : (
+                  <Pressable
+                    disabled={!isConnected || busy}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/(auth)/set-password',
+                        params: { email: session.email, purpose: 'setup' },
+                      })
+                    }
+                  >
+                    <Text style={styles.signInAction}>Set up password</Text>
+                  </Pressable>
+                )}
+                <Text style={styles.signInDot}>·</Text>
+                <Pressable
+                  disabled={!isConnected || busy}
+                  onPress={() => openSwitch(isMagic ? 'password' : 'magic_link')}
+                >
+                  <Text style={styles.signInAction}>
+                    {isMagic ? 'Switch to password' : 'Switch to email link'}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        </Section>
+
+        <Section label="Safety">
+          <Pressable style={styles.linkRow} onPress={() => router.push('/profile/blocked')}>
+            <Text style={styles.linkLabel}>Blocked users</Text>
+            <View style={styles.linkMeta}>
+              {blockedCount > 0 ? <Text style={styles.count}>{blockedCount}</Text> : null}
+              <Ionicons name="chevron-forward" size={15} color={Palette.muted2} />
+            </View>
+          </Pressable>
+        </Section>
+
+        <View style={styles.footer}>
+          {logoutPhase === 'working' ? (
+            <Button label="Logging out…" loading disabled />
+          ) : (
+            <Button
+              label="Log out"
+              variant="secondary"
+              disabled={!isConnected || busy}
+              onPress={() => {
+                setLogoutPhase('idle');
+                setPendingMethod(null);
+                setConfirm('logout');
+              }}
+            />
+          )}
+
+          {confirm === 'delete' ? (
+            <View style={[styles.confirmCard, styles.deleteConfirm]}>
+              <Text style={[styles.confirmTitle, styles.deleteTitle]}>Delete your account?</Text>
+              <Text style={styles.confirmBody}>
+                This deactivates your Throve account. You'll be signed out, normal account access will be disabled, and
+                your active listings will be hidden. Records needed for transactions, orders, reviews, disputes and audit
+                may be retained.
+              </Text>
+              <View style={styles.confirmActionsCol}>
+                <Button label="Keep my account" variant="secondary" onPress={() => setConfirm(null)} />
+                <Pressable
+                  style={[styles.deleteSolid, !isConnected && styles.deleteDisabled]}
+                  disabled={!isConnected}
+                  onPress={() => void onConfirmDelete()}
+                >
+                  <Text style={styles.deleteSolidLabel}>Delete account</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : deletePhase === 'working' ? (
+            <Pressable style={[styles.deleteSolid, styles.deleteWorking]} disabled>
+              <SpinnerArcIcon size={16} color={Palette.ivory} />
+              <Text style={styles.deleteSolidLabel}>Deactivating account…</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              style={[styles.deleteOutline, (!isConnected || busy) && styles.deleteDisabled]}
+              disabled={!isConnected || busy}
+              onPress={() => {
+                setDeletePhase('idle');
+                setPendingMethod(null);
+                setConfirm('delete');
+              }}
+            >
+              <Text style={styles.deleteOutlineLabel}>Delete account</Text>
+            </Pressable>
+          )}
+
+          <Text style={styles.footnote}>
+            Deleting your account deactivates it — you'll be signed out and your listings will be hidden.
+          </Text>
         </View>
       </ScrollView>
+
       <Dialog
-        visible={confirmDelete}
-        title="Delete your account?"
-        body="This deactivates your account — you'll be logged out and normal access disabled. Active listings are hidden. Records needed for order, transaction and review history may be retained."
+        visible={confirm === 'logout'}
+        title="Log out of Throve?"
+        body={
+          isMagic
+            ? "Your account stays exactly as it is. You'll sign back in with an email link."
+            : "Your account stays exactly as it is. You'll sign back in with your email and password."
+        }
+        onClose={() => setConfirm(null)}
         actions={[
-          { label: 'Cancel', onPress: () => setConfirmDelete(false) },
-          { label: 'Deactivate account', variant: 'primary', onPress: onConfirmDeactivate },
+          { label: 'Cancel', variant: 'secondary', onPress: () => setConfirm(null) },
+          { label: 'Log out', variant: 'primary', onPress: () => void onConfirmLogout() },
         ]}
-        onClose={() => setConfirmDelete(false)}
+      />
+
+      <Dialog
+        visible={confirm === 'switch'}
+        title={switchConfirmCopy.title}
+        body={switchConfirmCopy.body}
+        onClose={() => {
+          setConfirm(null);
+          setPendingMethod(null);
+        }}
+        actions={[
+          {
+            label: 'Cancel',
+            variant: 'secondary',
+            onPress: () => {
+              setConfirm(null);
+              setPendingMethod(null);
+            },
+          },
+          {
+            label: switchConfirmCopy.confirm,
+            variant: 'primary',
+            onPress: () => void onConfirmSwitch(),
+          },
+        ]}
       />
     </View>
   );
 }
 
-function SettingsRow({ label, onPress }: { label: string; onPress?: () => void }) {
+function Section({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <Pressable onPress={onPress} style={styles.row} disabled={!onPress}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      {onPress ? <Ionicons name="chevron-forward" size={16} color={Palette.muted2} /> : null}
-    </Pressable>
+    <View style={styles.section}>
+      <Text style={styles.sectionLabel}>{label}</Text>
+      <View style={styles.card}>{children}</View>
+    </View>
   );
 }
 
@@ -162,59 +436,229 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.ivory,
   },
   body: {
+    paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing.xxxl,
-    gap: Spacing.lg,
+    gap: Spacing.xl,
   },
-  sectionTitle: {
+  farewell: {
     paddingHorizontal: Spacing.xl,
-    fontSize: 20,
-    fontFamily: Typography.display,
-    color: Palette.espresso,
-    letterSpacing: -0.2,
+    paddingTop: Spacing.xl,
   },
-  group: {
-    paddingHorizontal: Spacing.xl,
+  section: {
+    gap: 9,
+  },
+  sectionLabel: {
+    fontSize: 10.5,
+    letterSpacing: 0.9,
+    textTransform: 'uppercase',
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.muted2,
+  },
+  card: {
+    borderWidth: 1,
+    borderColor: Palette.border,
     backgroundColor: Palette.ivoryElevated,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: Palette.divider,
+    borderRadius: Radius.sm,
+    overflow: 'hidden',
   },
-  row: {
+  linkRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Palette.divider,
-    gap: Spacing.md,
+    paddingVertical: 14,
+    paddingHorizontal: 15,
+    gap: 12,
   },
-  rowLast: {
-    borderBottomWidth: 1,
-  },
-  toggleCopy: {
+  linkLabel: {
     flex: 1,
-    gap: 2,
-  },
-  rowLabel: {
     fontSize: 14,
     fontFamily: Typography.body,
     color: Palette.espresso,
   },
-  rowHint: {
+  linkMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  count: {
     fontSize: 12,
     fontFamily: Typography.body,
-    color: Palette.muted,
-    lineHeight: 16,
+    color: Palette.muted2,
+    fontVariant: ['tabular-nums'],
   },
-  rowValue: {
-    fontSize: 14,
+  detailCard: {
+    paddingHorizontal: 15,
+    paddingVertical: 15,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  detailDivider: {
+    paddingBottom: 10,
+    marginBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: Palette.divider,
+  },
+  detailKey: {
+    fontSize: 13,
     fontFamily: Typography.body,
     color: Palette.muted,
-    maxWidth: '55%',
+  },
+  detailValue: {
+    flexShrink: 1,
+    fontSize: 13,
+    fontFamily: Typography.body,
+    color: Palette.espresso,
     textAlign: 'right',
   },
-  moreGroup: {
-    paddingHorizontal: Spacing.xl,
-    gap: Spacing.sm,
+  signInCard: {
+    padding: 15,
+    gap: 14,
+  },
+  signInTop: {
+    flexDirection: 'row',
+    gap: 11,
+  },
+  signInCopy: {
+    flex: 1,
+  },
+  signInTitle: {
+    fontSize: 13,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.espresso,
+    marginBottom: 3,
+  },
+  signInBody: {
+    fontSize: 11.5,
+    lineHeight: 19,
+    fontFamily: Typography.body,
+    color: Palette.body,
+  },
+  signInActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+  },
+  signInAction: {
+    fontSize: 12.5,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.plum,
+  },
+  signInDot: {
+    fontSize: 12.5,
+    color: Palette.muted2,
+  },
+  workingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  workingText: {
+    fontSize: 12.5,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.plum,
+  },
+  footer: {
+    gap: 10,
+    paddingTop: 4,
+  },
+  confirmCard: {
+    borderWidth: 1,
+    borderColor: Palette.border,
+    backgroundColor: Palette.ivory,
+    borderRadius: 10,
+    padding: 16,
+    gap: 6,
+  },
+  deleteConfirm: {
+    borderColor: Palette.errorBorder,
+  },
+  confirmTitle: {
+    fontSize: 18,
+    fontFamily: Typography.display,
+    color: Palette.espresso,
+  },
+  deleteTitle: {
+    color: Palette.errorText,
+  },
+  confirmBody: {
+    fontSize: 12,
+    lineHeight: 20,
+    fontFamily: Typography.body,
+    color: Palette.body,
+    marginTop: 2,
+  },
+  confirmActionsCol: {
+    gap: 9,
+    marginTop: 14,
+  },
+  deleteOutline: {
+    minHeight: 50,
+    borderRadius: Radius.button,
+    borderWidth: 1,
+    borderColor: Palette.errorText,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Palette.ivoryElevated,
+  },
+  deleteOutlineLabel: {
+    fontSize: 14,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.errorText,
+  },
+  deleteSolid: {
+    minHeight: 50,
+    borderRadius: Radius.button,
+    backgroundColor: Palette.errorText,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 9,
+  },
+  deleteSolidLabel: {
+    fontSize: 13.5,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.ivory,
+  },
+  deleteWorking: {
+    opacity: 0.72,
+  },
+  deleteDisabled: {
+    opacity: 0.45,
+  },
+  footnote: {
+    fontSize: 11,
+    lineHeight: 18,
+    fontFamily: Typography.body,
+    color: Palette.muted,
+    textAlign: 'center',
+    paddingHorizontal: 6,
+    paddingTop: 2,
+  },
+  deactivatedBox: {
+    borderWidth: 1,
+    borderColor: Palette.border,
+    backgroundColor: Palette.ivory,
+    borderRadius: 10,
+    padding: 16,
+    alignItems: 'center',
+  },
+  deactivatedTitle: {
+    fontSize: 13,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.espresso,
+    textAlign: 'center',
+  },
+  deactivatedBody: {
+    marginTop: 5,
+    fontSize: 11.5,
+    lineHeight: 19,
+    fontFamily: Typography.body,
+    color: Palette.muted,
+    textAlign: 'center',
   },
 });

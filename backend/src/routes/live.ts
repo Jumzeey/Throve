@@ -16,7 +16,7 @@ import {
 } from '../lib/live-moderators.js';
 import { mapLiveClaim, mapLiveSession, mapLiveStreamProduct } from '../lib/live-mappers.js';
 import { createLiveKitToken, getLiveKitUrl, isLiveKitConfigured } from '../lib/livekit.js';
-import { getProfileById, getSellerMap, mapListing } from '../lib/mappers.js';
+import { getProfileById, mapListing } from '../lib/mappers.js';
 import { createServiceClient, createSupabaseClient } from '../lib/supabase.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
 
@@ -72,30 +72,69 @@ function rpcErrorMessage(error: { message?: string; details?: string; hint?: str
 
 router.get('/sessions', optionalAuth, async (req, res) => {
   const supabase = publicClient(req as AuthedRequest);
-  const { data, error } = await supabase.from('live_sessions').select('*').order('created_at', { ascending: false });
+  const recentEndedCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  const { data, error } = await supabase
+    .from('live_sessions')
+    .select('*')
+    .or(`status.eq.live,status.eq.upcoming,and(status.eq.ended,ended_at.gte.${recentEndedCutoff})`)
+    .order('created_at', { ascending: false });
   if (error) return handleSupabaseError(res, error);
 
-  const hostMap = await getSellerMap(
-    supabase,
-    (data ?? []).map((row: DbRow) => row.host_id as string),
+  const hostIds = (data ?? []).map((row: DbRow) => row.host_id as string);
+  const { data: hosts, error: hostError } = await supabase
+    .from('profiles')
+    .select('id, username, photo_url')
+    .in('id', hostIds.length ? hostIds : ['00000000-0000-0000-0000-000000000000']);
+  if (hostError) return handleSupabaseError(res, hostError);
+
+  const hostMap = new Map(
+    (hosts ?? []).map((row) => [
+      row.id as string,
+      {
+        username: row.username as string,
+        photoUrl: row.photo_url && String(row.photo_url).startsWith('http') ? String(row.photo_url) : null,
+      },
+    ]),
   );
 
   const sessions = await Promise.all(
     (data ?? []).map(async (row: DbRow) => {
+      const host = hostMap.get(row.host_id as string);
       const products = await loadProducts(supabase, String(row.id));
       return mapLiveSession(
         row,
-        hostMap.get(row.host_id as string) ?? 'unknown',
+        host?.username ?? 'unknown',
         products,
         await listModeratorUsernames(String(row.id)),
+        host?.photoUrl,
       );
     }),
   );
 
+  const liveNow = sessions
+    .filter((s) => s.status === 'live')
+    .sort((a, b) => (b.viewers ?? 0) - (a.viewers ?? 0));
+  const upcoming = sessions
+    .filter((s) => s.status === 'upcoming')
+    .sort((a, b) => {
+      const aTime = a.scheduledAt ? new Date(String(a.scheduledAt)).getTime() : Number.MAX_SAFE_INTEGER;
+      const bTime = b.scheduledAt ? new Date(String(b.scheduledAt)).getTime() : Number.MAX_SAFE_INTEGER;
+      return aTime - bTime;
+    });
+  const recentlyEnded = sessions
+    .filter((s) => s.status === 'ended')
+    .sort((a, b) => {
+      const aTime = a.endedAt ? new Date(String(a.endedAt)).getTime() : 0;
+      const bTime = b.endedAt ? new Date(String(b.endedAt)).getTime() : 0;
+      return bTime - aTime;
+    });
+
   return res.json({
-    liveNow: sessions.filter((s) => s.status === 'live'),
-    upcoming: sessions.filter((s) => s.status === 'upcoming'),
-    all: sessions,
+    liveNow,
+    upcoming,
+    recentlyEnded,
+    all: [...liveNow, ...upcoming, ...recentlyEnded],
   });
 });
 
@@ -107,7 +146,11 @@ router.get('/sessions/:id', optionalAuth, async (req, res) => {
 
   const host = await getProfileById(supabase, data.host_id);
   const products = await loadProducts(supabase, data.id);
-  return res.json(mapLiveSession(data, host?.username ?? 'unknown', products, await listModeratorUsernames(data.id)));
+  const photo =
+    host?.photo_url && String(host.photo_url).startsWith('http') ? String(host.photo_url) : null;
+  return res.json(
+    mapLiveSession(data, host?.username ?? 'unknown', products, await listModeratorUsernames(data.id), photo),
+  );
 });
 
 router.post('/sessions', requireAuth, async (req, res) => {

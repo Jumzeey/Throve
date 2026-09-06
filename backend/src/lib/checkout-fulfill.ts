@@ -146,6 +146,8 @@ export async function fulfillPaidCheckout(
       live_stream_product_id: liveStreamProductId,
       claim_id: claimId,
       status: 'paid',
+      paid_at: new Date().toISOString(),
+      payout_status: 'not_yet_eligible',
     })
     .select('*')
     .single();
@@ -193,6 +195,10 @@ export async function fulfillPaidCheckout(
     reviewed: data.reviewed,
     paymentTxRef: paymentMeta?.txRef ?? null,
     paymentProviderRef: paymentMeta?.providerRef ?? null,
+    paidAt: data.paid_at ?? data.created_at,
+    payoutStatus: data.payout_status ?? 'not_yet_eligible',
+    trackingNumber: null,
+    dispute: null,
   };
 }
 
