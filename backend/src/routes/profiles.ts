@@ -239,13 +239,14 @@ router.post('/:username/follow', requireAuth, async (req, res) => {
     .eq('seller_id', seller.id)
     .maybeSingle();
 
-  const { error } = await supabase.from('seller_follows').upsert(
-    { follower_id: userId, seller_id: seller.id },
-    { onConflict: 'follower_id,seller_id' },
-  );
-  if (error) return handleSupabaseError(res, error);
-
+  // RLS allows insert/delete only — no update — so do not upsert on conflict.
   if (!existingFollow) {
+    const { error } = await supabase.from('seller_follows').insert({
+      follower_id: userId,
+      seller_id: seller.id,
+    });
+    if (error) return handleSupabaseError(res, error);
+
     const follower = await getProfileById(supabase, userId);
     if (follower?.username) {
       void notifyUser({

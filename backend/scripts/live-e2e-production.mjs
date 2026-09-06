@@ -164,8 +164,15 @@ async function main() {
   assert('listing.publish', pub.status === 200 && pub.json?.status === 'available', pub.json?.status || pub.json?.message);
 
   // --- Follow ---
-  const follow = await api(viewer.token, `/profiles/${hostUsername}/follow`, { method: 'POST', body: {} });
-  assert('follow.host', follow.status === 200 && follow.json?.isFollowing === true, `followers=${follow.json?.followerCount}`);
+  const follow = await api(viewer.token, `/profiles/${encodeURIComponent(hostUsername)}/follow`, {
+    method: 'POST',
+    body: {},
+  });
+  assert(
+    'follow.host',
+    follow.status === 200 && follow.json?.isFollowing === true,
+    `status=${follow.status} followers=${follow.json?.followerCount} msg=${follow.json?.message || ''}`,
+  );
 
   // --- Moderators ---
   const tMod = Date.now();
