@@ -63,6 +63,8 @@ type LiveContextValue = {
   releaseListing: (listingId: string) => Promise<void>;
   fetchLiveKitToken: (sessionId: string) => Promise<LiveKitCredentials>;
   startLive: (input: StartLiveInput) => Promise<LiveSession>;
+  /** Promote an upcoming session to live (host only). */
+  goLiveNow: (sessionId: string) => Promise<LiveSession>;
   endLive: (sessionId: string, opts?: { peakViewers?: number; reason?: 'host' | 'connection' }) => Promise<LiveSessionSummary>;
   subscribeSession: (sessionId: string) => () => void;
   prepareModerators: string[];
@@ -521,6 +523,16 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     return session;
   }, [prepareModerators]);
 
+  const goLiveNow = useCallback(async (sessionId: string) => {
+    const session = await apiFetch<LiveSession>(`/live/sessions/${sessionId}/start`, { method: 'POST' });
+    setSessions((current) => {
+      const without = current.filter((item) => item.id !== sessionId);
+      return [session, ...without];
+    });
+    setActiveBroadcastId(session.id);
+    return session;
+  }, []);
+
   const endLive = useCallback(async (sessionId: string, opts?: { peakViewers?: number; reason?: 'host' | 'connection' }) => {
     const summary = await apiFetch<LiveSessionSummary>(`/live/sessions/${sessionId}/end`, {
       method: 'POST',
@@ -643,6 +655,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       releaseListing,
       fetchLiveKitToken,
       startLive,
+      goLiveNow,
       endLive,
       subscribeSession,
       prepareModerators,
@@ -667,6 +680,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       getPinnedProduct,
       getProducts,
       getSession,
+      goLiveNow,
       hydrateSession,
       listingStatus,
       liveNow,

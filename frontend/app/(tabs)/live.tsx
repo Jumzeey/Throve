@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { CalendarIcon, EyeIcon, ImagePlaceholderIcon, UserIcon, VideoIcon } from '@/components/ui/icons';
 import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
 import { Palette, Radius, Typography } from '@/constants/theme';
+import { useAuth } from '@/context/auth-context';
 import { getLiveImage } from '@/data/images';
 import { useLive } from '@/context/live-context';
 import type { LiveSession } from '@/data/types';
@@ -11,7 +12,7 @@ import { formatLiveSchedule, formatNaira } from '@/lib/format';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 
@@ -34,8 +35,10 @@ function categoryLine(session: LiveSession, includeCategory = true) {
 export default function LiveDiscoveryScreen() {
   const { top, tabScrollBottom } = useScreenInsets();
   const router = useRouter();
-  const { liveNow, upcoming, recentlyEnded, loading, loadError, refresh } = useLive();
+  const { session } = useAuth();
+  const { liveNow, upcoming, recentlyEnded, loading, loadError, refresh, goLiveNow } = useLive();
   const { isConnected } = useNetworkStatus();
+  const [startingId, setStartingId] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -141,15 +144,31 @@ export default function LiveDiscoveryScreen() {
                 <Text style={styles.emptyUpcomingText}>Nothing scheduled yet. Check back soon.</Text>
               </View>
             ) : (
-              upcoming.map((session) => (
-                <UpcomingRow
-                  key={session.id}
-                  session={session}
-                  onPress={() =>
-                    router.push({ pathname: '/seller/[username]', params: { username: session.host } })
-                  }
-                />
-              ))
+              upcoming.map((item) => {
+                const isHost = Boolean(session?.username && item.host === session.username);
+                return (
+                  <UpcomingRow
+                    key={item.id}
+                    session={item}
+                    isHost={isHost}
+                    starting={startingId === item.id}
+                    onPress={() =>
+                      router.push({ pathname: '/seller/[username]', params: { username: item.host } })
+                    }
+                    onGoLive={
+                      isHost
+                        ? () => {
+                            setStartingId(item.id);
+                            void goLiveNow(item.id)
+                              .then(() => router.push('/live/broadcast'))
+                              .catch(() => undefined)
+                              .finally(() => setStartingId(null));
+                          }
+                        : undefined
+                    }
+                  />
+                );
+              })
             )}
 
             {recentlyEnded.length > 0 ? (
@@ -277,7 +296,19 @@ function CompactLiveCard({ session, onPress }: { session: LiveSession; onPress: 
   );
 }
 
-function UpcomingRow({ session, onPress }: { session: LiveSession; onPress: () => void }) {
+function UpcomingRow({
+  session,
+  onPress,
+  isHost,
+  onGoLive,
+  starting,
+}: {
+  session: LiveSession;
+  onPress: () => void;
+  isHost?: boolean;
+  onGoLive?: () => void;
+  starting?: boolean;
+}) {
   const when = formatLiveSchedule(session.scheduledAt);
   return (
     <Pressable onPress={onPress} style={styles.upcomingRow}>
@@ -298,6 +329,18 @@ function UpcomingRow({ session, onPress }: { session: LiveSession; onPress: () =
             <CalendarIcon size={12} color={Palette.blush} />
             <Text style={styles.upcomingWhen}>{when}</Text>
           </View>
+        ) : null}
+        {isHost && onGoLive ? (
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation?.();
+              onGoLive();
+            }}
+            disabled={starting}
+            style={styles.goLiveBtn}
+          >
+            <Text style={styles.goLiveBtnText}>{starting ? 'Starting…' : 'Go live now'}</Text>
+          </Pressable>
         ) : null}
       </View>
     </Pressable>
@@ -717,6 +760,19 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     fontFamily: Typography.body,
     color: Palette.blush,
+  },
+  goLiveBtn: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: Palette.liveRed,
+  },
+  goLiveBtnText: {
+    fontSize: 12,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.ivory,
   },
   endedSection: {
     marginTop: 18,
