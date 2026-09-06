@@ -140,6 +140,7 @@ export type LiveMediaCredentials = {
   ingestEndpoint?: string;
   streamKey?: string;
   playbackUrl?: string;
+  rtmpsUrl?: string;
 };
 
 /** @deprecated Use LiveMediaCredentials */

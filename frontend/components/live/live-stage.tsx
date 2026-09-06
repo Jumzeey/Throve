@@ -67,16 +67,104 @@ const LiveVideoLayer = memo(function LiveVideoLayer({
   }
 
   if (provider === 'ivs') {
-    return (
-      <View style={styles.placeholder}>
-        <VideoIcon size={34} color="rgba(255,247,240,0.28)" />
-        <Text style={styles.placeholderText}>IVS playback coming soon</Text>
-      </View>
-    );
+    return <IvsVideoLayer credentials={credentials} isHost={isHost} onConnectionChange={onConnectionChange} />;
   }
 
   return (
     <LiveKitVideoLayer credentials={credentials} isHost={isHost} onConnectionChange={onConnectionChange} />
+  );
+});
+
+const IvsVideoLayer = memo(function IvsVideoLayer({
+  credentials,
+  isHost,
+  onConnectionChange,
+}: {
+  credentials: LiveMediaCredentials;
+  isHost: boolean;
+  onConnectionChange?: (state: LiveConnection) => void;
+}) {
+  const [ready, setReady] = useState(false);
+  const [av, setAv] = useState<typeof import('expo-av') | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const mod = await import('expo-av');
+        if (!cancelled) setAv(mod);
+      } catch {
+        if (!cancelled) setAv(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isHost) {
+      onConnectionChange?.('live');
+      return;
+    }
+    if (credentials.playbackUrl) onConnectionChange?.('live');
+  }, [credentials.playbackUrl, isHost, onConnectionChange]);
+
+  if (isHost) {
+    return (
+      <View style={styles.videoLayer}>
+        <SimulatedStage />
+        <View style={styles.ivsHostBanner} pointerEvents="none">
+          <Text style={styles.ivsHostTitle}>IVS host ingest</Text>
+          <Text style={styles.ivsHostCopy}>
+            Broadcast with OBS to RTMPS. In-app camera publish for IVS needs the native broadcast SDK next.
+          </Text>
+          {credentials.ingestEndpoint ? (
+            <Text style={styles.ivsHostMeta} numberOfLines={2}>
+              {credentials.rtmpsUrl || `rtmps://${credentials.ingestEndpoint}:443/app/`}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+    );
+  }
+
+  if (!credentials.playbackUrl || !av) {
+    return (
+      <View style={styles.videoLayer}>
+        <SimulatedStage />
+        {!credentials.playbackUrl ? (
+          <View style={styles.placeholder}>
+            <Text style={styles.placeholderText}>Waiting for stream…</Text>
+          </View>
+        ) : null}
+      </View>
+    );
+  }
+
+  const { Video, ResizeMode } = av;
+
+  return (
+    <View style={styles.videoLayer} pointerEvents="none">
+      <Video
+        style={StyleSheet.absoluteFill}
+        source={{ uri: credentials.playbackUrl }}
+        useNativeControls={false}
+        resizeMode={ResizeMode.COVER}
+        shouldPlay
+        isLooping={false}
+        onReadyForDisplay={() => {
+          setReady(true);
+          onConnectionChange?.('live');
+        }}
+        onError={() => onConnectionChange?.('reconnecting')}
+      />
+      {!ready ? (
+        <View style={styles.placeholder}>
+          <Text style={styles.placeholderText}>Connecting stream…</Text>
+        </View>
+      ) : null}
+    </View>
   );
 });
 
@@ -565,6 +653,32 @@ const styles = StyleSheet.create({
   },
   video: {
     ...StyleSheet.absoluteFillObject,
+  },
+  ivsHostBanner: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 120,
+    padding: 14,
+    borderRadius: Radius.lg,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    gap: 6,
+  },
+  ivsHostTitle: {
+    fontFamily: Typography.bodySemiBold,
+    fontSize: 14,
+    color: Palette.ivory,
+  },
+  ivsHostCopy: {
+    fontFamily: Typography.body,
+    fontSize: 12,
+    color: LIVE_IVORY_62,
+  },
+  ivsHostMeta: {
+    marginTop: 4,
+    fontFamily: Typography.body,
+    fontSize: 11,
+    color: Palette.blush,
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,

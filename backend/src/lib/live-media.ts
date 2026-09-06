@@ -1,4 +1,6 @@
 import { createLiveKitToken, getLiveKitUrl, isLiveKitConfigured } from './livekit.js';
+import { ensureIvsChannelForSession, isIvsConfigured } from './ivs.js';
+import { createServiceClient } from './supabase.js';
 
 export type LiveMediaProvider = 'livekit' | 'ivs' | 'simulated';
 
@@ -10,10 +12,11 @@ export type LiveMediaCredentials = {
   token?: string;
   url?: string;
   roomName?: string;
-  /** Amazon IVS (future) */
+  /** Amazon IVS */
   ingestEndpoint?: string;
   streamKey?: string;
   playbackUrl?: string;
+  rtmpsUrl?: string;
 };
 
 export function configuredMediaProvider(): LiveMediaProvider {
@@ -38,9 +41,38 @@ export async function createSessionMediaCredentials(input: {
   }
 
   if (provider === 'ivs') {
-    const err = new Error('IVS media provider is not configured yet');
-    (err as Error & { code?: string }).code = 'MEDIA_PROVIDER_UNAVAILABLE';
-    throw err;
+    if (!isIvsConfigured()) {
+      const err = new Error('Amazon IVS is not configured');
+      (err as Error & { code?: string }).code = 'IVS_UNAVAILABLE';
+      throw err;
+    }
+
+    const admin = createServiceClient();
+    const { data: session } = await admin
+      .from('live_sessions')
+      .select('ivs_channel_arn, ivs_ingest_endpoint, ivs_playback_url, ivs_stream_key')
+      .eq('id', input.sessionId)
+      .maybeSingle();
+
+    const channel = await ensureIvsChannelForSession({
+      sessionId: input.sessionId,
+      existing: session ?? undefined,
+    });
+
+    const base: LiveMediaCredentials = {
+      provider: 'ivs',
+      role,
+      canPublish: input.isHost,
+      playbackUrl: channel.playbackUrl,
+      ingestEndpoint: channel.ingestEndpoint,
+    };
+
+    if (input.isHost) {
+      base.streamKey = channel.streamKey;
+      base.rtmpsUrl = `rtmps://${channel.ingestEndpoint}:443/app/`;
+    }
+
+    return base;
   }
 
   if (!isLiveKitConfigured()) {

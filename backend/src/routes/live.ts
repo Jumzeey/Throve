@@ -16,7 +16,8 @@ import {
   removeModerator,
 } from '../lib/live-moderators.js';
 import { mapLiveClaim, mapLiveSession, mapLiveStreamProduct } from '../lib/live-mappers.js';
-import { createSessionMediaCredentials } from '../lib/live-media.js';
+import { createSessionMediaCredentials, configuredMediaProvider } from '../lib/live-media.js';
+import { ensureIvsChannelForSession, isIvsConfigured } from '../lib/ivs.js';
 import { getProfileById, mapListing } from '../lib/mappers.js';
 import { notifyUser } from '../lib/notify.js';
 import { createServiceClient, createSupabaseClient } from '../lib/supabase.js';
@@ -283,7 +284,19 @@ router.post('/sessions', requireAuth, async (req, res) => {
   if (error) return handleSupabaseError(res, error);
 
   const roomName = `live_${data.id}`;
-  await supabase.from('live_sessions').update({ livekit_room_name: roomName }).eq('id', data.id);
+  const mediaProvider = configuredMediaProvider();
+  await supabase
+    .from('live_sessions')
+    .update({ livekit_room_name: roomName, media_provider: mediaProvider })
+    .eq('id', data.id);
+
+  if (mediaProvider === 'ivs' && isIvsConfigured() && !scheduled) {
+    try {
+      await ensureIvsChannelForSession({ sessionId: String(data.id) });
+    } catch (err) {
+      console.warn('[live] ivs channel', err instanceof Error ? err.message : err);
+    }
+  }
 
   if (productInputs.length) {
     const rows = productInputs.map((p, index) => {
@@ -598,7 +611,7 @@ router.post('/sessions/:id/media', requireAuth, async (req, res) => {
     return res.json(credentials);
   } catch (err) {
     const code = (err as { code?: string }).code;
-    if (code === 'LIVEKIT_UNAVAILABLE' || code === 'MEDIA_PROVIDER_UNAVAILABLE') {
+    if (code === 'LIVEKIT_UNAVAILABLE' || code === 'MEDIA_PROVIDER_UNAVAILABLE' || code === 'IVS_UNAVAILABLE') {
       return sendError(res, 503, err instanceof Error ? err.message : 'Media unavailable', code);
     }
     return sendError(res, 500, err instanceof Error ? err.message : 'Media credentials failed');
@@ -634,10 +647,14 @@ router.post('/sessions/:id/token', requireAuth, async (req, res) => {
       roomName: credentials.roomName,
       role: credentials.role,
       canPublish: credentials.canPublish,
+      ingestEndpoint: credentials.ingestEndpoint,
+      streamKey: credentials.streamKey,
+      playbackUrl: credentials.playbackUrl,
+      rtmpsUrl: credentials.rtmpsUrl,
     });
   } catch (err) {
     const code = (err as { code?: string }).code;
-    if (code === 'LIVEKIT_UNAVAILABLE' || code === 'MEDIA_PROVIDER_UNAVAILABLE') {
+    if (code === 'LIVEKIT_UNAVAILABLE' || code === 'MEDIA_PROVIDER_UNAVAILABLE' || code === 'IVS_UNAVAILABLE') {
       return sendError(res, 503, err instanceof Error ? err.message : 'LiveKit is not configured', code);
     }
     return sendError(res, 500, err instanceof Error ? err.message : 'Token failed');
