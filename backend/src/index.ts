@@ -1,6 +1,8 @@
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { startClaimExpiryWorker } from './jobs/claim-expiry.js';
 import { startLiveUpcomingWorker } from './jobs/live-upcoming.js';
 import { startOfferExpiryWorker } from './jobs/offer-expiry.js';
@@ -22,9 +24,12 @@ dotenv.config();
 
 const app = express();
 const port = Number(process.env.PORT ?? 4000);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const publicDir = path.join(__dirname, '..', 'public');
 
 app.use(cors({ origin: process.env.CORS_ORIGIN ?? '*' }));
 app.use(express.json({ limit: '2mb' }));
+app.use('/share/static', express.static(publicDir, { maxAge: '7d', fallthrough: true }));
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'throve-backend' });

@@ -67,7 +67,8 @@ router.get('/product/:id', async (req, res) => {
     (descRaw.length > 200 ? '…' : '');
 
   const photos = Array.isArray(listing.photo_urls) ? listing.photo_urls : [];
-  const image = photos.map(absoluteHttpUrl).find(Boolean) ?? null;
+  const image =
+    photos.map(absoluteHttpUrl).find(Boolean) ?? `${publicApiBase()}/share/static/og-default.jpg`;
 
   const shareUrl = `${publicApiBase()}/share/product/${id}`;
   const deepLink = `throveapp://product/${id}`;
