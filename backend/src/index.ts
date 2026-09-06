@@ -15,6 +15,7 @@ import liveRoutes from './routes/live.js';
 import mediaRoutes from './routes/media.js';
 import notificationsRoutes from './routes/notifications.js';
 import openRoutes from './routes/open.js';
+import shareRoutes from './routes/share.js';
 import profilesRoutes from './routes/profiles.js';
 
 dotenv.config();
@@ -30,6 +31,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/open', openRoutes);
+app.use('/share', shareRoutes);
 app.use('/auth', authRoutes);
 app.use('/profiles', profilesRoutes);
 app.use('/listings', listingsRoutes);

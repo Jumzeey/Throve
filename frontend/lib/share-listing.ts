@@ -1,5 +1,4 @@
-import { formatNaira } from '@/lib/format';
-import * as Linking from 'expo-linking';
+import { API_URL } from '@/lib/api';
 import { NativeModules, Platform, Share } from 'react-native';
 
 export type ListingSharePayload = {
@@ -8,11 +7,16 @@ export type ListingSharePayload = {
   price: number;
 };
 
+/** HTTPS share URL with Open Graph tags (WhatsApp / iMessage rich previews). */
+export function listingShareUrl(listingId: string) {
+  return `${API_URL}/share/product/${listingId}`;
+}
+
 export function listingShareContent(listing: ListingSharePayload) {
-  const url = Linking.createURL(`/product/${listing.id}`);
-  const headline = `${listing.title} · ${formatNaira(listing.price)} on Throve`;
-  const message = `${headline}\n${url}`;
-  return { url, headline, message };
+  const url = listingShareUrl(listing.id);
+  // Single message body — do not also pass `url` separately or messengers duplicate the link.
+  const message = `Check out this product I found on Throve:\n${url}`;
+  return { url, message, title: listing.title };
 }
 
 function isShareCancel(error: unknown) {
@@ -21,7 +25,7 @@ function isShareCancel(error: unknown) {
 }
 
 export async function openNativeShare(listing: ListingSharePayload) {
-  const { url, headline, message } = listingShareContent(listing);
+  const { message, title } = listingShareContent(listing);
 
   if (NativeModules.RNShare) {
     try {
@@ -29,9 +33,8 @@ export async function openNativeShare(listing: ListingSharePayload) {
         open: (options: Record<string, unknown>) => Promise<unknown>;
       };
       await RNShare.open({
-        title: headline,
-        message: Platform.OS === 'ios' ? headline : message,
-        url,
+        title,
+        message,
         failOnCancel: false,
       });
       return;
@@ -41,8 +44,6 @@ export async function openNativeShare(listing: ListingSharePayload) {
   }
 
   await Share.share(
-    Platform.OS === 'ios'
-      ? { message, url, title: headline }
-      : { message, title: headline },
+    Platform.OS === 'ios' ? { message, title } : { message, title },
   );
 }
