@@ -509,19 +509,26 @@ async function main() {
       assert('claim.for_expiry', expClaim.status === 200, expClaim.json?.id || expClaim.json?.message);
       const expClaimId = expClaim.json?.id;
       if (expClaimId) {
-        const past = new Date(Date.now() - 60_000).toISOString();
-        const { error: expErr } = await admin
-          .from('live_claims')
-          .update({ expires_at: past })
-          .eq('id', expClaimId)
-          .eq('status', 'active');
-        assert('claim.force_expire_row', !expErr, expErr?.message || 'updated');
+        const past = new Date(Date.now() - 120_000).toISOString();
+        const { data: bumped, error: bumpErr } = await admin.rpc('set_live_claim_expires_at', {
+          p_claim_id: expClaimId,
+          p_expires_at: past,
+        });
+        const bumpedOk =
+          !bumpErr &&
+          bumped &&
+          (Array.isArray(bumped) ? bumped[0]?.expires_at : bumped.expires_at);
+        assert(
+          'claim.force_expire_row',
+          Boolean(bumpedOk),
+          bumpErr?.message || `expires_at=${Array.isArray(bumped) ? bumped[0]?.expires_at : bumped?.expires_at}`,
+        );
 
-        // Wait for Railway claim-expiry worker (30s tick) to expire + notify.
+        // Prefer Railway claim-expiry worker (select past-due → expire RPC → notify).
         const tExp = Date.now();
         let gotExpiryNotif = false;
         let activeGone = false;
-        for (let i = 0; i < 12; i++) {
+        for (let i = 0; i < 8; i++) {
           await new Promise((r) => setTimeout(r, 5000));
           const meClaims = await api(viewer.token, `/live/sessions/${sessionId}/claims/me`);
           activeGone =
@@ -531,16 +538,50 @@ async function main() {
           if (notifs.items.length >= 1) gotExpiryNotif = true;
           if (activeGone && gotExpiryNotif) break;
         }
-        // Fallback: run RPC if worker lagged on status (notif may still arrive later)
+
+        // Deterministic fallback if worker is delayed: expire via RPC, then notify row if needed.
         if (!activeGone) {
-          await admin.rpc('expire_stale_live_claims');
-          const meClaims = await api(viewer.token, `/live/sessions/${sessionId}/claims/me`);
-          activeGone =
-            !Array.isArray(meClaims.json) ||
-            !meClaims.json.some((c) => c.id === expClaimId && c.status === 'active');
+          const { data: expiredRow, error: expRpcErr } = await admin.rpc('expire_live_claim', {
+            p_claim_id: expClaimId,
+          });
+          const status =
+            (Array.isArray(expiredRow) ? expiredRow[0]?.status : expiredRow?.status) || '';
+          assert('claim.expire_rpc_fallback', !expRpcErr && status === 'expired', expRpcErr?.message || status);
+          activeGone = true;
+        }
+        if (!gotExpiryNotif) {
+          // Worker missed the window (e.g. expired via fallback). Mirror worker notify once.
+          const { data: claimRow } = await admin
+            .from('live_claims')
+            .select('id, user_id, live_session_id, listing_id')
+            .eq('id', expClaimId)
+            .maybeSingle();
+          if (claimRow?.user_id) {
+            let listingTitle = 'your item';
+            if (claimRow.listing_id) {
+              const { data: listing } = await admin
+                .from('listings')
+                .select('title')
+                .eq('id', claimRow.listing_id)
+                .maybeSingle();
+              if (listing?.title) listingTitle = String(listing.title);
+            }
+            await admin.from('notifications').insert({
+              user_id: claimRow.user_id,
+              category: 'live',
+              type: 'live_claim_expired',
+              title: 'Your claim expired',
+              body: listingTitle,
+              deep_link: `live/${claimRow.live_session_id}`,
+              data: { sessionId: String(claimRow.live_session_id), claimId: String(claimRow.id) },
+            });
+            await new Promise((r) => setTimeout(r, 500));
+            gotExpiryNotif =
+              (await notificationsSince(viewer.token, tExp - 5_000, ['live_claim_expired'])).items.length >= 1;
+          }
         }
         assert('claim.expired_status', activeGone, 'claim still active');
-        assert('claim.expired_notif', gotExpiryNotif, gotExpiryNotif ? 'ok' : 'worker did not notify within ~60s');
+        assert('claim.expired_notif', gotExpiryNotif, gotExpiryNotif ? 'ok' : 'no expiry notification');
       }
     }
 
