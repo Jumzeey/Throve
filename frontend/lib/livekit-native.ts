@@ -17,6 +17,10 @@ export function canLoadNativeLiveKit() {
 /**
  * Load LiveKit once. registerGlobals must not run on every live-screen mount —
  * repeating it on Android/iOS WebRTC crashes the process.
+ *
+ * Failures must resolve to null (SimulatedStage) — never throw through to the UI.
+ * Common Android device crash without metro event-target-shim@6 redirect:
+ * "Super expression must either be null or a function" while loading webrtc.
  */
 export function loadLiveKitNative() {
   if (loadPromise) return loadPromise;
@@ -25,13 +29,18 @@ export function loadLiveKitNative() {
     try {
       await import('@livekit/react-native-webrtc');
       const rn = await import('@livekit/react-native');
+      if (!rn?.registerGlobals || !rn?.LiveKitRoom) {
+        console.warn('[livekit] react-native module incomplete');
+        return null;
+      }
       const client = await import('livekit-client');
       if (!registered) {
         rn.registerGlobals();
         registered = true;
       }
       return { rn, client };
-    } catch {
+    } catch (err) {
+      console.warn('[livekit] native load failed', err);
       return null;
     }
   })();
