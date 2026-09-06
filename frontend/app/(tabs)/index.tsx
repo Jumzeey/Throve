@@ -8,11 +8,12 @@ import { ListingGrid } from '@/components/ui/listing-grid';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useListings } from '@/context/listings-context';
+import { useLive } from '@/context/live-context';
+import { useNotifications } from '@/context/notifications-context';
 import { filterListings } from '@/data/filter-listings';
 import { getLiveImage, getSellerAvatar } from '@/data/images';
 import type { LiveSession } from '@/data/types';
 import { DEPARTMENTS } from '@/data/seed';
-import { useLive } from '@/context/live-context';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useRouter } from 'expo-router';
 import { useCallback, useMemo } from 'react';
@@ -130,6 +131,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const { session } = useAuth();
   const { listings: catalog, followingListings, toggleSave, refresh: refreshListings } = useListings();
+  const { unreadCount } = useNotifications();
   const { isConnected } = useNetworkStatus();
   const listings = useMemo(() => filterListings(catalog).slice(0, 4), [catalog]);
   const followingFeed = useMemo(() => followingListings.slice(0, 6), [followingListings]);
@@ -146,8 +148,13 @@ export default function HomeScreen() {
     <View style={[styles.screen, { paddingTop: top }]}>
       <View style={styles.header}>
         <Text style={styles.brand}>throve</Text>
-        <Pressable onPress={() => router.push('/(tabs)/inbox')} hitSlop={12} style={styles.bellBtn}>
+        <Pressable onPress={() => router.push('/inbox/alerts')} hitSlop={12} style={styles.bellBtn}>
           <BellIcon />
+          {unreadCount > 0 ? (
+            <View style={styles.bellBadge}>
+              <Text style={styles.bellBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+            </View>
+          ) : null}
         </Pressable>
       </View>
 
@@ -336,6 +343,23 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  bellBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 2,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    backgroundColor: Palette.liveRed,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bellBadgeText: {
+    fontSize: 9,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.ivory,
   },
   searchBar: {
     flexDirection: 'row',

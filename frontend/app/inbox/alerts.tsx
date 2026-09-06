@@ -65,7 +65,7 @@ export default function AlertsScreen() {
         ) : items.length === 0 ? (
           <EmptyState
             title="No alerts yet"
-            message="When sellers you follow post new items, or you get account notices, they’ll show up here."
+            message="Orders, offers, live updates, and new listings from sellers you follow will show up here."
             style={styles.empty}
           />
         ) : (

@@ -13,6 +13,22 @@ export function listingPublishedEmail(input: { listingId: string; title: string 
   });
 }
 
+export function listingReservedEmail(input: {
+  listingId: string;
+  title: string;
+  buyerUsername: string;
+}): EmailContent {
+  const link = deepLinks.product(input.listingId);
+  return buildEmail({
+    subject: truncateSubject('Your listing was reserved'),
+    title: 'Listing reserved',
+    bodyHtml: `<strong style="color:#2B211F;">@${escapeHtml(input.buyerUsername)}</strong> reserved <strong style="color:#2B211F;">${escapeHtml(input.title)}</strong>. Give them a moment to complete checkout.`,
+    bodyText: `@${input.buyerUsername} reserved ${input.title}.`,
+    ctaLabel: 'View listing',
+    actionLink: link,
+  });
+}
+
 export function followerNewListingEmail(input: {
   listingId: string;
   title: string;

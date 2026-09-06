@@ -2,6 +2,7 @@ import { sendTransactionalEmail } from '../lib/email/send.js';
 import { accountDeactivatedEmail } from '../lib/email/templates/account.js';
 import { getFollowStats } from '../lib/follows.js';
 import { getProfileById, getProfileByUsername, mapProfile, publicPhotoUrl, storedPhotoUrl } from '../lib/mappers.js';
+import { notifyUser } from '../lib/notify.js';
 import { createSupabaseClient } from '../lib/supabase.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
 import { Router } from 'express';
@@ -126,6 +127,8 @@ router.patch('/me/settings', requireAuth, async (req, res) => {
       notifMessages: z.boolean().optional(),
       notifLive: z.boolean().optional(),
       notifListings: z.boolean().optional(),
+      notifOrders: z.boolean().optional(),
+      notifPushEnabled: z.boolean().optional(),
       preferredLoginMethod: z.enum(['password', 'magic_link']).optional(),
     })
     .safeParse(req.body);
@@ -139,6 +142,8 @@ router.patch('/me/settings', requireAuth, async (req, res) => {
   if (parsed.data.notifMessages !== undefined) patch.notif_messages = parsed.data.notifMessages;
   if (parsed.data.notifLive !== undefined) patch.notif_live = parsed.data.notifLive;
   if (parsed.data.notifListings !== undefined) patch.notif_listings = parsed.data.notifListings;
+  if (parsed.data.notifOrders !== undefined) patch.notif_orders = parsed.data.notifOrders;
+  if (parsed.data.notifPushEnabled !== undefined) patch.notif_push_enabled = parsed.data.notifPushEnabled;
   if (parsed.data.preferredLoginMethod !== undefined) {
     patch.preferred_login_method = parsed.data.preferredLoginMethod;
   }
@@ -227,11 +232,33 @@ router.post('/:username/follow', requireAuth, async (req, res) => {
     return sendError(res, 400, 'You cannot follow yourself');
   }
 
+  const { data: existingFollow } = await supabase
+    .from('seller_follows')
+    .select('follower_id')
+    .eq('follower_id', userId)
+    .eq('seller_id', seller.id)
+    .maybeSingle();
+
   const { error } = await supabase.from('seller_follows').upsert(
     { follower_id: userId, seller_id: seller.id },
     { onConflict: 'follower_id,seller_id' },
   );
   if (error) return handleSupabaseError(res, error);
+
+  if (!existingFollow) {
+    const follower = await getProfileById(supabase, userId);
+    if (follower?.username) {
+      void notifyUser({
+        userId: seller.id,
+        category: 'account',
+        type: 'new_follower',
+        title: 'New follower',
+        body: `@${follower.username} started following you`,
+        deepLink: `seller/${follower.username}`,
+        data: { followerUsername: follower.username },
+      });
+    }
+  }
 
   const stats = await getFollowStats(seller.id, userId);
   return res.json({

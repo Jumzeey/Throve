@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { handleSupabaseError, sendError } from '../lib/errors.js';
 import type { DbRow } from '../lib/db-types.js';
 import { queueMessageEmail } from '../lib/email/message-debounce.js';
-import { queueEmail } from '../lib/email/send.js';
 import {
   offerAcceptedEmail,
   offerReceivedEmail,
@@ -11,6 +10,7 @@ import {
   offerWithdrawnEmail,
 } from '../lib/email/templates/offers.js';
 import { getProfileById, getProfileByUsername } from '../lib/mappers.js';
+import { notifyUser } from '../lib/notify.js';
 import { type AuthedRequest, requireAuth } from '../middleware/auth.js';
 
 const router = Router();
@@ -228,6 +228,16 @@ router.post('/conversations/:id/messages', requireAuth, async (req, res) => {
 
   await supabase.from('conversation_unread').upsert({ conversation_id: req.params.id, user_id: otherId });
 
+  void notifyUser({
+    userId: otherId,
+    category: 'message',
+    type: 'message_new',
+    title: `Message from @${meUsername || 'someone'}`,
+    body: preview,
+    deepLink: `inbox/chat/${req.params.id}`,
+    data: { conversationId: String(req.params.id) },
+  });
+
   queueMessageEmail({
     conversationId: String(req.params.id),
     toUserId: otherId,
@@ -349,10 +359,15 @@ router.post('/offers', requireAuth, async (req, res) => {
   const title = await listingTitle(supabase, parsed.data.listingId);
   const recipientId = parsed.data.initiator === 'buyer' ? sellerId : buyerId;
   const fromUsername = parsed.data.initiator === 'buyer' ? parsed.data.buyer : parsed.data.seller;
-  queueEmail({
-    toUserId: recipientId,
-    preference: 'offers',
-    content: offerReceivedEmail({
+  void notifyUser({
+    userId: recipientId,
+    category: 'offer',
+    type: 'offer_received',
+    title: `New offer from @${fromUsername}`,
+    body: title,
+    deepLink: `inbox/offer/${data.id}`,
+    data: { offerId: data.id },
+    email: offerReceivedEmail({
       offerId: data.id,
       listingTitle: title,
       amount: data.amount,
@@ -431,10 +446,15 @@ router.patch('/offers/:id', requireAuth, async (req, res) => {
   const title = await listingTitle(supabase, data.listing_id);
 
   if (parsed.data.action === 'counter') {
-    queueEmail({
-      toUserId: data.buyer_id,
-      preference: 'offers',
-      content: offerReceivedEmail({
+    void notifyUser({
+      userId: data.buyer_id,
+      category: 'offer',
+      type: 'offer_counter',
+      title: `Counter offer from @${seller?.username ?? 'seller'}`,
+      body: title,
+      deepLink: `inbox/offer/${data.id}`,
+      data: { offerId: data.id },
+      email: offerReceivedEmail({
         offerId: data.id,
         listingTitle: title,
         amount: data.amount,
@@ -443,25 +463,37 @@ router.patch('/offers/:id', requireAuth, async (req, res) => {
       }),
     });
   } else if (status === 'accepted') {
-    queueEmail({
-      toUserId: offer.initiator === 'seller' ? data.seller_id : data.buyer_id,
-      preference: 'offers',
-      content: offerAcceptedEmail({
+    const recipientId = offer.initiator === 'seller' ? data.seller_id : data.buyer_id;
+    const otherUsername =
+      offer.initiator === 'seller' ? (buyer?.username ?? 'buyer') : (seller?.username ?? 'seller');
+    void notifyUser({
+      userId: recipientId,
+      category: 'offer',
+      type: 'offer_accepted',
+      title: 'Offer accepted',
+      body: title,
+      deepLink: `inbox/offer/${data.id}`,
+      data: { offerId: data.id },
+      email: offerAcceptedEmail({
         offerId: data.id,
         listingTitle: title,
         amount: data.amount,
-        otherUsername:
-          offer.initiator === 'seller' ? (buyer?.username ?? 'buyer') : (seller?.username ?? 'seller'),
+        otherUsername,
       }),
     });
   } else if (status === 'rejected') {
     const recipientId = offer.initiator === 'seller' ? data.seller_id : data.buyer_id;
     const otherUsername =
       offer.initiator === 'seller' ? (buyer?.username ?? 'buyer') : (seller?.username ?? 'seller');
-    queueEmail({
-      toUserId: recipientId,
-      preference: 'offers',
-      content: offerRejectedEmail({
+    void notifyUser({
+      userId: recipientId,
+      category: 'offer',
+      type: 'offer_rejected',
+      title: 'Offer update',
+      body: title,
+      deepLink: `inbox/offer/${data.id}`,
+      data: { offerId: data.id },
+      email: offerRejectedEmail({
         offerId: data.id,
         listingTitle: title,
         amount: data.amount,
@@ -472,10 +504,15 @@ router.patch('/offers/:id', requireAuth, async (req, res) => {
     const recipientId = offer.initiator === 'seller' ? data.buyer_id : data.seller_id;
     const otherUsername =
       offer.initiator === 'seller' ? (seller?.username ?? 'seller') : (buyer?.username ?? 'buyer');
-    queueEmail({
-      toUserId: recipientId,
-      preference: 'offers',
-      content: offerWithdrawnEmail({
+    void notifyUser({
+      userId: recipientId,
+      category: 'offer',
+      type: 'offer_withdrawn',
+      title: 'Offer withdrawn',
+      body: title,
+      deepLink: `inbox/offer/${data.id}`,
+      data: { offerId: data.id },
+      email: offerWithdrawnEmail({
         offerId: data.id,
         listingTitle: title,
         amount: data.amount,

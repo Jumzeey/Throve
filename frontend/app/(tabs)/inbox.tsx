@@ -7,6 +7,7 @@ import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
+import { useNotifications } from '@/context/notifications-context';
 import { getListingImageSource } from '@/data/images';
 import type { Conversation } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
@@ -22,6 +23,7 @@ export default function InboxScreen() {
   const params = useLocalSearchParams<{ tab?: string }>();
   const { session, publicProfiles, ensurePublicProfile } = useAuth();
   const { refresh, conversationsFor, loading, otherParticipant, offersFor } = useInbox();
+  const { unreadCount } = useNotifications();
   const { getListing } = useListings();
   const { isConnected } = useNetworkStatus();
   const [loadError, setLoadError] = useState(false);
@@ -58,6 +60,9 @@ export default function InboxScreen() {
   if (params.tab === 'offers') {
     return <Redirect href="/inbox/offers" />;
   }
+  if (params.tab === 'alerts') {
+    return <Redirect href="/inbox/alerts" />;
+  }
 
   const isLoading = loading && !refreshing && conversations.length === 0;
 
@@ -75,6 +80,16 @@ export default function InboxScreen() {
             {pendingCount > 0 ? (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>{pendingCount > 9 ? '9+' : pendingCount}</Text>
+              </View>
+            ) : null}
+          </View>
+        </Pressable>
+        <Pressable onPress={() => router.push('/inbox/alerts')} style={styles.tab}>
+          <View style={styles.tabLabelRow}>
+            <Text style={styles.tabLabel}>Alerts</Text>
+            {unreadCount > 0 ? (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
               </View>
             ) : null}
           </View>

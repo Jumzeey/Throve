@@ -1,6 +1,7 @@
 import { createServiceClient } from '../lib/supabase.js';
-import { queueEmail } from '../lib/email/send.js';
 import { liveUpcomingEmail } from '../lib/email/templates/live.js';
+import { notifyFollowersOfLive } from '../lib/follows.js';
+import { notifyUser } from '../lib/notify.js';
 
 const INTERVAL_MS = 60_000;
 const WINDOW_MS = 30 * 60_000;
@@ -58,15 +59,32 @@ export function startLiveUpcomingWorker() {
           .select('username')
           .eq('id', session.host_id)
           .maybeSingle();
+        const hostUsername = (host?.username as string) || 'host';
+        const startLabel = formatStart(String(session.scheduled_at));
 
-        queueEmail({
-          toUserId: String(session.host_id),
-          content: liveUpcomingEmail({
+        await notifyUser({
+          userId: String(session.host_id),
+          category: 'live',
+          type: 'live_upcoming_reminder',
+          title: 'Going live soon',
+          body: String(session.title),
+          deepLink: `live/${id}`,
+          data: { sessionId: id },
+          email: liveUpcomingEmail({
             sessionId: id,
-            hostUsername: (host?.username as string) || 'host',
+            hostUsername,
             title: String(session.title),
-            startTimeLabel: formatStart(String(session.scheduled_at)),
+            startTimeLabel: startLabel,
           }),
+        });
+
+        void notifyFollowersOfLive({
+          sellerId: String(session.host_id),
+          sellerUsername: hostUsername,
+          sessionId: id,
+          title: String(session.title),
+          kind: 'upcoming',
+          startTimeLabel: startLabel,
         });
       }
     } catch (err) {

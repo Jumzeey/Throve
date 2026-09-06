@@ -1,6 +1,6 @@
 import { createServiceClient } from '../lib/supabase.js';
-import { queueEmail } from '../lib/email/send.js';
 import { offerExpiredEmail } from '../lib/email/templates/offers.js';
+import { notifyUser } from '../lib/notify.js';
 
 const INTERVAL_MS = 60_000;
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -54,8 +54,28 @@ export function startOfferExpiryWorker() {
           otherUsername: '',
         });
 
-        queueEmail({ toUserId: String(offer.buyer_id), preference: 'offers', content });
-        queueEmail({ toUserId: String(offer.seller_id), preference: 'offers', content });
+        await Promise.all([
+          notifyUser({
+            userId: String(offer.buyer_id),
+            category: 'offer',
+            type: 'offer_expired',
+            title: 'Offer expired',
+            body: title,
+            deepLink: `inbox/offer/${offer.id}`,
+            data: { offerId: String(offer.id) },
+            email: content,
+          }),
+          notifyUser({
+            userId: String(offer.seller_id),
+            category: 'offer',
+            type: 'offer_expired',
+            title: 'Offer expired',
+            body: title,
+            deepLink: `inbox/offer/${offer.id}`,
+            data: { offerId: String(offer.id) },
+            email: content,
+          }),
+        ]);
       }
 
       console.log(`[offer-expiry] expired ${stale.length} offer(s)`);

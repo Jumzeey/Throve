@@ -2,15 +2,20 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { handleSupabaseError, sendError } from '../lib/errors.js';
 import type { DbRow } from '../lib/db-types.js';
-import { queueEmail } from '../lib/email/send.js';
 import {
   orderCancelledEmail,
   orderCompletedEmail,
+  orderDeliveredEmail,
   orderDispatchedEmail,
+  orderDisputeOpenedEmail,
+  orderDisputeUpdatedEmail,
   orderPlacedBuyerEmail,
   orderPlacedSellerEmail,
+  orderPayoutStatusEmail,
+  orderTrackingUpdatedEmail,
 } from '../lib/email/templates/orders.js';
 import { getProfileById, getProfileByUsername } from '../lib/mappers.js';
+import { notifyUser } from '../lib/notify.js';
 import { createServiceClient } from '../lib/supabase.js';
 import { type AuthedRequest, requireAuth } from '../middleware/auth.js';
 import { buyerProtectionFee, shippingFee } from '../lib/listing-catalog.js';
@@ -329,13 +334,25 @@ router.post('/complete', requireAuth, async (req, res) => {
     fromLive,
   };
 
-  queueEmail({
-    toUserId: userId,
-    content: orderPlacedBuyerEmail(orderVars),
+  void notifyUser({
+    userId,
+    category: 'order',
+    type: 'order_placed',
+    title: 'Order confirmed',
+    body: data.listing_title,
+    deepLink: `checkout/order?id=${encodeURIComponent(data.id)}`,
+    data: { orderId: data.id },
+    email: orderPlacedBuyerEmail(orderVars),
   });
-  queueEmail({
-    toUserId: listing.seller_id,
-    content: orderPlacedSellerEmail(orderVars),
+  void notifyUser({
+    userId: listing.seller_id,
+    category: 'order',
+    type: 'order_placed_seller',
+    title: 'You made a sale',
+    body: data.listing_title,
+    deepLink: `checkout/order?id=${encodeURIComponent(data.id)}`,
+    data: { orderId: data.id },
+    email: orderPlacedSellerEmail(orderVars),
   });
 
   return res.status(201).json({
@@ -379,9 +396,15 @@ router.post('/orders/:id/dispatch', requireAuth, async (req, res) => {
   if (error) return handleSupabaseError(res, error);
   if (!data) return sendError(res, 400, 'Order not eligible');
 
-  queueEmail({
-    toUserId: data.buyer_id,
-    content: orderDispatchedEmail({
+  void notifyUser({
+    userId: data.buyer_id,
+    category: 'order',
+    type: 'order_dispatched',
+    title: 'Your order is on the way',
+    body: data.listing_title,
+    deepLink: `checkout/order?id=${encodeURIComponent(data.id)}`,
+    data: { orderId: data.id },
+    email: orderDispatchedEmail({
       orderId: data.id,
       listingTitle: data.listing_title,
       total: data.total,
@@ -428,6 +451,25 @@ router.post('/orders/:id/tracking', requireAuth, async (req, res) => {
 
   const { error } = await supabase.from('orders').update(patch).eq('id', order.id);
   if (error) return handleSupabaseError(res, error);
+
+  const tracking = parsed.data.trackingNumber.trim();
+  void notifyUser({
+    userId: order.buyer_id,
+    category: 'order',
+    type: 'order_tracking_updated',
+    title: 'Tracking updated',
+    body: `${order.listing_title} · ${tracking}`,
+    deepLink: `checkout/order?id=${encodeURIComponent(order.id)}`,
+    data: { orderId: order.id },
+    email: orderTrackingUpdatedEmail({
+      orderId: order.id,
+      listingTitle: order.listing_title,
+      total: order.total,
+      tracking,
+      carrier: parsed.data.carrier?.trim(),
+    }),
+  });
+
   return res.json({ ok: true });
 });
 
@@ -454,6 +496,22 @@ router.post('/orders/:id/mark-delivered', requireAuth, async (req, res) => {
     })
     .eq('id', order.id);
   if (error) return handleSupabaseError(res, error);
+
+  void notifyUser({
+    userId: order.buyer_id,
+    category: 'order',
+    type: 'order_delivered',
+    title: 'Confirm you received your order',
+    body: order.listing_title,
+    deepLink: `checkout/order?id=${encodeURIComponent(order.id)}`,
+    data: { orderId: order.id },
+    email: orderDeliveredEmail({
+      orderId: order.id,
+      listingTitle: order.listing_title,
+      total: order.total,
+    }),
+  });
+
   return res.json({ ok: true });
 });
 
@@ -477,14 +535,36 @@ router.post('/orders/:id/confirm-received', requireAuth, async (req, res) => {
   if (!data) return sendError(res, 400, 'Order not eligible — confirm after delivery');
 
   const buyer = await getProfileById(supabase, userId);
-  queueEmail({
-    toUserId: data.seller_id,
-    content: orderCompletedEmail({
+  void notifyUser({
+    userId: data.seller_id,
+    category: 'order',
+    type: 'order_completed',
+    title: 'Order completed',
+    body: data.listing_title,
+    deepLink: `checkout/order?id=${encodeURIComponent(data.id)}`,
+    data: { orderId: data.id },
+    email: orderCompletedEmail({
       orderId: data.id,
       listingTitle: data.listing_title,
       total: data.total,
       buyerName: buyer?.username ?? 'buyer',
     }),
+  });
+  void notifyUser({
+    userId: data.seller_id,
+    category: 'order',
+    type: 'payout_eligible',
+    title: 'Payout eligible',
+    body: data.listing_title,
+    deepLink: 'profile/orders',
+    data: { orderId: data.id },
+    email: orderPayoutStatusEmail({
+      orderId: data.id,
+      listingTitle: data.listing_title,
+      total: data.total,
+      payoutStatus: 'eligible',
+    }),
+    skipPush: true,
   });
 
   return res.json({ ok: true });
@@ -517,9 +597,15 @@ router.post('/orders/:id/cancel', requireAuth, async (req, res) => {
   }
 
   const otherId = order.buyer_id === userId ? order.seller_id : order.buyer_id;
-  queueEmail({
-    toUserId: otherId,
-    content: orderCancelledEmail({
+  void notifyUser({
+    userId: otherId,
+    category: 'order',
+    type: 'order_cancelled',
+    title: 'Order cancelled',
+    body: order.listing_title,
+    deepLink: `checkout/order?id=${encodeURIComponent(order.id)}`,
+    data: { orderId: order.id },
+    email: orderCancelledEmail({
       orderId: order.id,
       listingTitle: order.listing_title,
       total: order.total,
@@ -574,6 +660,40 @@ router.post('/orders/:id/dispute', requireAuth, async (req, res) => {
     .update({ payout_status: 'on_hold', auto_complete_at: null })
     .eq('id', order.id);
 
+  const buyer = await getProfileById(supabase, userId);
+  void notifyUser({
+    userId: order.seller_id,
+    category: 'order',
+    type: 'dispute_opened',
+    title: 'Dispute opened on your sale',
+    body: order.listing_title,
+    deepLink: `checkout/order?id=${encodeURIComponent(order.id)}`,
+    data: { orderId: order.id },
+    email: orderDisputeOpenedEmail({
+      orderId: order.id,
+      listingTitle: order.listing_title,
+      total: order.total,
+      buyerName: buyer?.username ?? 'buyer',
+      reason: parsed.data.reason.trim(),
+    }),
+  });
+  void notifyUser({
+    userId: order.seller_id,
+    category: 'order',
+    type: 'payout_on_hold',
+    title: 'Payout on hold',
+    body: order.listing_title,
+    deepLink: 'profile/orders',
+    data: { orderId: order.id },
+    email: orderPayoutStatusEmail({
+      orderId: order.id,
+      listingTitle: order.listing_title,
+      total: order.total,
+      payoutStatus: 'on_hold',
+    }),
+    skipPush: true,
+  });
+
   return res.json({ ok: true, disputeId: dispute.id });
 });
 
@@ -595,6 +715,24 @@ router.post('/orders/:id/dispute/respond', requireAuth, async (req, res) => {
     .update({ seller_response: parsed.data.response.trim(), status: 'under_review' })
     .eq('id', dispute.id);
   if (error) return handleSupabaseError(res, error);
+
+  const preview = parsed.data.response.trim().slice(0, 120);
+  void notifyUser({
+    userId: order.buyer_id,
+    category: 'order',
+    type: 'dispute_response',
+    title: 'Seller responded to your dispute',
+    body: order.listing_title,
+    deepLink: `checkout/order?id=${encodeURIComponent(order.id)}`,
+    data: { orderId: order.id },
+    email: orderDisputeUpdatedEmail({
+      orderId: order.id,
+      listingTitle: order.listing_title,
+      total: order.total,
+      responsePreview: preview,
+    }),
+  });
+
   return res.json({ ok: true });
 });
 
@@ -614,6 +752,24 @@ router.post('/orders/:id/dispute/evidence', requireAuth, async (req, res) => {
   const merged = [...(dispute.evidence_urls ?? []), ...parsed.data.evidenceUrls].slice(0, 12);
   const { error } = await supabase.from('order_disputes').update({ evidence_urls: merged }).eq('id', dispute.id);
   if (error) return handleSupabaseError(res, error);
+
+  const otherId = order.buyer_id === userId ? order.seller_id : order.buyer_id;
+  void notifyUser({
+    userId: otherId,
+    category: 'order',
+    type: 'dispute_evidence',
+    title: 'New dispute evidence',
+    body: order.listing_title,
+    deepLink: `checkout/order?id=${encodeURIComponent(order.id)}`,
+    data: { orderId: order.id },
+    email: orderDisputeUpdatedEmail({
+      orderId: order.id,
+      listingTitle: order.listing_title,
+      total: order.total,
+      responsePreview: 'New evidence was added.',
+    }),
+  });
+
   return res.json({ ok: true });
 });
 
@@ -638,6 +794,18 @@ router.post('/orders/:id/review', requireAuth, async (req, res) => {
   if (reviewError) return handleSupabaseError(res, reviewError);
 
   await supabase.from('orders').update({ reviewed: true }).eq('id', order.id);
+
+  const buyer = await getProfileById(supabase, userId);
+  void notifyUser({
+    userId: order.seller_id,
+    category: 'order',
+    type: 'review_received',
+    title: 'New review on your sale',
+    body: `${buyer?.username ?? 'A buyer'} rated you ${parsed.data.rating}★`,
+    deepLink: `checkout/order?id=${encodeURIComponent(order.id)}`,
+    data: { orderId: order.id },
+  });
+
   return res.json({ ok: true });
 });
 

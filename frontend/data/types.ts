@@ -285,6 +285,8 @@ export type UserProfile = {
   notifMessages?: boolean;
   notifLive?: boolean;
   notifListings?: boolean;
+  notifOrders?: boolean;
+  notifPushEnabled?: boolean;
   preferredLoginMethod?: PreferredLoginMethod;
   hasPassword?: boolean;
 };

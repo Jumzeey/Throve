@@ -12,6 +12,8 @@ export type NotifyUserInput = {
   data?: Record<string, string>;
   deepLink?: string;
   email?: EmailContent;
+  /** Skip Expo push even when notif_push_enabled is on (e.g. self confirmations). */
+  skipPush?: boolean;
 };
 
 /** In-app row + optional email + Expo push. Never throws. */
@@ -21,7 +23,7 @@ export async function notifyUser(input: NotifyUserInput): Promise<void> {
     const { data: profile, error: profileError } = await admin
       .from('profiles')
       .select(
-        'id, notif_offers, notif_messages, notif_live, notif_listings, notif_push_enabled, deactivated',
+        'id, notif_offers, notif_messages, notif_live, notif_listings, notif_orders, notif_push_enabled, deactivated',
       )
       .eq('id', input.userId)
       .maybeSingle();
@@ -35,6 +37,7 @@ export async function notifyUser(input: NotifyUserInput): Promise<void> {
     if (input.category === 'message' && profile.notif_messages === false) return;
     if (input.category === 'live' && profile.notif_live === false) return;
     if (input.category === 'listing' && profile.notif_listings === false) return;
+    if (input.category === 'order' && profile.notif_orders === false) return;
 
     const { error } = await admin.from('notifications').insert({
       user_id: input.userId,
@@ -57,7 +60,9 @@ export async function notifyUser(input: NotifyUserInput): Promise<void> {
               ? 'live'
               : input.category === 'listing'
                 ? 'listings'
-                : undefined;
+                : input.category === 'order'
+                  ? 'orders'
+                  : undefined;
       queueEmail({
         toUserId: input.userId,
         preference,
@@ -65,7 +70,7 @@ export async function notifyUser(input: NotifyUserInput): Promise<void> {
       });
     }
 
-    if (profile.notif_push_enabled !== false) {
+    if (!input.skipPush && profile.notif_push_enabled !== false) {
       await sendExpoPush({
         userId: input.userId,
         title: input.title,

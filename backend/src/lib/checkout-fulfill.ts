@@ -4,8 +4,8 @@ import { buyerProtectionFee, shippingFee } from './listing-catalog.js';
 import { getProfileById } from './mappers.js';
 import { createServiceClient } from './supabase.js';
 import type { DbRow } from './db-types.js';
-import { queueEmail } from './email/send.js';
 import { orderPlacedBuyerEmail, orderPlacedSellerEmail } from './email/templates/orders.js';
+import { notifyUser } from './notify.js';
 
 export type CheckoutPayload = {
   listingId: string;
@@ -166,8 +166,26 @@ export async function fulfillPaidCheckout(
     deliveryMethod: data.delivery_method,
     fromLive,
   };
-  queueEmail({ toUserId: userId, content: orderPlacedBuyerEmail(orderVars) });
-  queueEmail({ toUserId: listing.seller_id, content: orderPlacedSellerEmail(orderVars) });
+  void notifyUser({
+    userId,
+    category: 'order',
+    type: 'order_placed',
+    title: 'Order confirmed',
+    body: data.listing_title,
+    deepLink: `checkout/order?id=${encodeURIComponent(data.id)}`,
+    data: { orderId: data.id },
+    email: orderPlacedBuyerEmail(orderVars),
+  });
+  void notifyUser({
+    userId: listing.seller_id,
+    category: 'order',
+    type: 'order_placed_seller',
+    title: 'You made a sale',
+    body: data.listing_title,
+    deepLink: `checkout/order?id=${encodeURIComponent(data.id)}`,
+    data: { orderId: data.id },
+    email: orderPlacedSellerEmail(orderVars),
+  });
 
   return {
     id: data.id,

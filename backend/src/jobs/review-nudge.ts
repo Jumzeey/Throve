@@ -1,6 +1,6 @@
 import { createServiceClient } from '../lib/supabase.js';
-import { queueEmail } from '../lib/email/send.js';
 import { orderReviewNudgeEmail } from '../lib/email/templates/orders.js';
+import { notifyUser } from '../lib/notify.js';
 
 const INTERVAL_MS = 15 * 60_000;
 const NUDGE_AFTER_MS = 24 * 60 * 60 * 1000;
@@ -27,7 +27,6 @@ export function startReviewNudgeWorker() {
         .limit(25);
 
       if (error) {
-        // Column may not exist until migration is applied — fail soft.
         if (error.message.includes('review_nudge_sent')) {
           console.warn('[review-nudge] review_nudge_sent column missing; skip until migration');
           return;
@@ -48,13 +47,20 @@ export function startReviewNudgeWorker() {
           .maybeSingle();
         if (!claimed) continue;
 
-        queueEmail({
-          toUserId: String(order.buyer_id),
-          content: orderReviewNudgeEmail({
+        await notifyUser({
+          userId: String(order.buyer_id),
+          category: 'order',
+          type: 'review_nudge',
+          title: 'How was your order?',
+          body: String(order.listing_title),
+          deepLink: `checkout/order?id=${encodeURIComponent(String(order.id))}`,
+          data: { orderId: String(order.id) },
+          email: orderReviewNudgeEmail({
             orderId: String(order.id),
             listingTitle: String(order.listing_title),
             total: 0,
           }),
+          skipPush: true,
         });
       }
     } catch (err) {

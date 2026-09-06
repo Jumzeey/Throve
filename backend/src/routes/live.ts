@@ -2,12 +2,12 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { handleSupabaseError, sendError } from '../lib/errors.js';
 import type { DbRow } from '../lib/db-types.js';
-import { queueEmail } from '../lib/email/send.js';
 import {
   liveClaimReservedEmail,
-  liveStartedEmail,
+  liveEndedWithClaimEmail,
   liveUpcomingEmail,
 } from '../lib/email/templates/live.js';
+import { notifyFollowersOfLive } from '../lib/follows.js';
 import {
   attachPendingModerators,
   appointModerators,
@@ -17,6 +17,7 @@ import {
 import { mapLiveClaim, mapLiveSession, mapLiveStreamProduct } from '../lib/live-mappers.js';
 import { createLiveKitToken, getLiveKitUrl, isLiveKitConfigured } from '../lib/livekit.js';
 import { getProfileById, mapListing } from '../lib/mappers.js';
+import { notifyUser } from '../lib/notify.js';
 import { createServiceClient, createSupabaseClient } from '../lib/supabase.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
 
@@ -78,6 +79,44 @@ router.get('/host-access', requireAuth, async (req, res) => {
     canHostLive: Boolean(profile.can_host_live),
     invitationOnly: true,
   });
+});
+
+/** Service-assisted grant: set LIVE_HOST_GRANT_KEY and pass it as x-live-grant-key. */
+router.post('/host-access/grant', requireAuth, async (req, res) => {
+  const grantKey = process.env.LIVE_HOST_GRANT_KEY?.trim();
+  if (!grantKey || req.header('x-live-grant-key') !== grantKey) {
+    return sendError(res, 403, 'Forbidden');
+  }
+  const parsed = z.object({ username: z.string().min(1) }).safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, 'username required');
+
+  const admin = createServiceClient();
+  const { data: target } = await admin
+    .from('profiles')
+    .select('id, username, can_host_live')
+    .ilike('username', parsed.data.username.trim().replace(/^@/, ''))
+    .maybeSingle();
+  if (!target) return sendError(res, 404, 'User not found');
+  if (target.can_host_live) {
+    return res.json({ ok: true, alreadyGranted: true, username: target.username });
+  }
+
+  const { error } = await admin.from('profiles').update({ can_host_live: true }).eq('id', target.id);
+  if (error) return handleSupabaseError(res, error);
+
+  const { liveHostAccessGrantedEmail } = await import('../lib/email/templates/live.js');
+  void notifyUser({
+    userId: String(target.id),
+    category: 'live',
+    type: 'live_host_access_granted',
+    title: 'Live hosting unlocked',
+    body: 'You’re cleared to host live sessions on Throve.',
+    deepLink: 'live/host-access',
+    email: liveHostAccessGrantedEmail(),
+    skipPush: true,
+  });
+
+  return res.json({ ok: true, username: target.username });
 });
 
 router.get('/sessions', optionalAuth, async (req, res) => {
@@ -276,23 +315,36 @@ router.post('/sessions', requireAuth, async (req, res) => {
   const hostUsername = host?.username ?? 'unknown';
 
   if (scheduled && parsed.data.scheduledAt) {
-    queueEmail({
-      toUserId: userId,
-      content: liveUpcomingEmail({
+    void notifyUser({
+      userId,
+      category: 'live',
+      type: 'live_scheduled',
+      title: 'Live scheduled',
+      body: data.title,
+      deepLink: `live/${data.id}`,
+      data: { sessionId: data.id },
+      email: liveUpcomingEmail({
         sessionId: data.id,
         hostUsername,
         title: data.title,
         startTimeLabel: formatStart(parsed.data.scheduledAt),
       }),
     });
+    void notifyFollowersOfLive({
+      sellerId: userId,
+      sellerUsername: hostUsername,
+      sessionId: data.id,
+      title: data.title,
+      kind: 'upcoming',
+      startTimeLabel: formatStart(parsed.data.scheduledAt),
+    });
   } else {
-    queueEmail({
-      toUserId: userId,
-      content: liveStartedEmail({
-        sessionId: data.id,
-        hostUsername,
-        title: data.title,
-      }),
+    void notifyFollowersOfLive({
+      sellerId: userId,
+      sellerUsername: hostUsername,
+      sessionId: data.id,
+      title: data.title,
+      kind: 'started',
     });
   }
 
@@ -359,7 +411,25 @@ router.post('/moderators', requireAuth, async (req, res) => {
 router.delete('/moderators/:username', requireAuth, async (req, res) => {
   const { userId } = req as AuthedRequest;
   const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : undefined;
-  await removeModerator(userId, String(req.params.username), sessionId);
+  const username = String(req.params.username);
+  const admin = createServiceClient();
+  const { data: modProfile } = await admin
+    .from('profiles')
+    .select('id, username')
+    .ilike('username', username.trim().replace(/^@/, ''))
+    .maybeSingle();
+  await removeModerator(userId, username, sessionId);
+  if (modProfile?.id) {
+    void notifyUser({
+      userId: String(modProfile.id),
+      category: 'live',
+      type: 'live_moderator_removed',
+      title: 'Moderator access removed',
+      body: 'You’re no longer a live moderator for this host.',
+      deepLink: '(tabs)/live',
+      skipPush: true,
+    });
+  }
   return res.json({ ok: true });
 });
 
@@ -378,13 +448,12 @@ router.post('/sessions/:id/start', requireAuth, async (req, res) => {
   const products = await loadProducts(supabase, data.id);
   const hostUsername = host?.username ?? 'unknown';
 
-  queueEmail({
-    toUserId: userId,
-    content: liveStartedEmail({
-      sessionId: data.id,
-      hostUsername,
-      title: data.title,
-    }),
+  void notifyFollowersOfLive({
+    sellerId: userId,
+    sellerUsername: hostUsername,
+    sessionId: data.id,
+    title: data.title,
+    kind: 'started',
   });
 
   return res.json(mapLiveSession(data, hostUsername, products));
@@ -430,6 +499,38 @@ router.post('/sessions/:id/end', requireAuth, async (req, res) => {
       .eq('id', req.params.id)
       .eq('host_id', userId);
     if (error) return handleSupabaseError(res, error);
+
+    const service = createServiceClient();
+    const { data: openClaims } = await service
+      .from('live_claims')
+      .select('id, user_id, listing_id')
+      .eq('live_session_id', req.params.id)
+      .eq('status', 'active')
+      .limit(100);
+    for (const claim of openClaims ?? []) {
+      let listingTitle = 'your item';
+      if (claim.listing_id) {
+        const { data: listing } = await service
+          .from('listings')
+          .select('title')
+          .eq('id', claim.listing_id)
+          .maybeSingle();
+        if (listing?.title) listingTitle = String(listing.title);
+      }
+      void notifyUser({
+        userId: String(claim.user_id),
+        category: 'live',
+        type: 'live_ended_with_claim',
+        title: 'Live ended — finish checkout',
+        body: listingTitle,
+        deepLink: `live/${req.params.id}`,
+        data: { sessionId: String(req.params.id), claimId: String(claim.id) },
+        email: liveEndedWithClaimEmail({
+          sessionId: String(req.params.id),
+          listingTitle,
+        }),
+      });
+    }
   }
 
   const products = await loadProducts(supabase, String(req.params.id));
@@ -660,14 +761,37 @@ router.post('/sessions/:id/products/:productId/claim', requireAuth, async (req, 
       }
     }
 
-    queueEmail({
-      toUserId: userId,
-      content: liveClaimReservedEmail({
+    void notifyUser({
+      userId,
+      category: 'live',
+      type: 'live_claim_reserved',
+      title: 'Item reserved',
+      body: listingTitle,
+      deepLink: `live/${req.params.id}`,
+      data: { sessionId: String(req.params.id) },
+      email: liveClaimReservedEmail({
         sessionId: String(req.params.id),
         listingTitle,
         expiresInMinutes: Math.round(CLAIM_TTL_SECONDS / 60),
       }),
     });
+
+    const { data: liveSession } = await service
+      .from('live_sessions')
+      .select('host_id')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (liveSession?.host_id && liveSession.host_id !== userId) {
+      void notifyUser({
+        userId: String(liveSession.host_id),
+        category: 'live',
+        type: 'live_claim_host',
+        title: 'New claim on your live',
+        body: `${profile?.username ?? 'A viewer'} claimed ${listingTitle}`,
+        deepLink: `live/${req.params.id}`,
+        data: { sessionId: String(req.params.id) },
+      });
+    }
 
     return res.json(mapLiveClaim(claim, profile?.username ?? 'unknown'));
   } catch (err) {
@@ -820,14 +944,37 @@ router.post('/sessions/:id/claim/:listingId', requireAuth, async (req, res) => {
       .eq('id', req.params.listingId)
       .maybeSingle();
 
-    queueEmail({
-      toUserId: userId,
-      content: liveClaimReservedEmail({
+    void notifyUser({
+      userId,
+      category: 'live',
+      type: 'live_claim_reserved',
+      title: 'Item reserved',
+      body: (listing?.title as string) || 'your item',
+      deepLink: `live/${req.params.id}`,
+      data: { sessionId: String(req.params.id) },
+      email: liveClaimReservedEmail({
         sessionId: String(req.params.id),
         listingTitle: (listing?.title as string) || 'your item',
         expiresInMinutes: Math.round(CLAIM_TTL_SECONDS / 60),
       }),
     });
+
+    const { data: liveSession } = await service
+      .from('live_sessions')
+      .select('host_id')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (liveSession?.host_id && liveSession.host_id !== userId) {
+      void notifyUser({
+        userId: String(liveSession.host_id),
+        category: 'live',
+        type: 'live_claim_host',
+        title: 'New claim on your live',
+        body: `${profile?.username ?? 'A viewer'} claimed ${(listing?.title as string) || 'an item'}`,
+        deepLink: `live/${req.params.id}`,
+        data: { sessionId: String(req.params.id) },
+      });
+    }
 
     return res.json(mapLiveClaim(data as DbRow, profile?.username ?? 'unknown'));
   } catch (err) {

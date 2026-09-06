@@ -83,3 +83,53 @@ export async function notifyFollowersOfListing(input: {
     ),
   );
 }
+
+export async function notifyFollowersOfLive(input: {
+  sellerId: string;
+  sellerUsername: string;
+  sessionId: string;
+  title: string;
+  kind: 'started' | 'upcoming';
+  startTimeLabel?: string;
+}): Promise<void> {
+  const followerIds = await listFollowerIds(input.sellerId);
+  if (!followerIds.length) return;
+
+  const { followerLiveStartedEmail, followerLiveUpcomingEmail } = await import('./email/templates/live.js');
+  const { notifyUser } = await import('./notify.js');
+
+  const email =
+    input.kind === 'upcoming' && input.startTimeLabel
+      ? followerLiveUpcomingEmail({
+          sessionId: input.sessionId,
+          hostUsername: input.sellerUsername,
+          title: input.title,
+          startTimeLabel: input.startTimeLabel,
+        })
+      : followerLiveStartedEmail({
+          sessionId: input.sessionId,
+          hostUsername: input.sellerUsername,
+          title: input.title,
+        });
+
+  await Promise.all(
+    followerIds.map((userId) =>
+      notifyUser({
+        userId,
+        category: 'live',
+        type: input.kind === 'upcoming' ? 'followed_seller_live_upcoming' : 'followed_seller_live_started',
+        title:
+          input.kind === 'upcoming'
+            ? `@${input.sellerUsername} goes live soon`
+            : `@${input.sellerUsername} is live now`,
+        body: input.title,
+        data: {
+          sessionId: input.sessionId,
+          sellerUsername: input.sellerUsername,
+        },
+        deepLink: `live/${input.sessionId}`,
+        email,
+      }),
+    ),
+  );
+}

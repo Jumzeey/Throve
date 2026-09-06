@@ -2,11 +2,11 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { handleSupabaseError, sendError } from '../lib/errors.js';
 import type { DbRow } from '../lib/db-types.js';
-import { queueEmail } from '../lib/email/send.js';
-import { listingPublishedEmail } from '../lib/email/templates/listings.js';
+import { listingPublishedEmail, listingReservedEmail } from '../lib/email/templates/listings.js';
 import { notifyFollowersOfListing } from '../lib/follows.js';
 import { getProfileById, getSellerCards, getSellerMap, mapListing, escapeIlike } from '../lib/mappers.js';
 import { LISTING_CATALOG, categoriesForDepartment, shippingSummary, sizeIsRequiredForProductType } from '../lib/listing-catalog.js';
+import { notifyUser } from '../lib/notify.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
 
 const router = Router();
@@ -385,12 +385,19 @@ router.post('/:id/publish', requireAuth, async (req, res) => {
   const profile = await getProfileById(supabase, userId);
   const sellerUsername = profile?.username ?? 'unknown';
 
-  queueEmail({
-    toUserId: userId,
-    content: listingPublishedEmail({
+  void notifyUser({
+    userId,
+    category: 'account',
+    type: 'listing_published',
+    title: 'Listing published',
+    body: data.title,
+    deepLink: `product/${data.id}`,
+    data: { listingId: data.id },
+    email: listingPublishedEmail({
       listingId: data.id,
       title: data.title,
     }),
+    skipPush: true,
   });
 
   void notifyFollowersOfListing({
@@ -473,6 +480,25 @@ router.post('/:id/reserve', requireAuth, async (req, res) => {
 
   if (error) return handleSupabaseError(res, error);
 
+  const buyer = await getProfileById(supabase, userId);
+  const sellerUsername = (await getProfileById(supabase, listing.seller_id))?.username ?? 'unknown';
+  if (listing.seller_id !== userId) {
+    void notifyUser({
+      userId: listing.seller_id,
+      category: 'account',
+      type: 'listing_reserved',
+      title: 'Your listing was reserved',
+      body: data.title,
+      deepLink: `product/${data.id}`,
+      data: { listingId: data.id },
+      email: listingReservedEmail({
+        listingId: data.id,
+        title: data.title,
+        buyerUsername: buyer?.username ?? 'a buyer',
+      }),
+    });
+  }
+
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   if (req.body.liveSessionId) {
     await supabase.from('live_claims').upsert({
@@ -483,15 +509,29 @@ router.post('/:id/reserve', requireAuth, async (req, res) => {
     });
   }
 
-  const profile = await getProfileById(supabase, listing.seller_id);
-  return res.json(mapListing(data, profile?.username ?? 'unknown'));
+  return res.json(mapListing(data, sellerUsername));
 });
 
 router.post('/:id/release', requireAuth, async (req, res) => {
   const { supabase } = req as AuthedRequest;
+  const { data: listing } = await supabase.from('listings').select('*').eq('id', req.params.id).maybeSingle();
   const { error } = await supabase.from('listings').update({ status: 'available' }).eq('id', req.params.id);
   if (error) return handleSupabaseError(res, error);
   await supabase.from('live_claims').delete().eq('listing_id', req.params.id);
+
+  if (listing?.seller_id) {
+    void notifyUser({
+      userId: listing.seller_id,
+      category: 'account',
+      type: 'listing_released',
+      title: 'Reservation released',
+      body: String(listing.title ?? 'Your listing'),
+      deepLink: `product/${req.params.id}`,
+      data: { listingId: String(req.params.id) },
+      skipPush: true,
+    });
+  }
+
   return res.json({ ok: true });
 });
 

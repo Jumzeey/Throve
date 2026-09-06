@@ -34,6 +34,8 @@ type SettingsPatch = {
   notifMessages?: boolean;
   notifLive?: boolean;
   notifListings?: boolean;
+  notifOrders?: boolean;
+  notifPushEnabled?: boolean;
   preferredLoginMethod?: PreferredLoginMethod;
 };
 

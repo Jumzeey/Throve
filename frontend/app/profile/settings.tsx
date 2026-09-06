@@ -37,6 +37,8 @@ export default function SettingsScreen() {
   const [notifMessages, setNotifMessages] = useState(true);
   const [notifLive, setNotifLive] = useState(true);
   const [notifListings, setNotifListings] = useState(true);
+  const [notifOrders, setNotifOrders] = useState(true);
+  const [notifPushEnabled, setNotifPushEnabled] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,6 +61,8 @@ export default function SettingsScreen() {
     setNotifMessages(session.notifMessages !== false);
     setNotifLive(session.notifLive !== false);
     setNotifListings(session.notifListings !== false);
+    setNotifOrders(session.notifOrders !== false);
+    setNotifPushEnabled(session.notifPushEnabled !== false);
   }, [session]);
 
   useEffect(() => {
@@ -178,7 +182,13 @@ export default function SettingsScreen() {
   }
 
   async function toggleNotif(
-    key: 'notifOffers' | 'notifMessages' | 'notifLive' | 'notifListings',
+    key:
+      | 'notifOffers'
+      | 'notifMessages'
+      | 'notifLive'
+      | 'notifListings'
+      | 'notifOrders'
+      | 'notifPushEnabled',
     next: boolean,
   ) {
     if (!isConnected || busy) return;
@@ -187,12 +197,16 @@ export default function SettingsScreen() {
       notifMessages,
       notifLive,
       notifListings,
+      notifOrders,
+      notifPushEnabled,
     };
     const setters = {
       notifOffers: setNotifOffers,
       notifMessages: setNotifMessages,
       notifLive: setNotifLive,
       notifListings: setNotifListings,
+      notifOrders: setNotifOrders,
+      notifPushEnabled: setNotifPushEnabled,
     };
     setters[key](next);
     setNotifPhase('working');
@@ -282,7 +296,7 @@ export default function SettingsScreen() {
           </Pressable>
         </Section>
 
-        <Section label="Email notifications">
+        <Section label="Notifications">
           <NotifToggle
             title="Offers"
             body="When someone sends, accepts, or updates an offer."
@@ -301,7 +315,7 @@ export default function SettingsScreen() {
           <View style={styles.toggleDivider} />
           <NotifToggle
             title="Live"
-            body="When a live you care about is starting or you're invited to moderate."
+            body="When sellers you follow go live, claim holds, and moderator invites."
             value={notifLive}
             disabled={!isConnected || busy}
             onValueChange={(next) => void toggleNotif('notifLive', next)}
@@ -309,10 +323,26 @@ export default function SettingsScreen() {
           <View style={styles.toggleDivider} />
           <NotifToggle
             title="Followed sellers"
-            body="Email with the product photo and details when sellers you follow publish something new."
+            body="When sellers you follow publish a new listing."
             value={notifListings}
             disabled={!isConnected || busy}
             onValueChange={(next) => void toggleNotif('notifListings', next)}
+          />
+          <View style={styles.toggleDivider} />
+          <NotifToggle
+            title="Orders"
+            body="Order updates, tracking, delivery, disputes, and payouts."
+            value={notifOrders}
+            disabled={!isConnected || busy}
+            onValueChange={(next) => void toggleNotif('notifOrders', next)}
+          />
+          <View style={styles.toggleDivider} />
+          <NotifToggle
+            title="Push notifications"
+            body="Master switch for device push. In-app alerts and email still follow the categories above."
+            value={notifPushEnabled}
+            disabled={!isConnected || busy}
+            onValueChange={(next) => void toggleNotif('notifPushEnabled', next)}
           />
         </Section>
 

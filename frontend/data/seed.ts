@@ -405,6 +405,8 @@ export const DEMO_USER: UserProfile = {
   notifMessages: true,
   notifLive: true,
   notifListings: true,
+  notifOrders: true,
+  notifPushEnabled: true,
   preferredLoginMethod: 'password',
   hasPassword: true,
 };
