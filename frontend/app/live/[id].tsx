@@ -277,6 +277,14 @@ export default function LiveViewerScreen() {
                 key={comment.id}
                 comment={comment}
                 isModerator={live.isModerator(activeSession.id, comment.user)}
+                showActions={Boolean(
+                  session?.username &&
+                    (session.username === activeSession.host ||
+                      live.isModerator(activeSession.id, session.username)),
+                )}
+                onRemove={() => {
+                  void live.removeComment(activeSession.id, comment.id);
+                }}
               />
             ))}
           </ScrollView>

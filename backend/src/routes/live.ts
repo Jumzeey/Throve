@@ -11,6 +11,7 @@ import { notifyFollowersOfLive } from '../lib/follows.js';
 import {
   attachPendingModerators,
   appointModerators,
+  canModerateSession,
   listModeratorUsernames,
   removeModerator,
 } from '../lib/live-moderators.js';
@@ -885,6 +886,43 @@ router.post('/sessions/:id/comments', requireAuth, async (req, res) => {
     text: data.text,
     clientId: data.client_id ?? undefined,
   });
+});
+
+router.delete('/sessions/:id/comments/:commentId', requireAuth, async (req, res) => {
+  const { userId } = req as AuthedRequest;
+  const sessionId = String(req.params.id);
+  const commentId = String(req.params.commentId);
+  const access = await canModerateSession(sessionId, userId);
+  if (!access.session) return sendError(res, 404, 'Session not found');
+  if (!access.ok) return sendError(res, 403, 'Only the host or moderators can remove comments', 'FORBIDDEN');
+
+  const service = createServiceClient();
+  const { data: comment, error: commentError } = await service
+    .from('live_comments')
+    .select('id, user_id, text, session_id')
+    .eq('id', commentId)
+    .eq('session_id', sessionId)
+    .maybeSingle();
+  if (commentError) return handleSupabaseError(res, commentError);
+  if (!comment) return sendError(res, 404, 'Comment not found');
+
+  const { error } = await service.from('live_comments').delete().eq('id', commentId).eq('session_id', sessionId);
+  if (error) return handleSupabaseError(res, error);
+
+  if (comment.user_id && comment.user_id !== userId) {
+    void notifyUser({
+      userId: String(comment.user_id),
+      category: 'live',
+      type: 'live_comment_removed',
+      title: 'Comment removed',
+      body: 'A moderator removed your comment from the live.',
+      deepLink: `live/${sessionId}`,
+      data: { sessionId, commentId },
+      skipPush: true,
+    });
+  }
+
+  return res.json({ ok: true, id: commentId });
 });
 
 // Legacy pin by listing id → pin matching stream product

@@ -102,3 +102,24 @@ export async function removeModerator(hostId: string, username: string, sessionI
   query = sessionId ? query.eq('live_session_id', sessionId) : query.is('live_session_id', null);
   await query;
 }
+
+/** True if user is the session host or an appointed moderator for that session. */
+export async function canModerateSession(sessionId: string, userId: string) {
+  const admin = createServiceClient();
+  const { data: session } = await admin
+    .from('live_sessions')
+    .select('id, host_id')
+    .eq('id', sessionId)
+    .maybeSingle();
+  if (!session) return { ok: false as const, session: null };
+  if (session.host_id === userId) return { ok: true as const, session, role: 'host' as const };
+
+  const { data: mod } = await admin
+    .from('live_moderators')
+    .select('id')
+    .eq('live_session_id', sessionId)
+    .eq('moderator_id', userId)
+    .maybeSingle();
+  if (mod) return { ok: true as const, session, role: 'moderator' as const };
+  return { ok: false as const, session };
+}

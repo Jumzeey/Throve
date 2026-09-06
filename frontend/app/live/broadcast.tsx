@@ -269,7 +269,9 @@ export default function LiveBroadcastScreen() {
                   isModerator={live.isModerator(sessionId, comment.user)}
                   showActions
                   onLongPress={() => setActionComment(comment)}
-                  onRemove={() => live.removeComment(sessionId, comment.id)}
+                  onRemove={() => {
+                    void live.removeComment(sessionId, comment.id);
+                  }}
                 />
               ))}
             </ScrollView>
@@ -318,7 +320,10 @@ export default function LiveBroadcastScreen() {
         comment={actionComment}
         onClose={() => setActionComment(null)}
         onRemove={() => {
-          if (actionComment) live.removeComment(sessionId, actionComment.id);
+          if (actionComment) {
+            void live.removeComment(sessionId, actionComment.id);
+            setActionComment(null);
+          }
         }}
         onPin={() => setNotice('Comment pinned for moderators')}
         onMute={() => {

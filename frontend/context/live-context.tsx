@@ -51,7 +51,7 @@ type LiveContextValue = {
   resolveListing: (id?: string) => Listing | undefined;
   listingStatus: (id?: string) => ListingStatus | undefined;
   sendComment: (sessionId: string, user: string, text: string) => Promise<void>;
-  removeComment: (sessionId: string, commentId: string) => void;
+  removeComment: (sessionId: string, commentId: string) => Promise<void>;
   toggleConnection: (sessionId: string) => void;
   pinProduct: (sessionId: string, productId: string) => Promise<void>;
   pinListing: (sessionId: string, listingId: string) => Promise<void>;
@@ -233,6 +233,18 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         )
         .on(
           'postgres_changes',
+          { event: 'DELETE', schema: 'public', table: 'live_comments', filter: `session_id=eq.${sessionId}` },
+          (payload) => {
+            const row = payload.old as { id?: string } | undefined;
+            if (!row?.id) return;
+            setCommentsBySession((current) => ({
+              ...current,
+              [sessionId]: (current[sessionId] ?? []).filter((comment) => comment.id !== row.id),
+            }));
+          },
+        )
+        .on(
+          'postgres_changes',
           { event: '*', schema: 'public', table: 'live_stream_products', filter: `live_session_id=eq.${sessionId}` },
           (payload) => {
             const row = payload.new as Record<string, unknown> | undefined;
@@ -364,7 +376,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const removeComment = useCallback((sessionId: string, commentId: string) => {
+  const removeComment = useCallback(async (sessionId: string, commentId: string) => {
+    await apiFetch(`/live/sessions/${sessionId}/comments/${commentId}`, { method: 'DELETE' });
     setCommentsBySession((current) => ({
       ...current,
       [sessionId]: (current[sessionId] ?? []).filter((comment) => comment.id !== commentId),

@@ -236,6 +236,47 @@ async function main() {
     lk.status === 503 ? 'LiveKit unavailable' : lk.json?.message || String(lk.status),
   );
 
+  // --- Comments + moderator remove ---
+  const viewerComment = await api(viewer.token, `/live/sessions/${sessionId}/comments`, {
+    method: 'POST',
+    body: { text: 'E2E viewer comment — please remove me' },
+  });
+  assert('comment.viewer_post', viewerComment.status === 201, viewerComment.json?.id || viewerComment.json?.message);
+  const viewerCommentId = viewerComment.json?.id;
+
+  const hostComment = await api(hostToken, `/live/sessions/${sessionId}/comments`, {
+    method: 'POST',
+    body: { text: 'E2E host hello' },
+  });
+  assert('comment.host_post', hostComment.status === 201, hostComment.json?.id || hostComment.json?.message);
+
+  const listed = await api(viewer.token, `/live/sessions/${sessionId}/comments`);
+  const listedIds = Array.isArray(listed.json) ? listed.json.map((c) => c.id) : [];
+  assert(
+    'comment.list',
+    listed.status === 200 && listedIds.includes(viewerCommentId) && listedIds.includes(hostComment.json?.id),
+    `count=${listedIds.length}`,
+  );
+
+  const forbidden = await api(viewer.token, `/live/sessions/${sessionId}/comments/${hostComment.json?.id}`, {
+    method: 'DELETE',
+  });
+  assert('comment.viewer_cannot_delete', forbidden.status === 403, `status=${forbidden.status}`);
+
+  const tRm = Date.now();
+  const modDelete = await api(mod.token, `/live/sessions/${sessionId}/comments/${viewerCommentId}`, {
+    method: 'DELETE',
+  });
+  assert('comment.mod_delete', modDelete.status === 200 && modDelete.json?.ok === true, modDelete.json?.message || String(modDelete.status));
+
+  await new Promise((r) => setTimeout(r, 1200));
+  const afterDelete = await api(hostToken, `/live/sessions/${sessionId}/comments`);
+  const afterIds = Array.isArray(afterDelete.json) ? afterDelete.json.map((c) => c.id) : [];
+  assert('comment.gone_after_mod_delete', !afterIds.includes(viewerCommentId), `stillHas=${afterIds.includes(viewerCommentId)}`);
+
+  const rmNotif = await notificationsSince(viewer.token, tRm, ['live_comment_removed']);
+  assert('comment.removed_notif', rmNotif.items.length >= 1, rmNotif.items[0]?.title || 'none');
+
   // --- Claim ---
   const tClaim = Date.now();
   if (!productId) {
