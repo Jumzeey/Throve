@@ -89,6 +89,8 @@ export type LiveStreamProduct = {
   photoUrls?: string[];
   category?: string;
   department?: string;
+  size?: string;
+  condition?: string;
 };
 
 export type LiveSession = {

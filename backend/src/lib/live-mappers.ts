@@ -15,6 +15,8 @@ export type LiveStreamProductDto = {
   photoUrls?: string[];
   category?: string;
   department?: string;
+  size?: string;
+  condition?: string;
 };
 
 export type LiveClaimDto = {
@@ -47,6 +49,8 @@ export function mapLiveStreamProduct(row: DbRow, listing?: DbRow | null): LiveSt
     photoUrls: Array.isArray(listing?.photo_urls) ? (listing.photo_urls as string[]) : undefined,
     category: listing?.category ? String(listing.category) : undefined,
     department: listing?.department ? String(listing.department) : undefined,
+    size: listing?.size ? String(listing.size) : undefined,
+    condition: listing?.condition ? String(listing.condition) : undefined,
   };
 }
 

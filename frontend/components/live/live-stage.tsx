@@ -1,6 +1,6 @@
 import { ModeratorBadge } from '@/components/ui/status-chip';
+import { AppImage } from '@/components/ui/app-image';
 import {
-  ChevronBackIcon,
   CloseIcon,
   EyeIcon,
   MoreHorizontalIcon,
@@ -175,19 +175,25 @@ export function LiveIconButton({ onPress, children }: { onPress?: () => void; ch
 export function LiveHostChip({
   host,
   subtitle,
+  photoUrl,
   onPress,
 }: {
   host: string;
   subtitle?: string;
+  photoUrl?: string | null;
   onPress?: () => void;
 }) {
   return (
     <Pressable onPress={onPress} style={styles.hostChip}>
       <View style={styles.hostAvatar}>
-        <UserIcon size={17} color={Palette.muted3} />
+        {photoUrl ? (
+          <AppImage source={photoUrl} style={styles.hostAvatarImage} />
+        ) : (
+          <UserIcon size={17} color={Palette.muted3} />
+        )}
       </View>
       <View>
-        <Text style={styles.hostName}>@{host}</Text>
+        <Text style={styles.hostName}>{host}</Text>
         {subtitle ? <Text style={styles.hostSub}>{subtitle}</Text> : null}
       </View>
     </Pressable>
@@ -438,9 +444,6 @@ export function LiveViewerTopBar({
 }) {
   return (
     <View style={styles.hostTopBar}>
-      <LiveIconButton onPress={onClose}>
-        <ChevronBackIcon color={Palette.ivory} />
-      </LiveIconButton>
       <LiveBadgeRow viewers={viewers} />
       <View style={styles.hostTopSpacer} />
       {onMore ? (
@@ -448,7 +451,60 @@ export function LiveViewerTopBar({
           <MoreHorizontalIcon />
         </LiveIconButton>
       ) : null}
+      <LiveIconButton onPress={onClose}>
+        <CloseIcon color={Palette.ivory} size={16} />
+      </LiveIconButton>
     </View>
+  );
+}
+
+export function LiveReportSheet({
+  visible,
+  onClose,
+  onReportSession,
+  onReportUser,
+  onReportListing,
+  onLeave,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onReportSession: () => void;
+  onReportUser: () => void;
+  onReportListing: () => void;
+  onLeave: () => void;
+}) {
+  const { sheetBottom } = useScreenInsets();
+  const actions = [
+    { label: 'Report live session', destructive: false, onPress: onReportSession },
+    { label: 'Report user', destructive: false, onPress: onReportUser },
+    { label: 'Report listing', destructive: false, onPress: onReportListing },
+    { label: 'Leave live', destructive: true, onPress: onLeave },
+  ];
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.sheetOverlay} onPress={onClose}>
+        <View style={[styles.sheetCard, { paddingBottom: sheetBottom }]} onStartShouldSetResponder={() => true}>
+          <Text style={styles.reportSheetTitle}>Report controls</Text>
+          {actions.map((action, index) => (
+            <View key={action.label}>
+              {index > 0 ? <View style={styles.sheetDivider} /> : null}
+              <Pressable
+                onPress={() => {
+                  action.onPress();
+                  onClose();
+                }}
+                style={styles.sheetAction}
+              >
+                <Text style={[styles.sheetActionLabel, action.destructive && styles.sheetActionDanger]}>
+                  {action.label}
+                </Text>
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -543,11 +599,16 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
+    overflow: 'hidden',
     backgroundColor: Palette.border,
     borderWidth: 1,
     borderColor: Palette.borderSoft,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  hostAvatarImage: {
+    width: 34,
+    height: 34,
   },
   hostName: {
     fontSize: 13,
@@ -559,6 +620,12 @@ const styles = StyleSheet.create({
     fontSize: 10.5,
     fontFamily: Typography.body,
     color: 'rgba(255,247,240,0.66)',
+  },
+  reportSheetTitle: {
+    fontSize: 14,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.espresso,
+    marginBottom: 6,
   },
   commentRow: {
     flexDirection: 'row',
@@ -781,7 +848,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 16,
   },
   hostTopSpacer: {
     flex: 1,

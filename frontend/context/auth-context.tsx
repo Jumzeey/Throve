@@ -93,6 +93,7 @@ type AuthContextValue = {
   updateSettings: (input: SettingsPatch) => Promise<void>;
   deactivateAccount: () => Promise<void>;
   logout: () => Promise<void>;
+  refreshSession: () => Promise<UserProfile | null>;
 };
 
 function toPublicProfile(profile: Pick<UserProfile, 'username' | 'bio' | 'location' | 'photoUri'>): PublicProfile {
@@ -712,6 +713,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPendingSignup(null);
   }, [applySession, clearAuthResumeFlow]);
 
+  const refreshSession = useCallback(async () => {
+    return hydrateProfile({ force: true });
+  }, [hydrateProfile]);
+
   const value = useMemo(
     () => ({
       isReady,
@@ -740,6 +745,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       updateSettings,
       deactivateAccount,
       logout,
+      refreshSession,
     }),
     [
       completeMagicLink,
@@ -755,6 +761,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       persistAuthResume,
       publicProfiles,
+      refreshSession,
       requestMagicLink,
       requestRecovery,
       sendPasswordOtp,

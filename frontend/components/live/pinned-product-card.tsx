@@ -110,10 +110,8 @@ export function PinnedProductCard({
           A viewer is completing checkout. If they don't finish, it returns to Available.
         </Text>
       ) : null}
-      {sold ? (
-        <Text style={[styles.footnote, styles.footnoteCenter]}>
-          {role === 'host' ? "Sold items can't be claimed or bought again." : 'Sold in this live'}
-        </Text>
+      {sold && role === 'host' ? (
+        <Text style={[styles.footnote, styles.footnoteCenter]}>Sold items can't be claimed or bought again.</Text>
       ) : null}
     </View>
   );

@@ -73,7 +73,7 @@ export default function SellScreen() {
   }, [refresh]);
 
   function goLive() {
-    router.push(session?.canHostLive ? '/live/prepare' : '/live/host-access');
+    router.push('/live/host-access');
   }
 
   function openNew() {

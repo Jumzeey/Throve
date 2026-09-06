@@ -30,7 +30,7 @@ const OFFER: Record<OfferChipVariant, ChipConfig> = {
 
 const LIVE: Record<LiveChipVariant, ChipConfig> = {
   pinned: { label: 'PINNED', color: Palette.plum, border: 'transparent' },
-  available: { label: 'AVAILABLE', color: Palette.successText, border: Palette.successBorder },
+  available: { label: 'AVAILABLE', color: Palette.successText, border: Palette.successBorder, bg: Palette.successBg },
   reserved: { label: 'RESERVED', color: Palette.warningText, border: '#E9CFA6', bg: Palette.warningBg },
   your_claim: { label: 'YOUR CLAIM', color: Palette.warningText, border: '#E9CFA6', bg: Palette.warningBg },
   sold: { label: 'SOLD', color: Palette.ivory, border: Palette.espresso, bg: Palette.espresso },

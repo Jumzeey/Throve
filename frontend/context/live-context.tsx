@@ -97,6 +97,8 @@ function mapProductRow(row: Record<string, unknown>): LiveStreamProduct {
         : undefined,
     category: row.category ? String(row.category) : undefined,
     department: row.department ? String(row.department) : undefined,
+    size: row.size ? String(row.size) : undefined,
+    condition: row.condition ? String(row.condition) : undefined,
   };
 }
 

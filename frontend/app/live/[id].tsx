@@ -3,6 +3,7 @@ import {
   LiveComposer,
   LiveConnectionOverlay,
   LiveHostChip,
+  LiveReportSheet,
   LiveStage,
   LiveViewerTopBar,
 } from '@/components/live/live-stage';
@@ -12,6 +13,7 @@ import type { LiveConnection, LiveKitCredentials } from '@/data/types';
 import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
 import { useLive, useLiveClock } from '@/context/live-context';
+import { apiFetch } from '@/lib/api';
 import { formatCountdown, formatNaira } from '@/lib/format';
 import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
@@ -33,6 +35,7 @@ export default function LiveViewerScreen() {
   const [credentials, setCredentials] = useState<LiveKitCredentials | null>(null);
   const [claimError, setClaimError] = useState<string | null>(null);
   const [claiming, setClaiming] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   const claimingRef = useRef(false);
 
   const sessionId = Array.isArray(id) ? id[0] : id;
@@ -71,15 +74,19 @@ export default function LiveViewerScreen() {
     claim && claim.status === 'active' && claim.productId === pinnedProduct?.id,
   );
   const claimedByMe = Boolean(hasActiveClaim && session?.username === claim?.username);
-  const reservedByOther = Boolean(hasActiveClaim && !claimedByMe);
-  const available = pinnedProduct?.available ?? 0;
+  const reservedCount = pinnedProduct?.reservedCount ?? 0;
+  const soldCount = pinnedProduct?.soldCount ?? 0;
+  const stock = pinnedProduct?.stock ?? 0;
+  const available = pinnedProduct?.available ?? Math.max(0, stock - reservedCount - soldCount);
 
   const productVariant: PinnedProductVariant = useMemo(() => {
-    if (available <= 0) return 'sold';
+    if (!pinnedProduct) return 'available';
+    const soldOut = soldCount >= stock || (available <= 0 && reservedCount <= 0);
+    if (soldOut) return 'sold';
     if (claimedByMe) return 'your_claim';
-    if (reservedByOther) return 'reserved';
+    if (reservedCount > 0 && available <= 0) return 'reserved';
     return 'available';
-  }, [available, claimedByMe, reservedByOther]);
+  }, [available, claimedByMe, pinnedProduct, reservedCount, soldCount, stock]);
 
   const onConnectionChange = useCallback(
     (state: LiveConnection) => {
@@ -143,8 +150,34 @@ export default function LiveViewerScreen() {
     router.replace('/(tabs)/live');
   }
 
-  function report() {
-    setNote('Live session reported.');
+  function openSeller() {
+    router.push({ pathname: '/seller/[username]', params: { username: activeSession.host } });
+  }
+
+  async function submitReport(kind: 'session' | 'user' | 'listing') {
+    if (kind === 'listing' && !pinnedProduct?.listingId) {
+      setNote('No listing to report right now.');
+      setTimeout(() => setNote(null), 2200);
+      return;
+    }
+    try {
+      await apiFetch(`/live/sessions/${activeSession.id}/report`, {
+        method: 'POST',
+        body: JSON.stringify({
+          kind,
+          listingId: kind === 'listing' ? pinnedProduct?.listingId ?? null : null,
+        }),
+      });
+      setNote(
+        kind === 'session'
+          ? 'Live session reported.'
+          : kind === 'user'
+            ? 'User reported.'
+            : 'Listing reported.',
+      );
+    } catch {
+      setNote("We couldn't send that report. Try again.");
+    }
     setTimeout(() => setNote(null), 2200);
   }
 
@@ -168,6 +201,29 @@ export default function LiveViewerScreen() {
     }
   }
 
+  async function buyNow() {
+    if (!pinnedProduct || claimingRef.current) return;
+    claimingRef.current = true;
+    setClaiming(true);
+    setClaimError(null);
+    try {
+      const nextClaim = await live.claimProduct(activeSession.id, pinnedProduct.id, 1);
+      const started = await checkout.startCheckout({
+        listingId: pinnedProduct.listingId,
+        liveSessionId: activeSession.id,
+        liveStreamProductId: pinnedProduct.id,
+        claimId: nextClaim.id,
+        buyer: username,
+      });
+      if (started) router.push('/checkout/shipping');
+    } catch (err) {
+      setClaimError(err instanceof Error ? err.message : 'Claim failed');
+    } finally {
+      claimingRef.current = false;
+      setClaiming(false);
+    }
+  }
+
   async function goCheckout() {
     if (!pinnedProduct) return;
     const started = await checkout.startCheckout({
@@ -180,12 +236,14 @@ export default function LiveViewerScreen() {
     if (started) router.push('/checkout/shipping');
   }
 
-  const subtitle = [
-    pinnedListing?.size && pinnedListing.size !== '—' ? `Size ${pinnedListing.size}` : null,
-    pinnedListing?.condition,
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const sizeLabel =
+    pinnedProduct?.size && pinnedProduct.size !== '—'
+      ? pinnedProduct.size
+      : pinnedListing?.size && pinnedListing.size !== '—'
+        ? pinnedListing.size
+        : null;
+  const conditionLabel = pinnedProduct?.condition ?? pinnedListing?.condition;
+  const subtitle = [sizeLabel, conditionLabel].filter(Boolean).join(' · ');
 
   return (
     <View style={styles.screen}>
@@ -195,23 +253,18 @@ export default function LiveViewerScreen() {
           <Text style={styles.toastText}>{note}</Text>
         </View>
       ) : null}
-      <LiveStage
-        credentials={credentials}
-        isHost={false}
-        onConnectionChange={onConnectionChange}
-      >
+      <LiveStage credentials={credentials} isHost={false} onConnectionChange={onConnectionChange}>
         <View style={[styles.topArea, { paddingTop: top + 8 }]}>
           <LiveViewerTopBar
             viewers={activeSession.viewers}
             onClose={leave}
-            onMore={report}
+            onMore={() => setReportOpen(true)}
           />
           <LiveHostChip
             host={activeSession.host}
+            photoUrl={activeSession.hostPhotoUrl}
             subtitle={`${activeSession.title} · View profile`}
-            onPress={() =>
-              router.push({ pathname: '/seller/[username]', params: { username: activeSession.host } })
-            }
+            onPress={openSeller}
           />
         </View>
 
@@ -232,9 +285,7 @@ export default function LiveViewerScreen() {
         <LiveConnectionOverlay
           connection={connection}
           onLeave={leave}
-          onOpenProfile={() =>
-            router.push({ pathname: '/seller/[username]', params: { username: activeSession.host } })
-          }
+          onOpenProfile={openSeller}
           host={activeSession.host}
         />
 
@@ -252,16 +303,25 @@ export default function LiveViewerScreen() {
               claimError={claimError}
               claiming={claiming}
               onClaim={claimNow}
-              onBuyNow={claimNow}
+              onBuyNow={buyNow}
               onCheckout={goCheckout}
             />
           </View>
         ) : null}
 
         <View style={[styles.composerWrap, { paddingBottom: keyboard.height > 0 ? keyboard.height : sheetBottom }]}>
-          <LiveComposer value={draft} onChangeText={setDraft} onSend={send} />
+          <LiveComposer value={draft} onChangeText={setDraft} onSend={send} placeholder="Add a comment..." />
         </View>
       </LiveStage>
+
+      <LiveReportSheet
+        visible={reportOpen}
+        onClose={() => setReportOpen(false)}
+        onReportSession={() => void submitReport('session')}
+        onReportUser={() => void submitReport('user')}
+        onReportListing={() => void submitReport('listing')}
+        onLeave={leave}
+      />
     </View>
   );
 }

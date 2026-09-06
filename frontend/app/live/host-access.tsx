@@ -3,34 +3,61 @@ import { Button } from '@/components/ui/button';
 import { ChevronBackIcon, SpinnerArcIcon, VideoIcon } from '@/components/ui/icons';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
+import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
+import { apiFetch } from '@/lib/api';
 import { Redirect, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { StatusBar } from 'expo-status-bar';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-type AccessState = 'checking' | 'denied' | 'error' | 'offline';
+type AccessState = 'checking' | 'denied' | 'allowed' | 'error' | 'offline';
 
 export default function HostAccessScreen() {
   const router = useRouter();
   const { top, bottom } = useScreenInsets();
-  const { session, isReady } = useAuth();
+  const { session, isReady, refreshSession } = useAuth();
+  const { isConnected } = useNetworkStatus();
   const [accessState, setAccessState] = useState<AccessState>('checking');
+  const [checkKey, setCheckKey] = useState(0);
+
+  const checkAccess = useCallback(async () => {
+    if (!isReady) return;
+    if (!isConnected) {
+      setAccessState('offline');
+      return;
+    }
+    setAccessState('checking');
+    try {
+      const data = await apiFetch<{ canHostLive: boolean }>('/live/host-access');
+      if (data.canHostLive) {
+        await refreshSession();
+        setAccessState('allowed');
+        return;
+      }
+      setAccessState('denied');
+    } catch {
+      setAccessState('error');
+    }
+  }, [isConnected, isReady, refreshSession]);
 
   useEffect(() => {
-    if (!isReady) return;
-    const timer = setTimeout(() => setAccessState('denied'), 500);
-    return () => clearTimeout(timer);
-  }, [isReady]);
+    void checkAccess();
+  }, [checkAccess, checkKey]);
 
-  if (!isReady || accessState === 'checking') {
+  useEffect(() => {
+    if (!isConnected && accessState !== 'checking') {
+      setAccessState('offline');
+    }
+  }, [accessState, isConnected]);
+
+  if (!isReady) {
     return (
       <View style={[styles.screen, { paddingTop: top, paddingBottom: bottom }]}>
-        <Pressable onPress={() => router.back()} style={styles.back}>
-          <ChevronBackIcon color={Palette.ivory} />
-        </Pressable>
-        <View style={styles.center}>
+        <StatusBar style="light" />
+        <View style={styles.checkingBox}>
           <SpinnerArcIcon size={22} color={Palette.blush} />
-          <Text style={styles.checkingTitle}>Checking your live access…</Text>
+          <Text style={styles.checkingTitle}>Checking your live access...</Text>
         </View>
       </View>
     );
@@ -39,22 +66,42 @@ export default function HostAccessScreen() {
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
   }
-  if (session.canHostLive) {
+
+  if (accessState === 'allowed') {
     return <Redirect href="/live/prepare" />;
+  }
+
+  if (accessState === 'checking') {
+    return (
+      <View style={[styles.screen, { paddingTop: top, paddingBottom: bottom }]}>
+        <StatusBar style="light" />
+        <Pressable onPress={() => router.back()} style={styles.back} hitSlop={8}>
+          <ChevronBackIcon color={Palette.ivory} />
+        </Pressable>
+        <View style={styles.checkingBox}>
+          <SpinnerArcIcon size={22} color={Palette.blush} />
+          <Text style={styles.checkingTitle}>Checking your live access...</Text>
+        </View>
+      </View>
+    );
   }
 
   return (
     <View style={[styles.screen, { paddingTop: top, paddingBottom: bottom }]}>
-      <Pressable onPress={() => router.back()} style={styles.back}>
+      <StatusBar style="light" />
+      <Pressable onPress={() => router.back()} style={styles.back} hitSlop={8}>
         <ChevronBackIcon color={Palette.ivory} />
       </Pressable>
 
       <View style={styles.center}>
         {accessState === 'offline' ? (
-          <View style={styles.banner}>
-            <OfflineBanner title="No connection" message="Reconnect to check your live access." />
-          </View>
+          <OfflineBanner
+            title="No connection"
+            message="Reconnect to check your live access."
+            style={styles.banner}
+          />
         ) : null}
+
         {accessState === 'error' ? (
           <AlertBanner
             variant="error"
@@ -64,31 +111,60 @@ export default function HostAccessScreen() {
           />
         ) : null}
 
-        <View style={styles.iconCircle}>
-          <VideoIcon size={26} color={Palette.blush} />
-        </View>
-        <Text style={styles.title}>Live hosting is{'\n'}invitation only</Text>
-        <Text style={styles.copy}>
-          While Throve Live is in its early phase, only invited sellers can host a live session. Keep listing and
-          selling as usual. Hosting access may expand in the future.
-        </Text>
+        {accessState === 'denied' ? (
+          <>
+            <View style={styles.iconCircle}>
+              <VideoIcon size={26} color={Palette.blush} />
+            </View>
+            <Text style={styles.title}>Live hosting is{'\n'}invitation only</Text>
+            <Text style={styles.copy}>
+              While Throve Live is in its early phase, only invited sellers can host a live session. Keep listing and
+              selling as usual. Hosting access may expand in the future.
+            </Text>
+            <Button
+              label="Back to selling"
+              variant="dark"
+              onPress={() => router.replace('/(tabs)/sell')}
+              style={styles.primary}
+            />
+            <Pressable onPress={() => router.replace('/(tabs)')} style={styles.homeBtn}>
+              <Text style={styles.homeBtnLabel}>Go to Home</Text>
+            </Pressable>
+          </>
+        ) : null}
 
         {accessState === 'error' ? (
-          <Button
-            label="Try again"
-            variant="secondary"
-            onPress={() => setAccessState('checking')}
-            style={styles.primary}
-          />
-        ) : (
-          <Button label="Back to selling" variant="dark" onPress={() => router.replace('/(tabs)/sell')} style={styles.primary} />
-        )}
-        <Button label="Go to Home" variant="ghost" onPress={() => router.replace('/(tabs)')} style={styles.secondary} />
-        {accessState === 'error' ? (
-          <Button label="Start live · unavailable" disabled style={styles.disabled} />
+          <>
+            <Button
+              label="Try again"
+              variant="secondary"
+              onPress={() => setCheckKey((n) => n + 1)}
+              style={styles.primary}
+            />
+            <Button label="Start live · unavailable" disabled style={styles.disabled} />
+            <Text style={styles.hint}>Live can't start until access is confirmed.</Text>
+          </>
         ) : null}
-        {accessState === 'error' ? (
-          <Text style={styles.hint}>Live can't start until access is confirmed.</Text>
+
+        {accessState === 'offline' ? (
+          <>
+            <View style={styles.iconCircle}>
+              <VideoIcon size={26} color={Palette.blush} />
+            </View>
+            <Text style={styles.title}>Live hosting is{'\n'}invitation only</Text>
+            <Text style={styles.copy}>
+              While Throve Live is in its early phase, only invited sellers can host a live session. Keep listing and
+              selling as usual. Hosting access may expand in the future.
+            </Text>
+            <Button
+              label="Try again"
+              variant="secondary"
+              onPress={() => setCheckKey((n) => n + 1)}
+              style={styles.primary}
+            />
+            <Button label="Start live · unavailable" disabled style={styles.disabled} />
+            <Text style={styles.hint}>Live can't start until access is confirmed.</Text>
+          </>
         ) : null}
       </View>
     </View>
@@ -105,6 +181,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     alignSelf: 'flex-start',
   },
+  checkingBox: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
   center: {
     flex: 1,
     justifyContent: 'center',
@@ -114,6 +196,7 @@ const styles = StyleSheet.create({
   },
   banner: {
     width: '100%',
+    marginBottom: 4,
   },
   iconCircle: {
     width: 58,
@@ -125,7 +208,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   checkingTitle: {
-    marginTop: 9,
     fontSize: 13,
     fontFamily: Typography.bodySemiBold,
     color: Palette.ivory,
@@ -149,21 +231,28 @@ const styles = StyleSheet.create({
     width: '100%',
     minHeight: 50,
   },
-  secondary: {
+  homeBtn: {
     width: '100%',
     minHeight: 50,
     borderWidth: 1,
     borderColor: 'rgba(255,247,240,0.32)',
     borderRadius: Radius.button,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  homeBtnLabel: {
+    fontSize: 15,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.ivory,
   },
   disabled: {
     width: '100%',
-    minHeight: 44,
+    minHeight: 50,
   },
   hint: {
     fontSize: 11,
     lineHeight: 18,
     fontFamily: Typography.body,
-    color: Palette.muted,
+    color: 'rgba(255,247,240,0.5)',
   },
 });

@@ -70,6 +70,16 @@ function rpcErrorMessage(error: { message?: string; details?: string; hint?: str
   return { status: 400, message: error?.message ?? 'Request failed', code: 'RPC_ERROR' };
 }
 
+router.get('/host-access', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const profile = await getProfileById(supabase, userId);
+  if (!profile || profile.deactivated) return sendError(res, 401, 'Unauthorized');
+  return res.json({
+    canHostLive: Boolean(profile.can_host_live),
+    invitationOnly: true,
+  });
+});
+
 router.get('/sessions', optionalAuth, async (req, res) => {
   const supabase = publicClient(req as AuthedRequest);
   const recentEndedCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -178,6 +188,11 @@ router.post('/sessions', requireAuth, async (req, res) => {
     .safeParse(req.body);
 
   if (!parsed.success) return sendError(res, 400, 'Invalid input');
+
+  const hostProfile = await getProfileById(supabase, userId);
+  if (!hostProfile?.can_host_live) {
+    return sendError(res, 403, 'Live hosting is invitation only', 'HOST_ACCESS_DENIED');
+  }
 
   const scheduled = Boolean(parsed.data.scheduledAt?.trim());
   const productInputs =
@@ -759,6 +774,46 @@ router.get('/sessions/:id/listing/:listingId', optionalAuth, async (req, res) =>
   if (!data) return sendError(res, 404, 'Listing not found');
   const seller = await getProfileById(supabase, data.seller_id);
   return res.json(mapListing(data, seller?.username ?? 'unknown'));
+});
+
+router.post('/sessions/:id/report', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const parsed = z
+    .object({
+      kind: z.enum(['session', 'user', 'listing']),
+      listingId: z.string().uuid().optional().nullable(),
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, 'Invalid report');
+
+  const { data: sessionRow, error: sessionError } = await supabase
+    .from('live_sessions')
+    .select('id, host_id')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  if (sessionError) return handleSupabaseError(res, sessionError);
+  if (!sessionRow) return sendError(res, 404, 'Session not found');
+
+  const host = await getProfileById(supabase, sessionRow.host_id as string);
+  const listingId =
+    parsed.data.kind === 'listing' ? parsed.data.listingId ?? null : null;
+  if (parsed.data.kind === 'listing' && !listingId) {
+    return sendError(res, 400, 'listingId required');
+  }
+
+  const { data, error } = await supabase
+    .from('live_reports')
+    .insert({
+      reporter_id: userId,
+      live_session_id: req.params.id,
+      kind: parsed.data.kind,
+      target_username: host?.username ?? null,
+      listing_id: listingId,
+    })
+    .select('id')
+    .single();
+  if (error) return handleSupabaseError(res, error);
+  return res.status(201).json({ id: data.id, ok: true });
 });
 
 export default router;

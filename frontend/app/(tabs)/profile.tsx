@@ -189,7 +189,7 @@ export default function ProfileScreen() {
               icon={<VideoIcon size={18} color={Palette.plum} />}
               label="My live sessions"
               last
-              onPress={() => router.push(session.canHostLive ? '/live/prepare' : '/live/host-access')}
+              onPress={() => router.push('/live/host-access')}
             />
           </View>
 
