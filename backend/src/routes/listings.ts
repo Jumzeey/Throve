@@ -4,6 +4,7 @@ import { handleSupabaseError, sendError } from '../lib/errors.js';
 import type { DbRow } from '../lib/db-types.js';
 import { queueEmail } from '../lib/email/send.js';
 import { listingPublishedEmail } from '../lib/email/templates/listings.js';
+import { notifyFollowersOfListing } from '../lib/follows.js';
 import { getProfileById, getSellerCards, getSellerMap, mapListing, escapeIlike } from '../lib/mappers.js';
 import { LISTING_CATALOG, categoriesForDepartment, shippingSummary, sizeIsRequiredForProductType } from '../lib/listing-catalog.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
@@ -163,6 +164,30 @@ router.get('/search', optionalAuth, async (req, res) => {
     const message = err instanceof Error ? err.message : 'Search failed';
     return handleSupabaseError(res, { message });
   }
+});
+
+router.get('/following', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+
+  const { data: follows, error: followError } = await supabase
+    .from('seller_follows')
+    .select('seller_id')
+    .eq('follower_id', userId);
+  if (followError) return handleSupabaseError(res, followError);
+
+  const sellerIds = (follows ?? []).map((row) => row.seller_id as string);
+  if (!sellerIds.length) return res.json([]);
+
+  const { data, error } = await supabase
+    .from('listings')
+    .select('*')
+    .in('seller_id', sellerIds)
+    .eq('status', 'available')
+    .order('created_at', { ascending: false })
+    .limit(40);
+  if (error) return handleSupabaseError(res, error);
+
+  return res.json(await enrichListings(supabase, data ?? [], userId));
 });
 
 router.get('/saved/me', requireAuth, async (req, res) => {
@@ -358,6 +383,7 @@ router.post('/:id/publish', requireAuth, async (req, res) => {
 
   if (error) return handleSupabaseError(res, error);
   const profile = await getProfileById(supabase, userId);
+  const sellerUsername = profile?.username ?? 'unknown';
 
   queueEmail({
     toUserId: userId,
@@ -367,7 +393,19 @@ router.post('/:id/publish', requireAuth, async (req, res) => {
     }),
   });
 
-  return res.json(mapListing(data, profile?.username ?? 'unknown'));
+  void notifyFollowersOfListing({
+    sellerId: userId,
+    sellerUsername,
+    listingId: data.id,
+    listingTitle: data.title,
+    price: Number(data.price) || 0,
+    brand: data.brand ? String(data.brand) : undefined,
+    size: data.size ? String(data.size) : undefined,
+    condition: data.condition ? String(data.condition) : undefined,
+    photoUrl: Array.isArray(data.photo_urls) ? data.photo_urls[0] : undefined,
+  });
+
+  return res.json(mapListing(data, sellerUsername));
 });
 
 router.post('/:id/save', requireAuth, async (req, res) => {

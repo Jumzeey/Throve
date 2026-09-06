@@ -320,6 +320,16 @@ export function VideoIcon({ size = 26, color = Palette.blush, strokeWidth = 1.5 
   );
 }
 
+export function MicIcon({ size = 18, color = Palette.ivory, strokeWidth = 1.7 }: IconProps) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+      <Rect x={9} y={3} width={6} height={11} rx={3} />
+      <Path d="M6.5 11.5a5.5 5.5 0 0 0 11 0" />
+      <Path d="M12 17v3.5M9 20.5h6" />
+    </Svg>
+  );
+}
+
 export function CalendarIcon({ size = 17, color = Palette.muted, strokeWidth = 1.7 }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round">

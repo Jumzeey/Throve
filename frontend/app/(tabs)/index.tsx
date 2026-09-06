@@ -129,9 +129,10 @@ export default function HomeScreen() {
   const { top, tabScrollBottom } = useScreenInsets();
   const router = useRouter();
   const { session } = useAuth();
-  const { listings: catalog, toggleSave, refresh: refreshListings } = useListings();
+  const { listings: catalog, followingListings, toggleSave, refresh: refreshListings } = useListings();
   const { isConnected } = useNetworkStatus();
   const listings = useMemo(() => filterListings(catalog).slice(0, 4), [catalog]);
+  const followingFeed = useMemo(() => followingListings.slice(0, 6), [followingListings]);
   const { liveNow, upcoming, refresh: refreshLive } = useLive();
 
   const sellers = useMemo(() => Array.from(new Set(catalog.map((l) => l.seller))).slice(0, 3), [catalog]);
@@ -228,6 +229,38 @@ export default function HomeScreen() {
                 />
               ))}
             </View>
+          </View>
+        ) : null}
+
+        {session ? (
+          <View style={styles.section}>
+            <SectionHeading title="From sellers you follow" />
+            {followingFeed.length > 0 ? (
+              <View style={styles.listingsBody}>
+                <ListingGrid
+                  listings={followingFeed.map((listing) => (
+                    <ListingCard
+                      key={listing.id}
+                      listing={listing}
+                      meta="condition"
+                      showSave
+                      saved={Boolean(session.username && listing.savedBy.includes(session.username))}
+                      onSave={() => {
+                        void toggleSave(listing.id, session.username);
+                      }}
+                      onPress={() => router.push(`/product/${listing.id}`)}
+                    />
+                  ))}
+                />
+              </View>
+            ) : (
+              <View style={styles.listingsBody}>
+                <EmptyState
+                  title="Your feed is empty"
+                  message="Follow sellers you love — their new listings will show up here."
+                />
+              </View>
+            )}
           </View>
         ) : null}
 

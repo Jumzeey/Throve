@@ -26,6 +26,7 @@ export const PREVIEW_ERROR = 'Add a photo, then fill in title, department, categ
 type ListingsContextValue = {
   listings: Listing[];
   savedListings: Listing[];
+  followingListings: Listing[];
   loading: boolean;
   form: ListingForm;
   refresh: () => Promise<boolean>;
@@ -75,6 +76,7 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
   const { isReady, session } = useAuth();
   const [listings, setListings] = useState<Listing[]>([]);
   const [savedListings, setSavedListings] = useState<Listing[]>([]);
+  const [followingListings, setFollowingListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [form, setFormState] = useState<ListingForm>(EMPTY_LISTING_FORM);
 
@@ -84,6 +86,7 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
       const catalog = await apiFetch<Listing[]>('/listings');
       let mine: Listing[] = [];
       let saved: Listing[] = [];
+      let following: Listing[] = [];
       if (session) {
         try {
           mine = await apiFetch<Listing[]>('/listings/mine');
@@ -95,11 +98,17 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
         } catch {
           saved = [];
         }
+        try {
+          following = await apiFetch<Listing[]>('/listings/following');
+        } catch {
+          following = [];
+        }
       }
       const username = session?.username;
       const others = username ? catalog.filter((item) => item.seller !== username) : catalog;
       setListings(username ? [...mine, ...others] : catalog);
       setSavedListings(saved);
+      setFollowingListings(following);
       void fetchListingCatalog().catch(() => undefined);
       return true;
     } catch {
@@ -320,6 +329,7 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
     () => ({
       listings,
       savedListings,
+      followingListings,
       loading,
       form,
       refresh,
@@ -342,6 +352,7 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
     [
       canDelete,
       clearReservation,
+      followingListings,
       form,
       getListing,
       hideActiveForSeller,

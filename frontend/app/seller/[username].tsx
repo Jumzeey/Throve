@@ -1,5 +1,6 @@
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { AppImage } from '@/components/ui/app-image';
+import { Button } from '@/components/ui/button';
 import {
   ChatBubbleIcon,
   ChevronBackIcon,
@@ -38,8 +39,8 @@ export default function SellerProfileScreen() {
   const { isConnected } = useNetworkStatus();
   const { username: raw } = useLocalSearchParams<{ username: string }>();
   const username = Array.isArray(raw) ? raw[0] : raw;
-  const { session, publicProfiles, ensurePublicProfile } = useAuth();
-  const { listingsForSeller, loading: listingsLoading } = useListings();
+  const { session, publicProfiles, ensurePublicProfile, upsertPublicProfile } = useAuth();
+  const { listingsForSeller, loading: listingsLoading, refresh: refreshListings } = useListings();
   const checkout = useCheckout();
   const inbox = useInbox();
   const live = useLive();
@@ -51,6 +52,9 @@ export default function SellerProfileScreen() {
   const [stats, setStats] = useState({ avg: 0, count: 0 });
   const [profileReady, setProfileReady] = useState(false);
   const [profileError, setProfileError] = useState(false);
+  const [followBusy, setFollowBusy] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followerCount, setFollowerCount] = useState(0);
 
   const isOwn = Boolean(session && username && session.username === username);
 
@@ -59,20 +63,39 @@ export default function SellerProfileScreen() {
     if (session.username === username) {
       setProfileReady(true);
       setProfileError(false);
+      void apiFetch<{
+        followerCount?: number;
+        followingCount?: number;
+        isFollowing?: boolean;
+      }>(`/profiles/${encodeURIComponent(username)}/public`)
+        .then((profile) => {
+          setFollowerCount(profile.followerCount ?? 0);
+        })
+        .catch(() => undefined);
       return;
     }
     setProfileError(false);
     if (publicProfiles[username]) setProfileReady(true);
     void ensurePublicProfile(username)
-      .then(() => {
+      .then((profile) => {
         setProfileReady(true);
         setProfileError(false);
+        setIsFollowing(Boolean(profile.isFollowing));
+        setFollowerCount(profile.followerCount ?? 0);
       })
       .catch(() => {
         setProfileReady(true);
         setProfileError(true);
       });
   }, [ensurePublicProfile, publicProfiles, session, username]);
+
+  useEffect(() => {
+    if (!username) return;
+    const cached = publicProfiles[username];
+    if (!cached) return;
+    setIsFollowing(Boolean(cached.isFollowing));
+    setFollowerCount(cached.followerCount ?? 0);
+  }, [publicProfiles, username]);
 
   useEffect(() => {
     if (!username) return;
@@ -122,6 +145,38 @@ export default function SellerProfileScreen() {
     router.push(`/inbox/chat/${conv.id}`);
   }
 
+  async function toggleFollow() {
+    if (!username || followBusy || isOwn) return;
+    setFollowBusy(true);
+    try {
+      const result = await apiFetch<{
+        username: string;
+        followerCount: number;
+        followingCount: number;
+        isFollowing: boolean;
+      }>(`/profiles/${encodeURIComponent(username)}/follow`, {
+        method: isFollowing ? 'DELETE' : 'POST',
+      });
+      setIsFollowing(result.isFollowing);
+      setFollowerCount(result.followerCount);
+      upsertPublicProfile({
+        username,
+        bio: profile.bio ?? '',
+        location: profile.location ?? '',
+        photoUri: profile.photoUri,
+        followerCount: result.followerCount,
+        followingCount: result.followingCount,
+        isFollowing: result.isFollowing,
+      });
+      setBanner(result.isFollowing ? `You're following ${username}` : `Unfollowed ${username}`);
+      void refreshListings();
+    } catch {
+      setBanner('Could not update follow. Try again.');
+    } finally {
+      setFollowBusy(false);
+    }
+  }
+
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: top + 6 }]}>
@@ -145,6 +200,13 @@ export default function SellerProfileScreen() {
               <OfflineBanner title="No connection" message="Reconnect to view this seller." />
             </View>
           ) : null}
+          {banner ? (
+            <AlertBanner
+              variant={banner.startsWith('Could') ? 'error' : 'success'}
+              title={banner}
+              style={styles.bannerGap}
+            />
+          ) : null}
           {profileError && !isOwn ? (
             <AlertBanner
               variant="error"
@@ -166,6 +228,9 @@ export default function SellerProfileScreen() {
             ) : (
               <Text style={styles.ratingCount}>No reviews yet</Text>
             )}
+            <Text style={styles.followMeta}>
+              {followerCount} {followerCount === 1 ? 'follower' : 'followers'}
+            </Text>
             {profile.location ? (
               <View style={styles.locationRow}>
                 <MapPinIcon size={13} color={Palette.muted} />
@@ -176,13 +241,22 @@ export default function SellerProfileScreen() {
           </View>
 
           {!isOwn ? (
-            <Pressable
-              onPress={() => void message()}
-              disabled={!messageListing}
-              style={[styles.messageBtn, !messageListing && styles.messageBtnOff]}>
-              <ChatBubbleIcon size={16} color={Palette.plum} />
-              <Text style={styles.messageLabel}>Message seller</Text>
-            </Pressable>
+            <View style={styles.actionRow}>
+              <Button
+                label={isFollowing ? 'Following' : 'Follow'}
+                variant={isFollowing ? 'secondary' : 'primary'}
+                loading={followBusy}
+                onPress={() => void toggleFollow()}
+                style={styles.followBtn}
+              />
+              <Pressable
+                onPress={() => void message()}
+                disabled={!messageListing}
+                style={[styles.messageBtn, !messageListing && styles.messageBtnOff]}>
+                <ChatBubbleIcon size={16} color={Palette.plum} />
+                <Text style={styles.messageLabel}>Message</Text>
+              </Pressable>
+            </View>
           ) : null}
 
           {liveNow ? (
@@ -470,6 +544,12 @@ const styles = StyleSheet.create({
   ratingValue: { fontSize: 14, fontFamily: Typography.bodySemiBold, color: Palette.espresso },
   ratingCountInline: { fontSize: 13, fontFamily: Typography.body, color: Palette.muted },
   ratingCount: { marginTop: 8, fontSize: 13, fontFamily: Typography.body, color: Palette.muted },
+  followMeta: {
+    marginTop: 6,
+    fontSize: 13,
+    fontFamily: Typography.bodyMedium,
+    color: Palette.espresso,
+  },
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 8 },
   location: { fontSize: 13, fontFamily: Typography.body, color: Palette.muted },
   bio: {
@@ -481,7 +561,19 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     maxWidth: 320,
   },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 16,
+  },
+  followBtn: {
+    flex: 1,
+    minHeight: 50,
+    borderRadius: 25,
+  },
   messageBtn: {
+    flex: 1,
     minHeight: 50,
     borderRadius: 25,
     borderWidth: 1,
@@ -491,7 +583,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    marginBottom: 16,
   },
   messageBtnOff: { opacity: 0.45 },
   messageLabel: { fontSize: 14.5, fontFamily: Typography.bodySemiBold, color: Palette.plum },

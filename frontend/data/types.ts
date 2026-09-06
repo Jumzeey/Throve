@@ -111,8 +111,20 @@ export type LiveSession = {
   thumbnailUrl?: string;
   startedAt?: string;
   endedAt?: string;
+  peakViewers?: number;
+  productsShown?: number;
   products?: LiveStreamProduct[];
   moderators?: string[];
+};
+
+export type LiveSessionSummary = {
+  sessionId: string;
+  title: string;
+  durationMinutes: number;
+  peakViewers: number;
+  productsShown: number;
+  productsSold: number;
+  endedReason?: 'host' | 'connection';
 };
 
 export type LiveKitCredentials = {
@@ -271,6 +283,8 @@ export type UserProfile = {
   deactivated?: boolean;
   notifOffers?: boolean;
   notifMessages?: boolean;
+  notifLive?: boolean;
+  notifListings?: boolean;
   preferredLoginMethod?: PreferredLoginMethod;
   hasPassword?: boolean;
 };
@@ -280,6 +294,9 @@ export type PublicProfile = {
   bio: string;
   location: string;
   photoUri?: string;
+  followerCount?: number;
+  followingCount?: number;
+  isFollowing?: boolean;
 };
 
 export type AppNotification = {

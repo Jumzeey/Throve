@@ -1,52 +1,127 @@
 import { ModeratorsSheet } from '@/components/live/moderators-sheet';
+import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
+import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
-import { DepartmentChips } from '@/components/ui/department-chips';
-import { AlertBanner } from '@/components/ui/alert-banner';
-import { UserIcon } from '@/components/ui/icons';
-import { ReadyToggle } from '@/components/ui/ready-toggle';
+import {
+  AlertCircleIcon,
+  CalendarIcon,
+  ImagePlaceholderIcon,
+  MicIcon,
+  PlusIcon,
+  UserIcon,
+  VideoIcon,
+} from '@/components/ui/icons';
 import { ScreenHeader } from '@/components/ui/screen-header';
-import { StatusChip } from '@/components/ui/status-chip';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
 import { MAX_LIVE_MODERATORS, useLive } from '@/context/live-context';
-import { DEPARTMENTS } from '@/data/seed';
-import { formatNaira } from '@/lib/format';
+import { getListingImageSource } from '@/data/images';
+import type { Department } from '@/data/types';
+import { apiUpload } from '@/lib/api';
+import { formatLiveSchedule, formatNaira } from '@/lib/format';
+import { listingPhotoFormPart, pickListingPhotos } from '@/lib/listing-photos';
 import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
+import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { Redirect, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
-const DEPARTMENT_CHIPS = DEPARTMENTS.map((department) => ({ label: department, value: department }));
 const IVORY_50 = 'rgba(255,247,240,0.5)';
+
+type CategoryChip = {
+  key: string;
+  label: string;
+  department: Department;
+  category: string;
+};
+
+const CATEGORY_CHIPS: CategoryChip[] = [
+  { key: 'Women|Bags', label: 'Women · Bags', department: 'Women', category: 'Bags' },
+  { key: 'Women|Clothing', label: 'Women · Clothing', department: 'Women', category: 'Clothing' },
+  { key: 'Men|Clothing', label: 'Men · Clothing', department: 'Men', category: 'Clothing' },
+  { key: 'Women|Shoes', label: 'Women · Shoes', department: 'Women', category: 'Shoes' },
+  { key: 'Men|Shoes', label: 'Men · Shoes', department: 'Men', category: 'Shoes' },
+];
+
+type DeviceStatus = 'ready' | 'needed' | 'blocked' | 'checking';
+
+function permissionStatus(
+  perm: { granted: boolean; canAskAgain?: boolean; status?: string } | null,
+): DeviceStatus {
+  if (!perm) return 'checking';
+  if (perm.granted) return 'ready';
+  if (perm.canAskAgain === false) return 'blocked';
+  return 'needed';
+}
 
 export default function PrepareLiveScreen() {
   const router = useRouter();
   const { sheetBottom } = useScreenInsets();
   const keyboard = useKeyboardInset();
+  const { isConnected } = useNetworkStatus();
   const { session } = useAuth();
   const { listingsForSeller } = useListings();
   const inbox = useInbox();
   const live = useLive();
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [micPermission, requestMicPermission] = useMicrophonePermissions();
+
   const [title, setTitle] = useState('');
-  const [coverSet, setCoverSet] = useState(false);
-  const [department, setDepartment] = useState('');
+  const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const [coverUploading, setCoverUploading] = useState(false);
+  const [categoryKey, setCategoryKey] = useState(CATEGORY_CHIPS[0].key);
   const [description, setDescription] = useState('');
   const [scheduleMode, setScheduleMode] = useState(false);
-  const [scheduledAt, setScheduledAt] = useState('');
+  const [scheduledDate, setScheduledDate] = useState(() => {
+    const next = new Date();
+    next.setHours(next.getHours() + 2, 0, 0, 0);
+    return next;
+  });
+  const [showPicker, setShowPicker] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
-  const [cameraReady, setCameraReady] = useState(false);
-  const [micReady, setMicReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [modsOpen, setModsOpen] = useState(false);
+  const productsRef = useRef<View>(null);
+  const scrollRef = useRef<ScrollView>(null);
 
   const products = useMemo(() => {
     if (!session) return [];
     return listingsForSeller(session.username).filter((listing) => listing.status === 'available');
   }, [listingsForSeller, session]);
+
+  const cameraStatus = permissionStatus(cameraPermission);
+  const micStatus = permissionStatus(micPermission);
+  const categoryChip = CATEGORY_CHIPS.find((chip) => chip.key === categoryKey) ?? CATEGORY_CHIPS[0];
+
+  const missing: string[] = [];
+  if (!title.trim()) missing.push('A live title');
+  if (selected.length === 0) missing.push('At least one product');
+
+  const devicesOk = cameraStatus === 'ready' && micStatus === 'ready';
+  const draftReady = missing.length === 0;
+  const canStart = draftReady && devicesOk && isConnected && !coverUploading;
+  const deviceBlocked = cameraStatus === 'blocked' || micStatus === 'blocked';
+  const deviceNeedsPermission = cameraStatus === 'needed' || micStatus === 'needed';
+
+  useEffect(() => {
+    if (!isConnected) setError(null);
+  }, [isConnected]);
 
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
@@ -61,20 +136,56 @@ export default function PrepareLiveScreen() {
     .conversationsFor(host)
     .map((conv) => inbox.otherParticipant(conv, host))
     .filter(Boolean);
-  const canStart = title.trim() && department && selected.length > 0 && cameraReady && micReady;
 
   function toggleProduct(id: string) {
     setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
     setError(null);
   }
 
-  async function submit() {
-    if (!title.trim() || !department || selected.length === 0) {
-      setError('Add a title, category and at least one product.');
+  async function changeCover() {
+    setCoverUploading(true);
+    setError(null);
+    try {
+      const picked = await pickListingPhotos(1);
+      if (picked.rejected[0]) {
+        setError(picked.rejected[0]);
+        return;
+      }
+      const uri = picked.uris[0];
+      if (!uri) return;
+      const formData = new FormData();
+      formData.append('files', listingPhotoFormPart(uri, 0) as unknown as Blob);
+      const uploaded = await apiUpload<{ urls: string[] }>('/media/listing-photos', formData);
+      if (uploaded.urls[0]) setCoverUrl(uploaded.urls[0]);
+    } catch {
+      setError("We couldn't upload that cover image. Try again.");
+    } finally {
+      setCoverUploading(false);
+    }
+  }
+
+  async function ensureDevice(kind: 'camera' | 'mic') {
+    setError(null);
+    const status = kind === 'camera' ? cameraStatus : micStatus;
+    if (status === 'blocked') {
+      await Linking.openSettings();
       return;
     }
-    if (!cameraReady || !micReady) {
-      setError('Camera and microphone must both be ready.');
+    if (kind === 'camera') await requestCameraPermission();
+    else await requestMicPermission();
+  }
+
+  async function checkDevicesAgain() {
+    setError(null);
+    if (cameraStatus !== 'ready') await requestCameraPermission();
+    if (micStatus !== 'ready') await requestMicPermission();
+  }
+
+  async function submit() {
+    if (!isConnected) return;
+    if (!draftReady) return;
+    if (!devicesOk) {
+      setError("Live can't start until the camera and microphone are both available.");
       return;
     }
     setStarting(true);
@@ -82,10 +193,12 @@ export default function PrepareLiveScreen() {
     try {
       const created = await live.startLive({
         host,
-        title,
-        department: department as 'Women' | 'Men' | 'Kids',
-        description,
+        title: title.trim(),
+        department: categoryChip.department,
+        category: categoryChip.category,
+        description: description.trim() || undefined,
         featuredListingIds: selected,
+        thumbnailUrl: coverUrl ?? undefined,
         products: selected.map((listingId, index) => {
           const listing = products.find((p) => p.id === listingId);
           return {
@@ -95,7 +208,7 @@ export default function PrepareLiveScreen() {
             isPinned: index === 0,
           };
         }),
-        scheduledAt: scheduleMode && scheduledAt.trim() ? scheduledAt.trim() : undefined,
+        scheduledAt: scheduleMode ? scheduledDate.toISOString() : undefined,
       });
       if (created.status === 'upcoming') {
         router.replace('/(tabs)/live');
@@ -103,11 +216,19 @@ export default function PrepareLiveScreen() {
       }
       router.replace('/live/broadcast');
     } catch {
-      setError("We couldn't start your live. Check your connection and try again.");
+      setError("We couldn't start your live");
     } finally {
       setStarting(false);
     }
   }
+
+  const startLabel = starting
+    ? 'Starting your live...'
+    : !canStart
+      ? 'Start live · unavailable'
+      : scheduleMode
+        ? 'Schedule live'
+        : 'Start live';
 
   return (
     <View style={styles.screen}>
@@ -122,195 +243,265 @@ export default function PrepareLiveScreen() {
         }
       />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView
-        contentContainerStyle={[
-          styles.body,
-          {
-            paddingBottom:
-              sheetBottom + (Platform.OS === 'android' && keyboard.height > 0 ? keyboard.height : 0) + 24,
-          },
-        ]}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
-      >
-        <Text style={styles.sectionLabel}>Cover image</Text>
-        <Pressable onPress={() => setCoverSet(true)} style={[styles.cover, coverSet && styles.coverSet]}>
-          <Text style={styles.coverLabel}>{coverSet ? 'Cover image set' : 'Cover image'}</Text>
-          {coverSet ? (
-            <View style={styles.coverChange}>
-              <Text style={styles.coverChangeLabel}>Change</Text>
-            </View>
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={[
+            styles.body,
+            {
+              paddingBottom:
+                sheetBottom + (Platform.OS === 'android' && keyboard.height > 0 ? keyboard.height : 0) + 24,
+            },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+        >
+          {!isConnected ? (
+            <OfflineBanner
+              title="No connection"
+              message="Reconnect to continue setting up your live or start broadcasting."
+              style={styles.banner}
+            />
           ) : null}
-        </Pressable>
 
-        <Text style={styles.sectionLabel}>Live title</Text>
-        <TextInput
-          placeholder="The Fashion Edit"
-          placeholderTextColor={IVORY_50}
-          value={title}
-          onChangeText={(value) => {
-            setTitle(value);
-            setError(null);
-          }}
-          style={styles.input}
-        />
-
-        <Text style={styles.sectionLabel}>Category</Text>
-        <DepartmentChips
-          chips={DEPARTMENT_CHIPS}
-          selected={department}
-          onSelect={(value) => {
-            setDepartment(value);
-            setError(null);
-          }}
-        />
-
-        <Text style={styles.sectionLabel}>Description · optional</Text>
-        <TextInput
-          placeholder="Tell viewers what to expect…"
-          placeholderTextColor={IVORY_50}
-          value={description}
-          onChangeText={setDescription}
-          multiline
-          style={[styles.input, styles.textArea]}
-        />
-
-        <View style={styles.productsHeader}>
-          <Text style={styles.sectionLabel}>Products in this live</Text>
-          <Text style={styles.editLink}>Edit selection</Text>
-        </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.productRow}>
-          {products.map((listing) => {
-            const on = selected.includes(listing.id);
-            return (
-              <Pressable key={listing.id} onPress={() => toggleProduct(listing.id)} style={styles.productTile}>
-                <View style={[styles.productThumb, on && styles.productThumbOn]} />
-                <Text style={styles.productPrice}>{formatNaira(listing.price)}</Text>
-              </Pressable>
-            );
-          })}
-          <View style={styles.addTile}>
-            <Text style={styles.addTileLabel}>Add</Text>
-          </View>
-        </ScrollView>
-        <Text style={styles.hint}>Only your own available listings can be featured.</Text>
-
-        <Text style={[styles.sectionLabel, styles.whenLabel]}>When</Text>
-        <View style={styles.whenRow}>
-          <Pressable
-            onPress={() => setScheduleMode(false)}
-            style={[styles.whenBtn, !scheduleMode && styles.whenBtnOn]}
-          >
-            <Text style={[styles.whenBtnLabel, !scheduleMode && styles.whenBtnLabelOn]}>Start when ready</Text>
+          <Text style={styles.sectionLabel}>Cover image</Text>
+          <Pressable onPress={changeCover} style={styles.cover}>
+            {coverUrl ? (
+              <AppImage source={coverUrl} style={styles.coverImage} />
+            ) : (
+              <View style={styles.coverPlaceholder}>
+                <ImagePlaceholderIcon size={22} color="rgba(255,247,240,0.34)" />
+                <Text style={styles.coverLabel}>COVER IMAGE</Text>
+              </View>
+            )}
+            <View style={styles.coverChange}>
+              <Text style={styles.coverChangeLabel}>{coverUploading ? 'Uploading…' : 'Change'}</Text>
+            </View>
           </Pressable>
-          <Pressable
-            onPress={() => setScheduleMode(true)}
-            style={[styles.whenBtn, scheduleMode && styles.whenBtnOn]}
-          >
-            <Text style={[styles.whenBtnLabel, scheduleMode && styles.whenBtnLabelOn]}>Schedule</Text>
-          </Pressable>
-        </View>
-        {scheduleMode ? (
+
+          <Text style={styles.sectionLabel}>Live title</Text>
           <TextInput
-            placeholder="Saturday, 7:00 pm"
+            placeholder="The Fashion Edit"
             placeholderTextColor={IVORY_50}
-            value={scheduledAt}
-            onChangeText={setScheduledAt}
+            value={title}
+            onChangeText={(value) => {
+              setTitle(value);
+              setError(null);
+            }}
             style={styles.input}
           />
-        ) : null}
 
-        <Text style={[styles.sectionLabel, styles.deviceSection]}>Device check</Text>
-        <View style={styles.deviceRow}>
-          <Text style={styles.deviceName}>Camera</Text>
-          <View style={styles.deviceRight}>
-            {cameraReady ? <StatusChip kind="live" variant="available" label="READY" /> : null}
-            <ReadyToggle
-              on={cameraReady}
-              onToggle={() => {
-                setCameraReady((value) => !value);
-                setError(null);
-              }}
-            />
-          </View>
-        </View>
-        <View style={styles.deviceRow}>
-          <Text style={styles.deviceName}>Microphone</Text>
-          <View style={styles.deviceRight}>
-            {micReady ? <StatusChip kind="live" variant="available" label="READY" /> : null}
-            <ReadyToggle
-              on={micReady}
-              onToggle={() => {
-                setMicReady((value) => !value);
-                setError(null);
-              }}
-            />
-          </View>
-        </View>
+          <Text style={styles.sectionLabel}>Category</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+            {CATEGORY_CHIPS.map((chip) => {
+              const on = chip.key === categoryKey;
+              return (
+                <Pressable
+                  key={chip.key}
+                  onPress={() => setCategoryKey(chip.key)}
+                  style={[styles.chip, on && styles.chipOn]}
+                >
+                  <Text style={[styles.chipLabel, on && styles.chipLabelOn]}>{chip.label}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
 
-        <View style={styles.modsHeader}>
-          <Text style={styles.sectionLabel}>
-            Moderators · {moderators.length} of {MAX_LIVE_MODERATORS}
-          </Text>
-          <Pressable onPress={() => setModsOpen(true)} hitSlop={8}>
-            <Text style={styles.editLink}>Manage</Text>
-          </Pressable>
-        </View>
-        {moderators.length === 0 ? (
-          <Pressable onPress={() => setModsOpen(true)} style={styles.emptyMod}>
-            <Text style={styles.emptyModLabel}>Add a moderator (optional)</Text>
-          </Pressable>
-        ) : (
-          moderators.map((mod) => (
-            <View key={mod} style={styles.modRow}>
-              <View style={styles.modAvatar}>
-                <UserIcon size={16} color={Palette.muted3} />
-              </View>
-              <View style={styles.modMeta}>
-                <Text style={styles.modName}>{mod}</Text>
-                <Text style={styles.modSub}>Can moderate comments and viewers</Text>
-              </View>
-              <Pressable onPress={() => live.removePrepareModerator(mod)} hitSlop={8}>
-                <Text style={styles.modRemove}>Remove</Text>
-              </Pressable>
-            </View>
-          ))
-        )}
-        <Text style={styles.hint}>
-          A moderator helps with comments only — they never host, sell or manage products.
-        </Text>
-
-        {error ? <AlertBanner variant="error" title={error} style={styles.errorBanner} /> : null}
-
-        <View style={styles.footer}>
-          <Button
-            label={
-              starting
-                ? 'Starting your live…'
-                : !canStart
-                  ? 'Start live · unavailable'
-                  : scheduleMode
-                    ? 'Schedule live'
-                    : 'Start live'
-            }
-            variant="live"
-            loading={starting}
-            disabled={!canStart || starting}
-            onPress={submit}
-            style={styles.start}
+          <Text style={styles.sectionLabel}>Description · optional</Text>
+          <TextInput
+            placeholder="Bags and tailoring from this week's intake. Sizes S–L."
+            placeholderTextColor={IVORY_50}
+            value={description}
+            onChangeText={setDescription}
+            multiline
+            style={[styles.input, styles.textArea]}
           />
-          <Text style={styles.footerHint}>
-            Viewers can claim a featured item for about 5 minutes while they check out.
+
+          <View ref={productsRef} style={styles.productsHeader}>
+            <Text style={styles.sectionLabelInline}>Products in this live</Text>
+            <Pressable
+              onPress={() => scrollRef.current?.scrollTo({ y: 420, animated: true })}
+              hitSlop={8}
+            >
+              <Text style={styles.editLink}>Edit selection</Text>
+            </Pressable>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.productRow}>
+            {products.map((listing) => {
+              const on = selected.includes(listing.id);
+              return (
+                <Pressable key={listing.id} onPress={() => toggleProduct(listing.id)} style={styles.productTile}>
+                  <View style={[styles.productThumb, on && styles.productThumbOn]}>
+                    <AppImage source={getListingImageSource(listing)} style={styles.productImage} />
+                  </View>
+                  <Text style={styles.productPrice}>{formatNaira(listing.price)}</Text>
+                </Pressable>
+              );
+            })}
+            <Pressable
+              onPress={() => {
+                if (products[0] && !selected.includes(products[0].id)) toggleProduct(products[0].id);
+              }}
+              style={styles.addTile}
+            >
+              <PlusIcon size={16} color="rgba(255,247,240,0.6)" />
+              <Text style={styles.addTileLabel}>Add</Text>
+            </Pressable>
+          </ScrollView>
+          <Text style={styles.hint}>Only your own available listings can be featured.</Text>
+
+          <Text style={[styles.sectionLabel, styles.whenLabel]}>When</Text>
+          <View style={styles.whenRow}>
+            <Pressable
+              onPress={() => setScheduleMode(false)}
+              style={[styles.whenBtn, !scheduleMode && styles.whenBtnOn]}
+            >
+              <Text style={[styles.whenBtnLabel, !scheduleMode && styles.whenBtnLabelOn]}>Start when ready</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                setScheduleMode(true);
+                setShowPicker(true);
+              }}
+              style={[styles.whenBtn, scheduleMode && styles.whenBtnOn]}
+            >
+              <Text style={[styles.whenBtnLabel, scheduleMode && styles.whenBtnLabelOn]}>Schedule</Text>
+            </Pressable>
+          </View>
+
+          {scheduleMode ? (
+            <Pressable onPress={() => setShowPicker(true)} style={styles.scheduledCard}>
+              <CalendarIcon size={16} color={Palette.espresso} />
+              <View style={styles.scheduledMeta}>
+                <Text style={styles.scheduledWhen}>{formatLiveSchedule(scheduledDate.toISOString())}</Text>
+                <Text style={styles.scheduledSub}>Shown under Upcoming lives</Text>
+              </View>
+              <View style={styles.scheduledBadge}>
+                <Text style={styles.scheduledBadgeText}>SCHEDULED</Text>
+              </View>
+            </Pressable>
+          ) : null}
+
+          {showPicker && scheduleMode ? (
+            <DateTimePicker
+              value={scheduledDate}
+              mode="datetime"
+              minimumDate={new Date()}
+              onChange={(_, date) => {
+                if (Platform.OS === 'android') setShowPicker(false);
+                if (date) setScheduledDate(date);
+              }}
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              themeVariant="dark"
+            />
+          ) : null}
+
+          <Text style={[styles.sectionLabel, styles.deviceSection]}>Device check</Text>
+          <DeviceRow
+            icon={<VideoIcon size={18} color={cameraStatus === 'ready' ? Palette.ivory : Palette.espresso} />}
+            label="Camera"
+            status={cameraStatus}
+            onPress={() => void ensureDevice('camera')}
+          />
+          <DeviceRow
+            icon={<MicIcon size={18} color={micStatus === 'ready' ? Palette.ivory : Palette.espresso} />}
+            label="Microphone"
+            status={micStatus}
+            onPress={() => void ensureDevice('mic')}
+          />
+
+          {(deviceNeedsPermission || deviceBlocked) && (
+            <View style={styles.deviceHelp}>
+              <Text style={styles.deviceHelpText}>
+                Throve needs your camera to broadcast. Allow camera access in your device settings, then check again.
+              </Text>
+              <Button label="Check again" variant="secondary" onPress={() => void checkDevicesAgain()} style={styles.checkAgain} />
+            </View>
+          )}
+
+          <View style={styles.modsHeader}>
+            <Text style={styles.sectionLabelInline}>
+              Moderators · {moderators.length} of {MAX_LIVE_MODERATORS}
+            </Text>
+            <Pressable onPress={() => setModsOpen(true)} hitSlop={8}>
+              <Text style={styles.editLink}>Manage</Text>
+            </Pressable>
+          </View>
+          {moderators.length === 0 ? (
+            <Pressable onPress={() => setModsOpen(true)} style={styles.emptyMod}>
+              <Text style={styles.emptyModLabel}>Add a moderator (optional)</Text>
+            </Pressable>
+          ) : (
+            moderators.map((mod) => (
+              <View key={mod} style={styles.modRow}>
+                <View style={styles.modAvatar}>
+                  <UserIcon size={16} color={Palette.muted3} />
+                </View>
+                <View style={styles.modMeta}>
+                  <Text style={styles.modName}>{mod}</Text>
+                  <Text style={styles.modSub}>Can moderate comments and viewers</Text>
+                </View>
+                <Pressable onPress={() => live.removePrepareModerator(mod)} hitSlop={8}>
+                  <Text style={styles.modRemove}>Remove</Text>
+                </Pressable>
+              </View>
+            ))
+          )}
+          <Text style={styles.hint}>
+            A moderator helps with comments only — they never host, sell or manage products.
           </Text>
-        </View>
-      </ScrollView>
+
+          {!draftReady ? (
+            <View style={styles.needsCard}>
+              <View style={styles.needsHeader}>
+                <AlertCircleIcon size={16} color={Palette.warningText} />
+                <Text style={styles.needsTitle}>
+                  {missing.length === 1 ? 'One thing still needed' : `${missing.length} things still needed`}
+                </Text>
+              </View>
+              {missing.map((item) => (
+                <Text key={item} style={styles.needsItem}>
+                  · {item}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+
+          {error ? (
+            <AlertBanner
+              variant="error"
+              title={error}
+              message={error.includes("couldn't start") ? 'Check your connection and try again.' : undefined}
+              style={styles.banner}
+            />
+          ) : null}
+
+          <View style={styles.footer}>
+            <Button
+              label={startLabel}
+              variant="live"
+              loading={starting}
+              disabled={!canStart || starting}
+              onPress={submit}
+              style={styles.start}
+            />
+            {!devicesOk && draftReady ? (
+              <Text style={styles.footerHint}>
+                Live can't start until the camera and microphone are both available.
+              </Text>
+            ) : (
+              <Text style={styles.footerHint}>
+                Viewers can claim a featured item for about 5 minutes while they check out.
+              </Text>
+            )}
+          </View>
+        </ScrollView>
       </KeyboardAvoidingView>
 
       <ModeratorsSheet
         visible={modsOpen}
         title="Live moderators"
-        copy="You can appoint up to two. Search, tap a person to add them, then Add."
+        copy="You can appoint up to two. They help with comments and disruptive viewers — nothing else."
         hostUsername={host}
         moderators={moderators}
         suggestions={suggestedMods}
@@ -319,6 +510,63 @@ export default function PrepareLiveScreen() {
         onRemove={live.removePrepareModerator}
       />
     </View>
+  );
+}
+
+function DeviceRow({
+  icon,
+  label,
+  status,
+  onPress,
+}: {
+  icon: ReactNode;
+  label: string;
+  status: DeviceStatus;
+  onPress: () => void;
+}) {
+  const badge =
+    status === 'ready'
+      ? { label: 'READY', tone: 'ready' as const }
+      : status === 'blocked'
+        ? { label: 'BLOCKED', tone: 'blocked' as const }
+        : status === 'needed'
+          ? { label: 'PERMISSION NEEDED', tone: 'needed' as const }
+          : { label: '…', tone: 'needed' as const };
+  const light = status === 'needed' || status === 'blocked';
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[
+        styles.deviceRow,
+        status === 'blocked' && styles.deviceRowBlocked,
+        status === 'needed' && styles.deviceRowNeeded,
+      ]}
+    >
+      <View style={styles.deviceLeft}>
+        {icon}
+        <Text style={[styles.deviceName, light && styles.deviceNameLight]}>{label}</Text>
+      </View>
+      <View
+        style={[
+          styles.deviceBadge,
+          badge.tone === 'ready' && styles.deviceBadgeReady,
+          badge.tone === 'blocked' && styles.deviceBadgeBlocked,
+          badge.tone === 'needed' && styles.deviceBadgeNeeded,
+        ]}
+      >
+        <Text
+          style={[
+            styles.deviceBadgeText,
+            badge.tone === 'ready' && styles.deviceBadgeTextReady,
+            badge.tone === 'blocked' && styles.deviceBadgeTextBlocked,
+            badge.tone === 'needed' && styles.deviceBadgeTextNeeded,
+          ]}
+        >
+          {badge.label}
+        </Text>
+      </View>
+    </Pressable>
   );
 }
 
@@ -337,6 +585,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     gap: 10,
   },
+  banner: {
+    marginTop: 4,
+    width: '100%',
+  },
   sectionLabel: {
     fontSize: 10,
     letterSpacing: 1.1,
@@ -345,23 +597,35 @@ const styles = StyleSheet.create({
     color: IVORY_50,
     marginTop: 8,
   },
+  sectionLabelInline: {
+    fontSize: 10,
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+    fontFamily: Typography.bodySemiBold,
+    color: IVORY_50,
+  },
   cover: {
     aspectRatio: 16 / 9,
     borderRadius: Radius.md,
     backgroundColor: '#463038',
-    alignItems: 'center',
-    justifyContent: 'center',
+    overflow: 'hidden',
     marginTop: 4,
   },
-  coverSet: {
-    borderWidth: 1,
-    borderColor: 'rgba(255,247,240,0.2)',
+  coverImage: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  coverPlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   coverLabel: {
     fontSize: 9.5,
     letterSpacing: 1.4,
     textTransform: 'uppercase',
     color: 'rgba(255,247,240,0.34)',
+    fontFamily: Typography.bodySemiBold,
   },
   coverChange: {
     position: 'absolute',
@@ -393,6 +657,29 @@ const styles = StyleSheet.create({
     paddingTop: 13,
     textAlignVertical: 'top',
   },
+  chipRow: {
+    gap: 8,
+    paddingVertical: 2,
+  },
+  chip: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,247,240,0.28)',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  chipOn: {
+    backgroundColor: Palette.ivory,
+    borderColor: Palette.ivory,
+  },
+  chipLabel: {
+    fontSize: 12.5,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.ivory,
+  },
+  chipLabelOn: {
+    color: Palette.liveDark,
+  },
   productsHeader: {
     flexDirection: 'row',
     alignItems: 'baseline',
@@ -417,9 +704,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#463038',
     borderWidth: 2,
     borderColor: 'transparent',
+    overflow: 'hidden',
   },
   productThumbOn: {
     borderColor: Palette.blush,
+  },
+  productImage: {
+    width: '100%',
+    height: '100%',
   },
   productPrice: {
     marginTop: 6,
@@ -437,10 +729,12 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,247,240,0.3)',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
   },
   addTileLabel: {
     fontSize: 9,
     color: 'rgba(255,247,240,0.6)',
+    fontFamily: Typography.bodySemiBold,
   },
   hint: {
     fontSize: 11,
@@ -476,13 +770,47 @@ const styles = StyleSheet.create({
   whenBtnLabelOn: {
     color: Palette.liveDark,
   },
+  scheduledCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: Palette.ivoryElevated,
+    borderWidth: 1,
+    borderColor: Palette.border,
+    borderRadius: Radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  scheduledMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  scheduledWhen: {
+    fontSize: 13.5,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.espresso,
+  },
+  scheduledSub: {
+    marginTop: 2,
+    fontSize: 11,
+    fontFamily: Typography.body,
+    color: Palette.muted,
+  },
+  scheduledBadge: {
+    borderWidth: 1,
+    borderColor: Palette.espresso,
+    borderRadius: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+  },
+  scheduledBadgeText: {
+    fontSize: 9,
+    letterSpacing: 0.7,
+    fontFamily: Typography.bodyBold,
+    color: Palette.espresso,
+  },
   deviceSection: {
     marginTop: 12,
-  },
-  deviceName: {
-    fontSize: 13.5,
-    fontFamily: Typography.body,
-    color: Palette.ivory,
   },
   deviceRow: {
     flexDirection: 'row',
@@ -495,10 +823,71 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 13,
   },
-  deviceRight: {
+  deviceRowNeeded: {
+    backgroundColor: Palette.warningBg,
+    borderColor: Palette.warningBorder,
+  },
+  deviceRowBlocked: {
+    backgroundColor: Palette.errorBg,
+    borderColor: Palette.errorBorder,
+  },
+  deviceLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+  },
+  deviceName: {
+    fontSize: 13.5,
+    fontFamily: Typography.body,
+    color: Palette.ivory,
+  },
+  deviceNameLight: {
+    color: Palette.espresso,
+  },
+  deviceBadge: {
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  deviceBadgeReady: {
+    borderColor: Palette.successBorder,
+    backgroundColor: Palette.successBg,
+  },
+  deviceBadgeNeeded: {
+    borderColor: Palette.warningBorder,
+    backgroundColor: 'transparent',
+  },
+  deviceBadgeBlocked: {
+    borderColor: Palette.errorBorder,
+    backgroundColor: 'transparent',
+  },
+  deviceBadgeText: {
+    fontSize: 9.5,
+    letterSpacing: 0.7,
+    fontFamily: Typography.bodyBold,
+  },
+  deviceBadgeTextReady: {
+    color: Palette.successText,
+  },
+  deviceBadgeTextNeeded: {
+    color: Palette.warningText,
+  },
+  deviceBadgeTextBlocked: {
+    color: Palette.error,
+  },
+  deviceHelp: {
+    gap: 10,
+    marginTop: 4,
+  },
+  deviceHelpText: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: Typography.body,
+    color: 'rgba(255,247,240,0.62)',
+  },
+  checkAgain: {
+    minHeight: 44,
   },
   modsHeader: {
     flexDirection: 'row',
@@ -559,8 +948,31 @@ const styles = StyleSheet.create({
     fontFamily: Typography.bodySemiBold,
     color: Palette.blush,
   },
-  errorBanner: {
+  needsCard: {
     marginTop: 8,
+    backgroundColor: Palette.warningBg,
+    borderWidth: 1,
+    borderColor: Palette.warningBorder,
+    borderRadius: Radius.md,
+    padding: 14,
+    gap: 4,
+  },
+  needsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  needsTitle: {
+    fontSize: 13,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.warningText,
+  },
+  needsItem: {
+    fontSize: 12.5,
+    fontFamily: Typography.body,
+    color: Palette.muted,
+    paddingLeft: 4,
   },
   footer: {
     marginTop: 16,

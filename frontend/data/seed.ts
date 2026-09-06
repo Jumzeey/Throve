@@ -403,6 +403,8 @@ export const DEMO_USER: UserProfile = {
   canHostLive: true,
   notifOffers: true,
   notifMessages: true,
+  notifLive: true,
+  notifListings: true,
   preferredLoginMethod: 'password',
   hasPassword: true,
 };

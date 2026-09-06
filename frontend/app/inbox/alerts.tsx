@@ -65,7 +65,7 @@ export default function AlertsScreen() {
         ) : items.length === 0 ? (
           <EmptyState
             title="No alerts yet"
-            message="Live moderator invites, and other account notices, will show up here."
+            message="When sellers you follow post new items, or you get account notices, they’ll show up here."
             style={styles.empty}
           />
         ) : (

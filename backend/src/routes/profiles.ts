@@ -1,5 +1,6 @@
 import { sendTransactionalEmail } from '../lib/email/send.js';
 import { accountDeactivatedEmail } from '../lib/email/templates/account.js';
+import { getFollowStats } from '../lib/follows.js';
 import { getProfileById, getProfileByUsername, mapProfile, publicPhotoUrl, storedPhotoUrl } from '../lib/mappers.js';
 import { createSupabaseClient } from '../lib/supabase.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
@@ -123,6 +124,8 @@ router.patch('/me/settings', requireAuth, async (req, res) => {
     .object({
       notifOffers: z.boolean().optional(),
       notifMessages: z.boolean().optional(),
+      notifLive: z.boolean().optional(),
+      notifListings: z.boolean().optional(),
       preferredLoginMethod: z.enum(['password', 'magic_link']).optional(),
     })
     .safeParse(req.body);
@@ -134,6 +137,8 @@ router.patch('/me/settings', requireAuth, async (req, res) => {
   const patch: Record<string, boolean | string> = {};
   if (parsed.data.notifOffers !== undefined) patch.notif_offers = parsed.data.notifOffers;
   if (parsed.data.notifMessages !== undefined) patch.notif_messages = parsed.data.notifMessages;
+  if (parsed.data.notifLive !== undefined) patch.notif_live = parsed.data.notifLive;
+  if (parsed.data.notifListings !== undefined) patch.notif_listings = parsed.data.notifListings;
   if (parsed.data.preferredLoginMethod !== undefined) {
     patch.preferred_login_method = parsed.data.preferredLoginMethod;
   }
@@ -193,16 +198,71 @@ router.get('/search', requireAuth, async (req, res) => {
 
 router.get('/:username/public', optionalAuth, async (req, res) => {
   const supabase = (req as AuthedRequest).supabase ?? createSupabaseClient();
+  const userId = (req as AuthedRequest).userId;
   const username = String(req.params.username);
   const profile = await getProfileByUsername(supabase, username);
   if (!profile || profile.deactivated) {
     return sendError(res, 404, 'Seller not found', 'NOT_FOUND');
   }
+  const stats = await getFollowStats(profile.id, userId);
   return res.json({
     username: profile.username,
     bio: profile.bio,
     location: profile.location,
     photoUri: publicPhotoUrl(profile.photo_url),
+    followerCount: stats.followerCount,
+    followingCount: stats.followingCount,
+    isFollowing: stats.isFollowing,
+  });
+});
+
+router.post('/:username/follow', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const username = String(req.params.username);
+  const seller = await getProfileByUsername(supabase, username);
+  if (!seller || seller.deactivated) {
+    return sendError(res, 404, 'Seller not found', 'NOT_FOUND');
+  }
+  if (seller.id === userId) {
+    return sendError(res, 400, 'You cannot follow yourself');
+  }
+
+  const { error } = await supabase.from('seller_follows').upsert(
+    { follower_id: userId, seller_id: seller.id },
+    { onConflict: 'follower_id,seller_id' },
+  );
+  if (error) return handleSupabaseError(res, error);
+
+  const stats = await getFollowStats(seller.id, userId);
+  return res.json({
+    username: seller.username,
+    followerCount: stats.followerCount,
+    followingCount: stats.followingCount,
+    isFollowing: true,
+  });
+});
+
+router.delete('/:username/follow', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const username = String(req.params.username);
+  const seller = await getProfileByUsername(supabase, username);
+  if (!seller || seller.deactivated) {
+    return sendError(res, 404, 'Seller not found', 'NOT_FOUND');
+  }
+
+  const { error } = await supabase
+    .from('seller_follows')
+    .delete()
+    .eq('follower_id', userId)
+    .eq('seller_id', seller.id);
+  if (error) return handleSupabaseError(res, error);
+
+  const stats = await getFollowStats(seller.id, userId);
+  return res.json({
+    username: seller.username,
+    followerCount: stats.followerCount,
+    followingCount: stats.followingCount,
+    isFollowing: false,
   });
 });
 

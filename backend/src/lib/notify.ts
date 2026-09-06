@@ -20,7 +20,9 @@ export async function notifyUser(input: NotifyUserInput): Promise<void> {
     const admin = createServiceClient();
     const { data: profile, error: profileError } = await admin
       .from('profiles')
-      .select('id, notif_offers, notif_messages, notif_live, notif_push_enabled, deactivated')
+      .select(
+        'id, notif_offers, notif_messages, notif_live, notif_listings, notif_push_enabled, deactivated',
+      )
       .eq('id', input.userId)
       .maybeSingle();
     if (profileError) {
@@ -32,6 +34,7 @@ export async function notifyUser(input: NotifyUserInput): Promise<void> {
     if (input.category === 'offer' && profile.notif_offers === false) return;
     if (input.category === 'message' && profile.notif_messages === false) return;
     if (input.category === 'live' && profile.notif_live === false) return;
+    if (input.category === 'listing' && profile.notif_listings === false) return;
 
     const { error } = await admin.from('notifications').insert({
       user_id: input.userId,
@@ -46,7 +49,15 @@ export async function notifyUser(input: NotifyUserInput): Promise<void> {
 
     if (input.email) {
       const preference =
-        input.category === 'offer' ? 'offers' : input.category === 'message' ? 'messages' : input.category === 'live' ? 'live' : undefined;
+        input.category === 'offer'
+          ? 'offers'
+          : input.category === 'message'
+            ? 'messages'
+            : input.category === 'live'
+              ? 'live'
+              : input.category === 'listing'
+                ? 'listings'
+                : undefined;
       queueEmail({
         toUserId: input.userId,
         preference,

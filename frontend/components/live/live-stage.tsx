@@ -148,7 +148,7 @@ function CameraLayer({
   return <VideoTrack trackRef={track} style={styles.video} objectFit="cover" />;
 }
 
-export function LiveBadgeRow({ viewers }: { viewers?: number }) {
+export function LiveBadgeRow({ viewers, duration }: { viewers?: number; duration?: string }) {
   return (
     <View style={styles.badgeRow}>
       <View style={styles.liveBadge}>
@@ -158,6 +158,11 @@ export function LiveBadgeRow({ viewers }: { viewers?: number }) {
         <View style={styles.viewerBadge}>
           <EyeIcon size={12} />
           <Text style={styles.viewerText}>{viewers}</Text>
+        </View>
+      ) : null}
+      {duration ? (
+        <View style={styles.viewerBadge}>
+          <Text style={styles.viewerText}>{duration}</Text>
         </View>
       ) : null}
     </View>
@@ -328,21 +333,29 @@ export function LiveCommentActionsSheet({
   comment,
   onClose,
   onRemove,
+  onPin,
+  onMute,
+  onRemoveViewer,
+  onReport,
 }: {
   visible: boolean;
   comment: LiveComment | null;
   onClose: () => void;
   onRemove?: () => void;
+  onPin?: () => void;
+  onMute?: () => void;
+  onRemoveViewer?: () => void;
+  onReport?: () => void;
 }) {
   const { sheetBottom } = useScreenInsets();
   if (!comment) return null;
 
   const actions = [
-    { label: 'Pin comment', destructive: false, onPress: onClose },
+    { label: 'Pin comment', destructive: false, onPress: () => { onPin?.(); onClose(); } },
     { label: 'Remove comment', destructive: true, onPress: () => { onRemove?.(); onClose(); } },
-    { label: 'Mute viewer', destructive: true, onPress: onClose },
-    { label: 'Remove viewer from live', destructive: true, onPress: onClose },
-    { label: 'Report to Throve', destructive: true, onPress: onClose },
+    { label: 'Mute viewer', destructive: true, onPress: () => { onMute?.(); onClose(); } },
+    { label: 'Remove viewer from live', destructive: true, onPress: () => { onRemoveViewer?.(); onClose(); } },
+    { label: 'Report to Throve', destructive: true, onPress: () => { onReport?.(); onClose(); } },
   ];
 
   return (
@@ -410,16 +423,18 @@ export function EndLiveDialog({
 
 export function LiveHostTopBar({
   viewers,
+  duration,
   onEnd,
   onModeration,
 }: {
   viewers?: number;
+  duration?: string;
   onEnd: () => void;
   onModeration?: () => void;
 }) {
   return (
     <View style={styles.hostTopBar}>
-      <LiveBadgeRow viewers={viewers} />
+      <LiveBadgeRow viewers={viewers} duration={duration} />
       <View style={styles.hostTopSpacer} />
       {onModeration ? (
         <LiveIconButton onPress={onModeration}>

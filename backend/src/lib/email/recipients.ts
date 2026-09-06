@@ -1,6 +1,6 @@
 import { createServiceClient } from '../supabase.js';
 
-export type NotificationPreference = 'offers' | 'messages' | 'live';
+export type NotificationPreference = 'offers' | 'messages' | 'live' | 'listings';
 
 export type Recipient = {
   userId: string;
@@ -10,6 +10,7 @@ export type Recipient = {
   notifOffers: boolean;
   notifMessages: boolean;
   notifLive: boolean;
+  notifListings: boolean;
   notifPushEnabled: boolean;
 };
 
@@ -18,7 +19,9 @@ export async function resolveRecipient(userId: string): Promise<Recipient | null
   const admin = createServiceClient();
   const { data: profile, error } = await admin
     .from('profiles')
-    .select('id, email, username, name, notif_offers, notif_messages, notif_live, notif_push_enabled, deactivated')
+    .select(
+      'id, email, username, name, notif_offers, notif_messages, notif_live, notif_listings, notif_push_enabled, deactivated',
+    )
     .eq('id', userId)
     .maybeSingle();
 
@@ -47,6 +50,7 @@ export async function resolveRecipient(userId: string): Promise<Recipient | null
     notifOffers: profile.notif_offers !== false,
     notifMessages: profile.notif_messages !== false,
     notifLive: profile.notif_live !== false,
+    notifListings: profile.notif_listings !== false,
     notifPushEnabled: profile.notif_push_enabled !== false,
   };
 }
@@ -56,5 +60,6 @@ export function preferenceAllows(recipient: Recipient, preference?: Notification
   if (preference === 'offers') return recipient.notifOffers;
   if (preference === 'messages') return recipient.notifMessages;
   if (preference === 'live') return recipient.notifLive;
+  if (preference === 'listings') return recipient.notifListings;
   return true;
 }

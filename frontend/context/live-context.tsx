@@ -9,6 +9,7 @@ import type {
   LiveConnection,
   LiveKitCredentials,
   LiveSession,
+  LiveSessionSummary,
   LiveStreamProduct,
 } from '@/data/types';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -21,10 +22,12 @@ type StartLiveInput = {
   host: string;
   title: string;
   department: LiveSession['department'];
+  category?: string;
   description?: string;
   featuredListingIds: string[];
   products?: { listingId: string; livePrice: number; stock: number; isPinned?: boolean }[];
   scheduledAt?: string;
+  thumbnailUrl?: string;
 };
 
 type LiveContextValue = {
@@ -60,7 +63,7 @@ type LiveContextValue = {
   releaseListing: (listingId: string) => Promise<void>;
   fetchLiveKitToken: (sessionId: string) => Promise<LiveKitCredentials>;
   startLive: (input: StartLiveInput) => Promise<LiveSession>;
-  endLive: (sessionId: string) => Promise<void>;
+  endLive: (sessionId: string, opts?: { peakViewers?: number; reason?: 'host' | 'connection' }) => Promise<LiveSessionSummary>;
   subscribeSession: (sessionId: string) => () => void;
   prepareModerators: string[];
   getModerators: (sessionId?: string) => string[];
@@ -278,8 +281,19 @@ export function LiveProvider({ children }: { children: ReactNode }) {
           const state = channel.presenceState();
           const viewers = Object.keys(state).length;
           setSessions((current) =>
-            current.map((session) => (session.id === sessionId ? { ...session, viewers } : session)),
+            current.map((session) => {
+              if (session.id !== sessionId) return session;
+              return {
+                ...session,
+                viewers,
+                peakViewers: Math.max(session.peakViewers ?? 0, viewers),
+              };
+            }),
           );
+          void apiFetch(`/live/sessions/${sessionId}/viewers`, {
+            method: 'POST',
+            body: JSON.stringify({ viewers }),
+          }).catch(() => undefined);
         })
         .subscribe(async (status) => {
           if (status === 'SUBSCRIBED') {
@@ -488,10 +502,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({
         title: input.title,
         department: input.department,
+        category: input.category,
         description: input.description,
         featuredListingIds: listings,
         products,
         scheduledAt: input.scheduledAt,
+        thumbnailUrl: input.thumbnailUrl,
         moderatorUsernames: prepareModerators,
       }),
     });
@@ -505,13 +521,20 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     return session;
   }, [prepareModerators]);
 
-  const endLive = useCallback(async (sessionId: string) => {
-    await apiFetch(`/live/sessions/${sessionId}/end`, { method: 'POST' });
+  const endLive = useCallback(async (sessionId: string, opts?: { peakViewers?: number; reason?: 'host' | 'connection' }) => {
+    const summary = await apiFetch<LiveSessionSummary>(`/live/sessions/${sessionId}/end`, {
+      method: 'POST',
+      body: JSON.stringify({
+        peakViewers: opts?.peakViewers,
+        reason: opts?.reason ?? 'host',
+      }),
+    });
     setSessions((current) =>
       current.map((session) => (session.id === sessionId ? { ...session, status: 'ended' } : session)),
     );
     setConnections((current) => ({ ...current, [sessionId]: 'ended' }));
     setActiveBroadcastId((current) => (current === sessionId ? null : current));
+    return summary;
   }, []);
 
   const getModerators = useCallback(

@@ -32,6 +32,8 @@ type ProfilePatch = {
 type SettingsPatch = {
   notifOffers?: boolean;
   notifMessages?: boolean;
+  notifLive?: boolean;
+  notifListings?: boolean;
   preferredLoginMethod?: PreferredLoginMethod;
 };
 
@@ -58,6 +60,7 @@ type AuthContextValue = {
   /** Public seller cards keyed by username, seeded from the signed-in profile. */
   publicProfiles: Record<string, PublicProfile>;
   ensurePublicProfile: (username: string) => Promise<PublicProfile>;
+  upsertPublicProfile: (profile: PublicProfile) => void;
   /** In-progress email OTP / magic-link flow restored after the OS kills the app. */
   authResume: AuthResume | null;
   persistAuthResume: (resume: AuthResume) => Promise<void>;
@@ -192,7 +195,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       existing &&
       existing.bio === profile.bio &&
       existing.location === profile.location &&
-      existing.photoUri === profile.photoUri
+      existing.photoUri === profile.photoUri &&
+      existing.followerCount === profile.followerCount &&
+      existing.followingCount === profile.followingCount &&
+      existing.isFollowing === profile.isFollowing
     ) {
       return;
     }
@@ -300,7 +306,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return card;
       }
       const cached = publicProfilesRef.current[username];
-      if (cached) return cached;
+      if (cached && cached.followerCount !== undefined) return cached;
       const inflight = publicProfileInflight.current[username];
       if (inflight) return inflight;
 
@@ -311,6 +317,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           bio: profile.bio ?? '',
           location: profile.location ?? '',
           photoUri: profile.photoUri,
+          followerCount: profile.followerCount ?? 0,
+          followingCount: profile.followingCount ?? 0,
+          isFollowing: Boolean(profile.isFollowing),
         };
         rememberPublicProfile(card);
         return card;
@@ -724,6 +733,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       publicProfiles,
       ensurePublicProfile,
+      upsertPublicProfile: rememberPublicProfile,
       authResume,
       persistAuthResume,
       clearAuthResumeFlow,
@@ -762,6 +772,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       persistAuthResume,
       publicProfiles,
       refreshSession,
+      rememberPublicProfile,
       requestMagicLink,
       requestRecovery,
       sendPasswordOtp,

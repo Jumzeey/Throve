@@ -169,6 +169,7 @@ router.post('/sessions', requireAuth, async (req, res) => {
     .object({
       title: z.string().min(1),
       department: z.enum(['Women', 'Men', 'Kids']),
+      category: z.string().optional(),
       description: z.string().optional(),
       featuredListingIds: z.array(z.string()).default([]),
       products: z
@@ -224,11 +225,14 @@ router.post('/sessions', requireAuth, async (req, res) => {
       host_id: userId,
       title: parsed.data.title.trim(),
       department: parsed.data.department,
+      category: parsed.data.category?.trim() || null,
       description: parsed.data.description?.trim() ?? null,
       featured_listing_ids: productInputs.map((p) => p.listingId),
       scheduled_at: scheduled ? parsed.data.scheduledAt : null,
       status: scheduled ? 'upcoming' : 'live',
       viewers: scheduled ? null : 1,
+      peak_viewers: scheduled ? 0 : 1,
+      products_shown: productInputs.length > 0 ? 1 : 0,
       pinned_listing_id: productInputs.find((p) => p.isPinned)?.listingId ?? productInputs[0]?.listingId ?? null,
       thumbnail_url: parsed.data.thumbnailUrl ?? null,
       started_at: scheduled ? null : new Date().toISOString(),
@@ -388,13 +392,85 @@ router.post('/sessions/:id/start', requireAuth, async (req, res) => {
 
 router.post('/sessions/:id/end', requireAuth, async (req, res) => {
   const { supabase, userId } = req as AuthedRequest;
-  const { error } = await supabase
+  const parsed = z
+    .object({
+      peakViewers: z.number().int().nonnegative().optional(),
+      reason: z.enum(['host', 'connection']).optional(),
+    })
+    .safeParse(req.body ?? {});
+
+  const { data: session, error: sessionError } = await supabase
     .from('live_sessions')
-    .update({ status: 'ended', ended_at: new Date().toISOString() })
+    .select('*')
     .eq('id', req.params.id)
-    .eq('host_id', userId);
+    .eq('host_id', userId)
+    .maybeSingle();
+  if (sessionError) return handleSupabaseError(res, sessionError);
+  if (!session) return sendError(res, 404, 'Session not found');
+
+  const endedAt = session.status === 'ended' && session.ended_at
+    ? String(session.ended_at)
+    : new Date().toISOString();
+  const peakFromClient = parsed.success ? parsed.data.peakViewers : undefined;
+  const peakViewers = Math.max(
+    Number(session.peak_viewers ?? 0),
+    Number(session.viewers ?? 0),
+    peakFromClient ?? 0,
+  );
+
+  if (session.status !== 'ended') {
+    const { error } = await supabase
+      .from('live_sessions')
+      .update({
+        status: 'ended',
+        ended_at: endedAt,
+        peak_viewers: peakViewers,
+        viewers: 0,
+      })
+      .eq('id', req.params.id)
+      .eq('host_id', userId);
+    if (error) return handleSupabaseError(res, error);
+  }
+
+  const products = await loadProducts(supabase, String(req.params.id));
+  const productsSold = products.filter((p) => p.soldCount > 0).length;
+  const productsShown = Math.max(Number(session.products_shown ?? 0), products.length);
+  const startedMs = session.started_at ? new Date(String(session.started_at)).getTime() : Date.now();
+  const endedMs = new Date(endedAt).getTime();
+  const durationMinutes = Math.max(1, Math.round((endedMs - startedMs) / 60000));
+
+  return res.json({
+    sessionId: session.id,
+    title: session.title,
+    durationMinutes,
+    peakViewers,
+    productsShown,
+    productsSold,
+    endedReason: parsed.success ? parsed.data.reason ?? 'host' : 'host',
+  });
+});
+
+router.post('/sessions/:id/viewers', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const parsed = z.object({ viewers: z.number().int().nonnegative() }).safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, 'Invalid viewers');
+
+  const { data: session, error } = await supabase
+    .from('live_sessions')
+    .select('id, host_id, peak_viewers, status')
+    .eq('id', req.params.id)
+    .maybeSingle();
   if (error) return handleSupabaseError(res, error);
-  return res.json({ ok: true });
+  if (!session) return sendError(res, 404, 'Session not found');
+  if (session.status !== 'live') return res.json({ ok: true });
+
+  const peak = Math.max(Number(session.peak_viewers ?? 0), parsed.data.viewers);
+  const { error: updateError } = await supabase
+    .from('live_sessions')
+    .update({ viewers: parsed.data.viewers, peak_viewers: peak })
+    .eq('id', req.params.id);
+  if (updateError) return handleSupabaseError(res, updateError);
+  return res.json({ ok: true, peakViewers: peak });
 });
 
 router.post('/sessions/:id/token', requireAuth, async (req, res) => {
@@ -517,7 +593,7 @@ router.patch('/sessions/:id/products/:productId', requireAuth, async (req, res) 
 });
 
 router.post('/sessions/:id/products/:productId/pin', requireAuth, async (req, res) => {
-  const { userId } = req as AuthedRequest;
+  const { supabase, userId } = req as AuthedRequest;
   try {
     const service = createServiceClient();
     const { data, error } = await service.rpc('pin_live_product', {
@@ -528,6 +604,18 @@ router.post('/sessions/:id/products/:productId/pin', requireAuth, async (req, re
       const mapped = rpcErrorMessage(error);
       return sendError(res, mapped.status, mapped.message, mapped.code);
     }
+
+    const { data: session } = await supabase
+      .from('live_sessions')
+      .select('products_shown')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    await supabase
+      .from('live_sessions')
+      .update({ products_shown: Number(session?.products_shown ?? 0) + 1 })
+      .eq('id', req.params.id)
+      .eq('host_id', userId);
+
     return res.json(mapLiveStreamProduct(data as DbRow));
   } catch (err) {
     return sendError(res, 500, err instanceof Error ? err.message : 'Pin failed');

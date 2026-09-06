@@ -13,6 +13,8 @@ type ProfileRow = {
   deactivated: boolean;
   notif_offers: boolean;
   notif_messages: boolean;
+  notif_live?: boolean;
+  notif_listings?: boolean;
   preferred_login_method?: 'password' | 'magic_link' | null;
   has_password?: boolean | null;
   payout_verified?: boolean | null;
@@ -65,6 +67,8 @@ export function mapProfile(row: ProfileRow, sellerUsername?: string) {
     deactivated: row.deactivated,
     notifOffers: row.notif_offers,
     notifMessages: row.notif_messages,
+    notifLive: row.notif_live !== false,
+    notifListings: row.notif_listings !== false,
     preferredLoginMethod: row.preferred_login_method === 'magic_link' ? 'magic_link' : 'password',
     hasPassword: Boolean(row.has_password),
     payoutVerified: Boolean(row.payout_verified),

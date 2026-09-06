@@ -13,14 +13,14 @@ import { getDeviceLoginPreference } from '@/lib/login-preference';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
 type ConfirmKind = 'logout' | 'delete' | 'switch' | null;
 type ActionPhase = 'idle' | 'working' | 'done' | 'error';
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { session, logout, deactivateAccount, updatePreferredLoginMethod } = useAuth();
+  const { session, logout, deactivateAccount, updatePreferredLoginMethod, updateSettings } = useAuth();
   const inbox = useInbox();
   const { hideActiveForSeller } = useListings();
   const { isConnected } = useNetworkStatus();
@@ -31,7 +31,12 @@ export default function SettingsScreen() {
   const [logoutPhase, setLogoutPhase] = useState<ActionPhase>('idle');
   const [deletePhase, setDeletePhase] = useState<ActionPhase>('idle');
   const [switchPhase, setSwitchPhase] = useState<ActionPhase>('idle');
+  const [notifPhase, setNotifPhase] = useState<ActionPhase>('idle');
   const [farewell, setFarewell] = useState<'logout' | 'delete' | null>(null);
+  const [notifOffers, setNotifOffers] = useState(true);
+  const [notifMessages, setNotifMessages] = useState(true);
+  const [notifLive, setNotifLive] = useState(true);
+  const [notifListings, setNotifListings] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -47,6 +52,14 @@ export default function SettingsScreen() {
   useEffect(() => {
     if (session?.preferredLoginMethod) setMethod(session.preferredLoginMethod);
   }, [session?.preferredLoginMethod]);
+
+  useEffect(() => {
+    if (!session) return;
+    setNotifOffers(session.notifOffers !== false);
+    setNotifMessages(session.notifMessages !== false);
+    setNotifLive(session.notifLive !== false);
+    setNotifListings(session.notifListings !== false);
+  }, [session]);
 
   useEffect(() => {
     if (!farewell || session) return;
@@ -101,7 +114,11 @@ export default function SettingsScreen() {
   const blockedCount = inbox.blockedUsers.length;
   const hasPassword = Boolean(session.hasPassword);
   const isMagic = method === 'magic_link';
-  const busy = logoutPhase === 'working' || deletePhase === 'working' || switchPhase === 'working';
+  const busy =
+    logoutPhase === 'working' ||
+    deletePhase === 'working' ||
+    switchPhase === 'working' ||
+    notifPhase === 'working';
 
   function openSwitch(next: PreferredLoginMethod) {
     if (!isConnected || busy || next === method) return;
@@ -157,6 +174,34 @@ export default function SettingsScreen() {
       setPendingMethod(null);
     } catch {
       setSwitchPhase('error');
+    }
+  }
+
+  async function toggleNotif(
+    key: 'notifOffers' | 'notifMessages' | 'notifLive' | 'notifListings',
+    next: boolean,
+  ) {
+    if (!isConnected || busy) return;
+    const prev = {
+      notifOffers,
+      notifMessages,
+      notifLive,
+      notifListings,
+    };
+    const setters = {
+      notifOffers: setNotifOffers,
+      notifMessages: setNotifMessages,
+      notifLive: setNotifLive,
+      notifListings: setNotifListings,
+    };
+    setters[key](next);
+    setNotifPhase('working');
+    try {
+      await updateSettings({ [key]: next });
+      setNotifPhase('done');
+    } catch {
+      setters[key](prev[key]);
+      setNotifPhase('error');
     }
   }
 
@@ -218,11 +263,57 @@ export default function SettingsScreen() {
           />
         ) : null}
 
+        {notifPhase === 'error' ? (
+          <AlertBanner
+            variant="error"
+            title="Couldn't update notifications"
+            message="Your email preferences are unchanged. Please try again."
+          />
+        ) : null}
+
+        {notifPhase === 'done' ? (
+          <AlertBanner variant="success" title="Notification preferences updated" />
+        ) : null}
+
         <Section label="Profile">
           <Pressable style={styles.linkRow} onPress={() => router.push('/profile/edit')}>
             <Text style={styles.linkLabel}>Edit profile</Text>
             <Ionicons name="chevron-forward" size={15} color={Palette.muted2} />
           </Pressable>
+        </Section>
+
+        <Section label="Email notifications">
+          <NotifToggle
+            title="Offers"
+            body="When someone sends, accepts, or updates an offer."
+            value={notifOffers}
+            disabled={!isConnected || busy}
+            onValueChange={(next) => void toggleNotif('notifOffers', next)}
+          />
+          <View style={styles.toggleDivider} />
+          <NotifToggle
+            title="Messages"
+            body="When you get a new chat message."
+            value={notifMessages}
+            disabled={!isConnected || busy}
+            onValueChange={(next) => void toggleNotif('notifMessages', next)}
+          />
+          <View style={styles.toggleDivider} />
+          <NotifToggle
+            title="Live"
+            body="When a live you care about is starting or you're invited to moderate."
+            value={notifLive}
+            disabled={!isConnected || busy}
+            onValueChange={(next) => void toggleNotif('notifLive', next)}
+          />
+          <View style={styles.toggleDivider} />
+          <NotifToggle
+            title="Followed sellers"
+            body="Email with the product photo and details when sellers you follow publish something new."
+            value={notifListings}
+            disabled={!isConnected || busy}
+            onValueChange={(next) => void toggleNotif('notifListings', next)}
+          />
         </Section>
 
         <Section label="Account details">
@@ -430,6 +521,37 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+function NotifToggle({
+  title,
+  body,
+  value,
+  disabled,
+  onValueChange,
+}: {
+  title: string;
+  body: string;
+  value: boolean;
+  disabled?: boolean;
+  onValueChange: (next: boolean) => void;
+}) {
+  return (
+    <View style={styles.toggleRow}>
+      <View style={styles.toggleCopy}>
+        <Text style={styles.toggleTitle}>{title}</Text>
+        <Text style={styles.toggleBody}>{body}</Text>
+      </View>
+      <Switch
+        value={value}
+        disabled={disabled}
+        onValueChange={onValueChange}
+        trackColor={{ false: Palette.border, true: Palette.plum }}
+        thumbColor={Palette.ivory}
+        ios_backgroundColor={Palette.border}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
@@ -460,6 +582,33 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.ivoryElevated,
     borderRadius: Radius.sm,
     overflow: 'hidden',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 15,
+  },
+  toggleCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  toggleTitle: {
+    fontSize: 14,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.espresso,
+  },
+  toggleBody: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: Typography.body,
+    color: Palette.muted,
+  },
+  toggleDivider: {
+    height: 1,
+    backgroundColor: Palette.divider,
+    marginLeft: 15,
   },
   linkRow: {
     flexDirection: 'row',
