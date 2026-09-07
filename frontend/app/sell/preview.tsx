@@ -1,3 +1,4 @@
+import { AlertBanner } from '@/components/ui/alert-banner';
 import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
 import { EyeIcon } from '@/components/ui/icons';
@@ -8,6 +9,7 @@ import { isListingFormPublishable, parseListingPrice, useListings } from '@/cont
 import { DELIVERY_OPTIONS } from '@/data/checkout';
 import { isNativeImageUri } from '@/data/images';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
+import { ApiError } from '@/lib/api';
 import { formatNaira } from '@/lib/format';
 import { displayListingSize } from '@/lib/listing-display';
 import { getCachedListingCatalog } from '@/lib/listing-catalog';
@@ -23,6 +25,8 @@ export default function ListingPreviewScreen() {
   const [photoIndex, setPhotoIndex] = useState(0);
   const [publishing, setPublishing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
 
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
@@ -58,14 +62,23 @@ export default function ListingPreviewScreen() {
   async function goPublish() {
     if (publishing) return;
     setPublishing(true);
+    setPublishError(null);
     try {
       const listing = await publish(username);
       if (!listing) {
-        router.replace('/sell/create');
+        setPublishError('This listing is missing required details. Go back and finish the form.');
         return;
       }
       router.replace({ pathname: '/sell/[id]', params: { id: listing.id, notice: 'published' } });
-    } catch {
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'We could not publish this listing. Please try again.';
+      setPublishError(message);
+    } finally {
       setPublishing(false);
     }
   }
@@ -73,10 +86,19 @@ export default function ListingPreviewScreen() {
   async function goDraft() {
     if (saving) return;
     setSaving(true);
+    setDraftError(null);
     try {
       await saveDraft(username);
       router.replace({ pathname: '/(tabs)/sell', params: { tab: 'draft' } });
-    } catch {
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'We could not save this draft. Please try again.';
+      setDraftError(message);
+    } finally {
       setSaving(false);
     }
   }
@@ -91,6 +113,23 @@ export default function ListingPreviewScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 12 }}>
+        {publishError ? (
+          <AlertBanner
+            variant="error"
+            title="Couldn't publish"
+            message={publishError}
+            style={styles.errorBanner}
+          />
+        ) : null}
+        {draftError ? (
+          <AlertBanner
+            variant="error"
+            title="Couldn't save draft"
+            message={draftError}
+            style={styles.errorBanner}
+          />
+        ) : null}
+
         <PhotoPager
           count={photoCount}
           uris={photoUris}
@@ -237,6 +276,10 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontFamily: Typography.body,
     color: Palette.plum,
+  },
+  errorBanner: {
+    marginHorizontal: Spacing.xl,
+    marginTop: Spacing.md,
   },
   thumbs: {
     gap: 8,

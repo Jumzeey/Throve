@@ -420,6 +420,8 @@ router.post('/:id/publish', requireAuth, async (req, res) => {
     size: data.size ? String(data.size) : undefined,
     condition: data.condition ? String(data.condition) : undefined,
     photoUrl: Array.isArray(data.photo_urls) ? data.photo_urls[0] : undefined,
+  }).catch((err) => {
+    console.warn('[listings] follower notify failed', err instanceof Error ? err.message : err);
   });
 
   return res.json(mapListing(data, sellerUsername));

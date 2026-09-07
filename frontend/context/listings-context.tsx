@@ -1,4 +1,4 @@
-import { apiFetch, apiUpload } from '@/lib/api';
+import { apiFetch, apiUpload, ApiError } from '@/lib/api';
 import { isLocalListingPhotoUri, isUploadableLocalFileUri, listingPhotoFormPart } from '@/lib/listing-photos';
 import { getCachedListingCatalog, listingFormIssues, fetchListingCatalog } from '@/lib/listing-catalog';
 import { useAuth } from '@/context/auth-context';
@@ -159,7 +159,16 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
     if (!uris.length) return [] as string[];
 
     const remote = uris.filter((uri) => !isLocalListingPhotoUri(uri));
-    const local = uris.filter((uri) => isLocalListingPhotoUri(uri) && isUploadableLocalFileUri(uri));
+    const localCandidates = uris.filter((uri) => isLocalListingPhotoUri(uri));
+    const local = localCandidates.filter((uri) => isUploadableLocalFileUri(uri));
+
+    if (localCandidates.length && !local.length) {
+      throw new ApiError(
+        'Your photos are no longer available on this device. Add them again, then publish.',
+        'PHOTO_UNAVAILABLE',
+      );
+    }
+
     if (!local.length) return remote;
 
     const formData = new FormData();
@@ -167,8 +176,17 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
       formData.append('files', listingPhotoFormPart(uri, index) as unknown as Blob);
     });
 
-    const uploaded = await apiUpload<{ urls: string[] }>('/media/listing-photos', formData);
-    return [...remote, ...(uploaded.urls ?? [])];
+    const uploaded = await apiUpload<{ urls: string[] }>('/media/listing-photos', formData, {
+      timeoutMs: Math.max(90_000, local.length * 45_000),
+    });
+    const urls = uploaded.urls ?? [];
+    if (urls.length < local.length) {
+      throw new ApiError(
+        'Some photos failed to upload. Try again with fewer or smaller images.',
+        'PHOTO_UPLOAD',
+      );
+    }
+    return [...remote, ...urls];
   }, []);
 
   const saveDraft = useCallback(
@@ -214,8 +232,18 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
     async (_seller: string) => {
       if (!isListingFormPublishable(form)) return null;
       const draft = await saveDraft(_seller);
+      if (!(draft.photoUrls?.length ?? draft.photoCount)) {
+        throw new ApiError(
+          'Add at least one photo before publishing. If photos were already selected, add them again.',
+          'PHOTO_REQUIRED',
+        );
+      }
       const listing = await apiFetch<Listing>(`/listings/${draft.id}/publish`, { method: 'POST' });
-      setListings((current) => current.map((item) => (item.id === listing.id ? listing : item)));
+      setListings((current) => {
+        const index = current.findIndex((item) => item.id === listing.id);
+        if (index === -1) return [listing, ...current];
+        return current.map((item) => (item.id === listing.id ? listing : item));
+      });
       setFormState(EMPTY_LISTING_FORM);
       return listing;
     },

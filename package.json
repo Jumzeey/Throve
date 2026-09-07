@@ -12,6 +12,7 @@
     "start:backend": "npm run dev --workspace backend",
     "start:admin": "npm run dev --workspace admin",
     "dev": "npm run dev --workspace backend",
+    "postinstall": "npm run postinstall --workspace frontend",
     "typecheck": "npm run typecheck --workspace backend && npm run typecheck --workspace frontend",
     "db:push": "bash scripts/push-migrations.sh",
     "db:seed": "npm run seed --workspace backend"

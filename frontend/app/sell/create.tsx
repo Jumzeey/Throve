@@ -19,18 +19,30 @@ import {
   sizeIsRequired,
   sizesForProductType,
   type ListingCatalog,
+  type ListingFormIssueField,
 } from '@/lib/listing-catalog';
 import { pickListingPhotos } from '@/lib/listing-photos';
 import * as Haptics from 'expo-haptics';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type LayoutChangeEvent,
+} from 'react-native';
+import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
 
 export default function CreateListingScreen() {
   const router = useRouter();
   const { bottom } = useScreenInsets();
-  const keyboard = useKeyboardInset();
+  const keyboardScroll = useKeyboardAwareScroll();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { session } = useAuth();
   const { form, setForm, getListing, loadFormFromListing, saveDraft, loading: listingsLoading } = useListings();
@@ -44,6 +56,7 @@ export default function CreateListingScreen() {
   const [showErrors, setShowErrors] = useState(false);
   const [photoIndex, setPhotoIndex] = useState<number | null>(null);
   const [skipDialog, setSkipDialog] = useState<{ title: string; body: string } | null>(null);
+  const fieldOffsets = useRef<Partial<Record<ListingFormIssueField, number>>>({});
 
   const photoUris = form.photoUris ?? [];
 
@@ -90,7 +103,7 @@ export default function CreateListingScreen() {
   const loading = (!catalog && !catalogError) || loadingDraft;
   const categories = catalog ? categoriesForDepartment(catalog, form.department) : [];
   const issues = catalog ? listingFormIssues(form, catalog) : [];
-  const canPreview = issues.length === 0;
+  const issueFields = new Set(issues.map((item) => item.field));
   const photoMax = catalog?.photo.max ?? 8;
   const sizeOptions = catalog ? sizesForProductType(catalog, form.productType) : [];
   const sizeRequired = catalog ? sizeIsRequired(catalog, form.productType) : false;
@@ -110,9 +123,24 @@ export default function CreateListingScreen() {
       .catch(() => setCatalogError(true));
   }
 
+  function rememberFieldOffset(field: ListingFormIssueField) {
+    return (event: LayoutChangeEvent) => {
+      fieldOffsets.current[field] = event.nativeEvent.layout.y;
+    };
+  }
+
+  function scrollToField(field: ListingFormIssueField) {
+    const y = fieldOffsets.current[field];
+    if (y == null) return;
+    keyboardScroll.scrollRef.current?.scrollTo({ y: Math.max(0, y - 16), animated: true });
+  }
+
   function preview() {
-    if (!canPreview) {
+    if (issues.length > 0) {
       setShowErrors(true);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      // Wait for error styles / banner layout so offsets are fresh.
+      setTimeout(() => scrollToField(issues[0].field), 100);
       return;
     }
     router.push('/sell/preview');
@@ -217,18 +245,18 @@ export default function CreateListingScreen() {
       ) : (
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView
+            ref={keyboardScroll.scrollRef}
+            onScroll={keyboardScroll.onScroll}
+            scrollEventThrottle={16}
             contentContainerStyle={[
               styles.body,
               {
-                paddingBottom:
-                  Spacing.xxxl +
-                  bottom +
-                  (Platform.OS === 'android' && keyboard.height > 0 ? keyboard.height : 0),
+                paddingBottom: Spacing.xxxl + Math.max(keyboardScroll.contentPaddingBottom, bottom),
               },
             ]}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
-            automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}>
+            automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}>
           {!isConnected ? (
             <AlertBanner variant="warning" title="No connection" message="Reconnect to save this listing." style={styles.banner} />
           ) : null}
@@ -261,178 +289,247 @@ export default function CreateListingScreen() {
             <AlertBanner
               variant="error"
               title={neededLabel}
-              message={issues.map((item) => `• ${item}`).join('\n')}
+              message={issues.map((item) => `• ${item.label}`).join('\n')}
               style={styles.banner}
             />
           ) : null}
 
           {catalog ? (
             <>
-              <View style={styles.sectionHead}>
-                <Text style={styles.labelTight}>Photographs</Text>
-                <Text style={styles.counter}>
-                  {photoUris.length} of {photoMax}
+              <View onLayout={rememberFieldOffset('photos')}>
+                <View style={styles.sectionHead}>
+                  <Text style={styles.labelTight}>Photographs</Text>
+                  <Text style={styles.counter}>
+                    {photoUris.length} of {photoMax}
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.photoGrid,
+                    showErrors && issueFields.has('photos') ? styles.sectionError : null,
+                  ]}>
+                  {photoUris.map((uri, index) => (
+                    <View key={`${uri}-${index}`} style={styles.photoCell}>
+                      <Pressable
+                        onPress={() => setPhotoIndex(index)}
+                        onLongPress={() => void makeMain(index)}
+                        delayLongPress={280}
+                        style={[styles.photoSlot, styles.photoFilled, index === 0 && styles.photoMain]}>
+                        <Image source={{ uri }} style={styles.photoThumb} />
+                        {index === 0 ? (
+                          <View style={styles.mainBanner}>
+                            <Text style={styles.mainBannerText}>MAIN</Text>
+                          </View>
+                        ) : null}
+                      </Pressable>
+                    </View>
+                  ))}
+                  {photoUris.length < photoMax ? (
+                    <View style={styles.photoCell}>
+                      <Pressable
+                        onPress={() => void addPhotos()}
+                        disabled={picking}
+                        style={[
+                          styles.photoSlot,
+                          styles.photoAdd,
+                          photoUris.length === 0 && styles.photoAddMain,
+                          showErrors && issueFields.has('photos') ? styles.photoAddError : null,
+                        ]}
+                        accessibilityLabel="Add photos from library">
+                        {picking ? (
+                          <ActivityIndicator color={Palette.plum} />
+                        ) : (
+                          <>
+                            <PlusIcon size={18} color={Palette.plum} />
+                            <Text style={styles.addLabel}>{photoUris.length === 0 ? 'Main' : 'Add'}</Text>
+                          </>
+                        )}
+                      </Pressable>
+                    </View>
+                  ) : null}
+                  {Array.from({ length: emptySlots }).map((_, index) => (
+                    <View key={`empty-${index}`} style={styles.photoCell}>
+                      <View style={styles.photoSlot} />
+                    </View>
+                  ))}
+                </View>
+                <Text style={[styles.hint, showErrors && issueFields.has('photos') && styles.hintError]}>
+                  {showErrors && issueFields.has('photos')
+                    ? `Add at least ${catalog.photo.min} photo${catalog.photo.min === 1 ? '' : 's'} to continue.`
+                    : photoUris.length === 0
+                      ? `0 of ${photoMax} · ${catalog.hints.photosEmpty}`
+                      : photoUris.length >= photoMax
+                        ? `${photoMax} of ${photoMax} — the limit is reached, so Add is hidden. Press and hold a photo to make it the main image.`
+                        : catalog.hints.photos}
                 </Text>
               </View>
-              <View style={styles.photoGrid}>
-                {photoUris.map((uri, index) => (
-                  <View key={`${uri}-${index}`} style={styles.photoCell}>
-                    <Pressable
-                      onPress={() => setPhotoIndex(index)}
-                      onLongPress={() => void makeMain(index)}
-                      delayLongPress={280}
-                      style={[styles.photoSlot, styles.photoFilled, index === 0 && styles.photoMain]}>
-                      <Image source={{ uri }} style={styles.photoThumb} />
-                      {index === 0 ? (
-                        <View style={styles.mainBanner}>
-                          <Text style={styles.mainBannerText}>MAIN</Text>
-                        </View>
-                      ) : null}
-                    </Pressable>
-                  </View>
-                ))}
-                {photoUris.length < photoMax ? (
-                  <View style={styles.photoCell}>
-                    <Pressable
-                      onPress={() => void addPhotos()}
-                      disabled={picking}
-                      style={[styles.photoSlot, styles.photoAdd, photoUris.length === 0 && styles.photoAddMain]}
-                      accessibilityLabel="Add photos from library">
-                      {picking ? (
-                        <ActivityIndicator color={Palette.plum} />
-                      ) : (
-                        <>
-                          <PlusIcon size={18} color={Palette.plum} />
-                          <Text style={styles.addLabel}>{photoUris.length === 0 ? 'Main' : 'Add'}</Text>
-                        </>
-                      )}
-                    </Pressable>
-                  </View>
-                ) : null}
-                {Array.from({ length: emptySlots }).map((_, index) => (
-                  <View key={`empty-${index}`} style={styles.photoCell}>
-                    <View style={styles.photoSlot} />
-                  </View>
-                ))}
-              </View>
-              <Text style={[styles.hint, showErrors && photoUris.length < catalog.photo.min && styles.hintError]}>
-                {photoUris.length === 0
-                  ? `0 of ${photoMax} · ${catalog.hints.photosEmpty}`
-                  : photoUris.length >= photoMax
-                    ? `${photoMax} of ${photoMax} — the limit is reached, so Add is hidden. Press and hold a photo to make it the main image.`
-                    : catalog.hints.photos}
-              </Text>
 
-              <View style={styles.sectionHead}>
-                <Text style={styles.labelTight}>Item title</Text>
-                <Text style={styles.counter}>
-                  {form.title.length} / {catalog.titleMax}
-                </Text>
-              </View>
-              <TextField
-                placeholder="e.g. Quilted chain flap bag"
-                value={form.title}
-                maxLength={catalog.titleMax}
-                onChangeText={(title) => {
-                  setForm({ title });
-                  setDraftSaved(false);
-                }}
-              />
-
-              <Text style={styles.label}>Department</Text>
-              <WrapChips chips={catalog.departments} selected={form.department} onSelect={selectDepartment} />
-
-              {form.department ? (
-                <>
-                  <Text style={styles.label}>Category in {form.department}</Text>
-                  <WrapChips chips={categories} selected={form.category} onSelect={selectCategory} />
-                  <Text style={styles.hint}>{catalog.hints.category}</Text>
-                </>
-              ) : null}
-
-              <Text style={styles.label}>Condition</Text>
-              <WrapChips
-                chips={catalog.conditions}
-                selected={form.condition}
-                onSelect={(condition) => {
-                  setForm({ condition });
-                  setShowErrors(false);
-                }}
-              />
-
-              <Text style={styles.label}>Product type</Text>
-              <PickerField
-                value={form.productType}
-                options={catalog.productTypes}
-                placeholder="Choose a product type"
-                error={showErrors && !form.productType ? 'Choose a product type for the size chart.' : null}
-                onSelect={selectProductType}
-              />
-              <Text style={styles.hint}>{catalog.hints.productType ?? catalog.hints.size}</Text>
-
-              <Text style={styles.label}>Size{sizeRequired ? '' : ' - optional'}</Text>
-              <PickerField
-                value={sizeLabel}
-                options={sizeOptions.map((item) => item.label)}
-                placeholder={form.productType ? 'Choose a size' : 'Choose a product type first'}
-                error={
-                  showErrors && sizeRequired && !form.size
-                    ? `Size is required for ${form.productType}.`
-                    : null
-                }
-                onSelect={(label) => {
-                  const match = sizeOptions.find((item) => item.label === label);
-                  setForm({ size: match?.value ?? label });
-                  setShowErrors(false);
-                }}
-              />
-              <Text style={styles.hint}>{catalog.hints.size}</Text>
-
-              <Text style={styles.label}>Brand</Text>
-              <PickerField
-                value={form.brand}
-                options={catalog.brands ?? []}
-                placeholder="e.g. Zara"
-                onSelect={(brand) => {
-                  setForm({ brand });
-                  setDraftSaved(false);
-                }}
-              />
-
-              <Text style={styles.label}>Colour - optional</Text>
-              <TextField placeholder="e.g. Black" value={form.colour} onChangeText={(colour) => setForm({ colour })} />
-
-              <Text style={styles.label}>Price</Text>
-              <View style={styles.priceRow}>
-                <Text style={styles.naira}>₦</Text>
+              <View onLayout={rememberFieldOffset('title')} ref={keyboardScroll.setAnchor('title')} collapsable={false}>
+                <View style={styles.sectionHead}>
+                  <Text style={styles.labelTight}>Item title</Text>
+                  <Text style={styles.counter}>
+                    {form.title.length} / {catalog.titleMax}
+                  </Text>
+                </View>
                 <TextField
-                  placeholder="0"
-                  value={form.price ? Number(form.price).toLocaleString('en-NG') : ''}
-                  keyboardType="number-pad"
-                  containerStyle={styles.priceField}
-                  error={showErrors && issues.includes('Price') ? 'Enter a price in naira above zero.' : null}
-                  onChangeText={(price) => {
-                    setForm({ price: price.replace(/[^\d]/g, '') });
+                  placeholder="e.g. Quilted chain flap bag"
+                  value={form.title}
+                  maxLength={catalog.titleMax}
+                  error={showErrors && issueFields.has('title') ? 'Add a title for this listing.' : null}
+                  onFocus={() => keyboardScroll.onFieldFocus('title')}
+                  onChangeText={(title) => {
+                    setForm({ title });
+                    setDraftSaved(false);
                     setShowErrors(false);
                   }}
                 />
               </View>
 
-              <View style={styles.sectionHead}>
-                <Text style={styles.labelTight}>Description</Text>
-                <Text style={styles.counter}>
-                  {form.description.length} / {catalog.descriptionMax}
-                </Text>
+              <View onLayout={rememberFieldOffset('department')}>
+                <Text style={styles.label}>Department</Text>
+                <WrapChips
+                  chips={catalog.departments}
+                  selected={form.department}
+                  error={showErrors && issueFields.has('department')}
+                  onSelect={selectDepartment}
+                />
+                {showErrors && issueFields.has('department') ? (
+                  <Text style={styles.fieldErrorText}>Choose a department.</Text>
+                ) : null}
               </View>
-              <TextField
-                placeholder="Condition details, measurements, etc."
-                value={form.description}
-                maxLength={catalog.descriptionMax}
-                multiline
-                style={styles.description}
-                onChangeText={(description) => setForm({ description })}
-              />
 
+              {form.department ? (
+                <View onLayout={rememberFieldOffset('category')}>
+                  <Text style={styles.label}>Category in {form.department}</Text>
+                  <WrapChips
+                    chips={categories}
+                    selected={form.category}
+                    error={showErrors && issueFields.has('category')}
+                    onSelect={selectCategory}
+                  />
+                  <Text style={[styles.hint, showErrors && issueFields.has('category') && styles.hintError]}>
+                    {showErrors && issueFields.has('category')
+                      ? 'Choose a category for this item.'
+                      : catalog.hints.category}
+                  </Text>
+                </View>
+              ) : null}
+
+              <View onLayout={rememberFieldOffset('condition')}>
+                <Text style={styles.label}>Condition</Text>
+                <WrapChips
+                  chips={catalog.conditions}
+                  selected={form.condition}
+                  error={showErrors && issueFields.has('condition')}
+                  onSelect={(condition) => {
+                    setForm({ condition });
+                    setShowErrors(false);
+                  }}
+                />
+                {showErrors && issueFields.has('condition') ? (
+                  <Text style={styles.fieldErrorText}>Choose a condition.</Text>
+                ) : null}
+              </View>
+
+              <View onLayout={rememberFieldOffset('productType')}>
+                <Text style={styles.label}>Product type</Text>
+                <PickerField
+                  value={form.productType}
+                  options={catalog.productTypes}
+                  placeholder="Choose a product type"
+                  error={showErrors && issueFields.has('productType') ? 'Choose a product type for the size chart.' : null}
+                  onSelect={selectProductType}
+                />
+                <Text style={styles.hint}>{catalog.hints.productType ?? catalog.hints.size}</Text>
+              </View>
+
+              <View onLayout={rememberFieldOffset('size')}>
+                <Text style={styles.label}>Size{sizeRequired ? '' : ' - optional'}</Text>
+                <PickerField
+                  value={sizeLabel}
+                  options={sizeOptions.map((item) => item.label)}
+                  placeholder={form.productType ? 'Choose a size' : 'Choose a product type first'}
+                  allowCustom
+                  customEyebrow="Use this size"
+                  error={
+                    showErrors && issueFields.has('size')
+                      ? `Size is required for ${form.productType}.`
+                      : null
+                  }
+                  onSelect={(label) => {
+                    const match = sizeOptions.find((item) => item.label === label);
+                    setForm({ size: match?.value ?? label });
+                    setShowErrors(false);
+                  }}
+                />
+                <Text style={styles.hint}>{catalog.hints.size}</Text>
+              </View>
+
+              <Text style={styles.label}>Brand</Text>
+              <PickerField
+                value={form.brand}
+                options={catalog.brands ?? []}
+                placeholder="e.g. Zara, or your own label"
+                allowCustom
+                customEyebrow="Use your brand"
+                onSelect={(brand) => {
+                  setForm({ brand });
+                  setDraftSaved(false);
+                }}
+              />
+              <Text style={styles.hint}>
+                Pick a suggestion or type any brand — including your own label. Use Unbranded if there isn’t one.
+              </Text>
+
+              <View ref={keyboardScroll.setAnchor('colour')} collapsable={false}>
+                <Text style={styles.label}>Colour - optional</Text>
+                <TextField
+                  placeholder="e.g. Black"
+                  value={form.colour}
+                  onFocus={() => keyboardScroll.onFieldFocus('colour')}
+                  onChangeText={(colour) => setForm({ colour })}
+                />
+              </View>
+
+              <View
+                onLayout={rememberFieldOffset('price')}
+                ref={keyboardScroll.setAnchor('price')}
+                collapsable={false}>
+                <Text style={styles.label}>Price</Text>
+                <View style={styles.priceRow}>
+                  <Text style={styles.naira}>₦</Text>
+                  <TextField
+                    placeholder="0"
+                    value={form.price ? Number(form.price).toLocaleString('en-NG') : ''}
+                    keyboardType="number-pad"
+                    containerStyle={styles.priceField}
+                    error={showErrors && issueFields.has('price') ? 'Enter a price in naira above zero.' : null}
+                    onFocus={() => keyboardScroll.onFieldFocus('price')}
+                    onChangeText={(price) => {
+                      setForm({ price: price.replace(/[^\d]/g, '') });
+                      setShowErrors(false);
+                    }}
+                  />
+                </View>
+              </View>
+
+              <View ref={keyboardScroll.setAnchor('description')} collapsable={false}>
+                <View style={styles.sectionHead}>
+                  <Text style={styles.labelTight}>Description</Text>
+                  <Text style={styles.counter}>
+                    {form.description.length} / {catalog.descriptionMax}
+                  </Text>
+                </View>
+                <TextField
+                  placeholder="Condition details, measurements, etc."
+                  value={form.description}
+                  maxLength={catalog.descriptionMax}
+                  multiline
+                  style={styles.description}
+                  onFocus={() => keyboardScroll.onFieldFocus('description')}
+                  onChangeText={(description) => setForm({ description })}
+                />
+              </View>
               <Text style={styles.label}>Shipping</Text>
               {catalog.shipping.map((option) => {
                 const active = selectedShipping?.value === option.value;
@@ -458,11 +555,11 @@ export default function CreateListingScreen() {
                   label={saving ? 'Saving draft...' : 'Save as draft'}
                   variant="secondary"
                   loading={saving}
-                  disabled={!isConnected}
+                  disabled={!isConnected || saving}
                   onPress={() => void draft()}
                   style={styles.action}
                 />
-                <Button label="Preview" disabled={!canPreview} onPress={preview} style={styles.action} />
+                <Button label="Preview" onPress={preview} style={styles.action} />
               </View>
             </>
           ) : null}
@@ -510,13 +607,15 @@ function WrapChips({
   chips,
   selected,
   onSelect,
+  error = false,
 }: {
   chips: readonly string[];
   selected: string;
   onSelect: (value: string) => void;
+  error?: boolean;
 }) {
   return (
-    <View style={styles.chips}>
+    <View style={[styles.chips, error ? styles.chipsError : null]}>
       {chips.map((chip) => {
         const active = selected === chip;
         return (
@@ -581,6 +680,23 @@ const styles = StyleSheet.create({
     color: Palette.muted,
   },
   hintError: { color: Palette.error },
+  fieldErrorText: {
+    marginTop: 8,
+    fontSize: 11.5,
+    lineHeight: 17,
+    fontFamily: Typography.body,
+    color: Palette.error,
+  },
+  sectionError: {
+    borderWidth: 1.5,
+    borderColor: Palette.error,
+    borderRadius: Radius.sm,
+    padding: 4,
+  },
+  photoAddError: {
+    borderColor: Palette.error,
+    borderStyle: 'dashed',
+  },
   photoGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -4 },
   photoCell: { width: '25%', padding: 4 },
   photoSlot: {
@@ -619,6 +735,12 @@ const styles = StyleSheet.create({
   },
   addLabel: { marginTop: 4, fontSize: 10, fontFamily: Typography.bodySemiBold, color: Palette.plum },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
+  chipsError: {
+    borderWidth: 1.5,
+    borderColor: Palette.error,
+    borderRadius: Radius.sm,
+    padding: 8,
+  },
   chip: { height: 34, paddingHorizontal: 14, borderRadius: Radius.pill, justifyContent: 'center' },
   chipOn: { backgroundColor: Palette.plum },
   chipOff: { backgroundColor: Palette.ivoryElevated, borderWidth: 1, borderColor: Palette.border },

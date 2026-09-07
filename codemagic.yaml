@@ -57,10 +57,29 @@ workflows:
     scripts:
       - name: Install npm dependencies
         script: |
-          # Install from monorepo root so workspace lockfile keeps event-target-shim@6
-          # for LiveKit. frontend-only install can flatten to RN's v5 and crash Live on Android.
+          # Install from monorepo root so workspace lockfile + postinstall patch apply.
           npm ci || npm install
-          node -e "const p=require('event-target-shim-v6/package.json'); if(p.version!=='6.0.2'){console.error(p);process.exit(1)}; console.log('event-target-shim-v6', p.version)"
+          node frontend/scripts/patch-livekit-webrtc-shim.js
+          node -e "
+            const path=require('path');
+            const metro=require('./frontend/metro.config.js');
+            const origin=path.resolve('node_modules/@livekit/react-native-webrtc/src/MediaDevices.ts');
+            const r=metro.resolver.resolveRequest(
+              { originModulePath: origin, resolveRequest: () => { throw new Error('fallback'); } },
+              'event-target-shim/index',
+              'android'
+            );
+            if (!String(r.filePath).includes('vendor/event-target-shim-v6')) {
+              console.error('Metro did not pin vendored shim v6', r);
+              process.exit(1);
+            }
+            const sample=require('fs').readFileSync(origin,'utf8').split('\\n')[0];
+            if (!sample.includes('event-target-shim-v6')) {
+              console.error('LiveKit WebRTC import was not patched', sample);
+              process.exit(1);
+            }
+            console.log('LiveKit WebRTC shim OK ->', r.filePath);
+          "
       - name: Write Expo env file
         script: |
           set -e
@@ -147,7 +166,22 @@ workflows:
       - name: Install npm dependencies
         script: |
           npm ci || npm install
-          node -e "const p=require('event-target-shim-v6/package.json'); if(p.version!=='6.0.2'){console.error(p);process.exit(1)}; console.log('event-target-shim-v6', p.version)"
+          node frontend/scripts/patch-livekit-webrtc-shim.js
+          node -e "
+            const path=require('path');
+            const metro=require('./frontend/metro.config.js');
+            const origin=path.resolve('node_modules/@livekit/react-native-webrtc/src/MediaDevices.ts');
+            const r=metro.resolver.resolveRequest(
+              { originModulePath: origin, resolveRequest: () => { throw new Error('fallback'); } },
+              'event-target-shim/index',
+              'ios'
+            );
+            if (!String(r.filePath).includes('vendor/event-target-shim-v6')) {
+              console.error('Metro did not pin vendored shim v6', r);
+              process.exit(1);
+            }
+            console.log('LiveKit WebRTC shim OK ->', r.filePath);
+          "
       - name: Write Expo env file
         script: |
           set -e

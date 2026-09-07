@@ -23,9 +23,10 @@ type SheetProps = {
 
 /**
  * Bottom sheet that lifts above the software keyboard (iOS + Android).
- * Place inside a transparent full-screen Modal.
+ * Place inside a transparent full-screen Modal — Android Modals do not
+ * resize with the soft keyboard, so we pad explicitly from keyboard metrics.
  */
-export function KeyboardSafeSheet({ children, onDismiss, style, gap = 10 }: SheetProps) {
+export function KeyboardSafeSheet({ children, onDismiss, style, gap = 12 }: SheetProps) {
   const { sheetBottom } = useScreenInsets();
   const { height: keyboardHeight } = useKeyboardInset();
   const padBottom = keyboardHeight > 0 ? keyboardHeight + gap : sheetBottom;

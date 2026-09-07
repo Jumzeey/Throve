@@ -6,61 +6,47 @@ const path = require('path');
 /** @type {import('expo/metro-config').MetroConfig} */
 const config = getDefaultConfig(__dirname);
 
-function resolveEventTargetShimV6Entry() {
-  const candidates = [];
-  try {
-    candidates.push(
-      path.resolve(path.dirname(require.resolve('event-target-shim-v6/package.json')), 'index.js'),
-    );
-  } catch {
-    /* fall through */
-  }
-  candidates.push(
-    path.resolve(__dirname, 'node_modules/event-target-shim-v6/index.js'),
-    path.resolve(__dirname, '../node_modules/event-target-shim-v6/index.js'),
-    path.resolve(
-      __dirname,
-      'node_modules/@livekit/react-native-webrtc/node_modules/event-target-shim/index.js',
-    ),
-    path.resolve(
-      __dirname,
-      '../node_modules/@livekit/react-native-webrtc/node_modules/event-target-shim/index.js',
-    ),
-  );
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) return candidate;
-  }
+/**
+ * Vendored event-target-shim@6 — committed under frontend/vendor so CI/release
+ * bundles never depend on fragile nested node_modules resolution.
+ */
+const VENDOR_SHIM_V6 = path.resolve(__dirname, 'vendor/event-target-shim-v6/index.js');
+
+if (!fs.existsSync(VENDOR_SHIM_V6)) {
   throw new Error(
-    'Unable to resolve event-target-shim@6. Install event-target-shim-v6 (see frontend/package.json).',
+    `Missing ${VENDOR_SHIM_V6}. The vendored LiveKit WebRTC EventTarget shim is required.`,
   );
 }
 
+const previousResolveRequest = config.resolver.resolveRequest;
+
 /**
  * React Native depends on event-target-shim@5; @livekit/react-native-webrtc needs @6.
+ * Android Live crash without this: "Super expression must either be null or a function".
  *
- * Codemagic used to `cd frontend && npm install`, which can flatten only RN's v5 into
- * node_modules. resolve-from(webrtc → event-target-shim) then returns v5 and Android
- * crashes with: "Super expression must either be null or a function".
- *
- * Always pin WebRTC's event-target-shim* imports to the dedicated v6 alias package.
+ * 1) postinstall rewrites webrtc imports → event-target-shim-v6
+ * 2) Metro always resolves that id (and legacy event-target-shim* from webrtc) to vendor v6
  *
  * @see https://github.com/react-native-webrtc/react-native-webrtc/issues/1503
- * @see https://github.com/livekit/client-sdk-react-native/issues/223
  */
-const eventTargetShimV6Entry = resolveEventTargetShimV6Entry();
-
 config.resolver.resolveRequest = (context, moduleName, platform) => {
-  if (
-    moduleName.startsWith('event-target-shim') &&
-    context.originModulePath.includes('react-native-webrtc')
-  ) {
-    return {
-      filePath: eventTargetShimV6Entry,
-      type: 'sourceFile',
-    };
+  const fromWebrtc = context.originModulePath.includes('react-native-webrtc');
+  const wantsV6Alias =
+    moduleName === 'event-target-shim-v6' || moduleName.startsWith('event-target-shim-v6/');
+  const wantsLegacyShim =
+    moduleName === 'event-target-shim' || moduleName.startsWith('event-target-shim/');
+
+  if (wantsV6Alias || (fromWebrtc && wantsLegacyShim)) {
+    return { filePath: VENDOR_SHIM_V6, type: 'sourceFile' };
   }
 
+  if (previousResolveRequest) {
+    return previousResolveRequest(context, moduleName, platform);
+  }
   return context.resolveRequest(context, moduleName, platform);
 };
+
+// Avoid package-exports picking a different event-target-shim entry than our pin.
+config.resolver.unstable_enablePackageExports = false;
 
 module.exports = config;

@@ -1,65 +1,136 @@
 import { Button } from '@/components/ui/button';
 import { CheckIcon, ChevronDownIcon } from '@/components/ui/icons';
+import { KeyboardSafeSheet } from '@/components/ui/keyboard-safe';
 import { TextField } from '@/components/ui/text-field';
 import { Palette, Radius, Shadows, Typography } from '@/constants/theme';
-import { useScreenInsets } from '@/hooks/use-screen-insets';
-import { useState } from 'react';
-import { FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
+import { useMemo, useState } from 'react';
+import { Dimensions, FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 type Props = {
   value: string;
   options: string[];
   placeholder?: string;
+  searchPlaceholder?: string;
+  /** When true, typed search can be used as a custom value (not limited to options). */
+  allowCustom?: boolean;
+  customActionLabel?: (query: string) => string;
+  customEyebrow?: string;
   onSelect: (value: string) => void;
   error?: string | null;
 };
 
-export function PickerField({ value, options, placeholder, onSelect, error }: Props) {
-  const { sheetBottom } = useScreenInsets();
+export function PickerField({
+  value,
+  options,
+  placeholder,
+  searchPlaceholder = 'Search…',
+  allowCustom = false,
+  customActionLabel,
+  customEyebrow = 'Use your brand',
+  onSelect,
+  error,
+}: Props) {
+  const keyboard = useKeyboardInset();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
 
-  const filtered = search ? options.filter((o) => o.toLowerCase().includes(search.toLowerCase())) : options;
+  const trimmedSearch = search.trim();
+  const filtered = useMemo(() => {
+    if (!trimmedSearch) return options;
+    const needle = trimmedSearch.toLowerCase();
+    return options.filter((o) => o.toLowerCase().includes(needle));
+  }, [options, trimmedSearch]);
+
+  const exactMatch = useMemo(
+    () => options.some((o) => o.toLowerCase() === trimmedSearch.toLowerCase()),
+    [options, trimmedSearch],
+  );
+
+  const showCustom = allowCustom && trimmedSearch.length > 0 && !exactMatch;
+
+  const windowHeight = Dimensions.get('window').height;
+  const sheetMaxHeight =
+    keyboard.height > 0
+      ? Math.max(280, windowHeight - keyboard.height - 28)
+      : Math.round(windowHeight * 0.7);
 
   function close() {
     setOpen(false);
     setSearch('');
   }
 
+  function choose(next: string) {
+    onSelect(next.trim());
+    close();
+  }
+
   return (
     <>
       <Pressable style={[styles.field, error ? styles.fieldError : null]} onPress={() => setOpen(true)}>
-        <Text style={[styles.fieldText, !value && styles.placeholder]}>{value || placeholder || 'Select'}</Text>
+        <Text style={[styles.fieldText, !value && styles.placeholder]} numberOfLines={1}>
+          {value || placeholder || 'Select'}
+        </Text>
         <ChevronDownIcon />
       </Pressable>
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
       <Modal visible={open} transparent animationType="slide" onRequestClose={close}>
-        <Pressable style={styles.overlay} onPress={close}>
-          <View style={[styles.sheet, { paddingBottom: sheetBottom }]} onStartShouldSetResponder={() => true}>
-            <View style={styles.handle} />
-            <TextField
-              placeholder="Search…"
-              value={search}
-              onChangeText={setSearch}
-              autoFocus
-              style={styles.search}
-            />
-            <FlatList
-              data={filtered}
-              keyExtractor={(item) => item}
-              keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => (
-                <Pressable style={[styles.option, item === value && styles.optionActive]} onPress={() => { onSelect(item); close(); }}>
-                  <Text style={[styles.optionText, item === value && styles.optionTextActive]}>{item}</Text>
-                  {item === value ? <CheckIcon size={18} color={Palette.plum} /> : null}
+        <KeyboardSafeSheet onDismiss={close} style={[styles.sheet, { maxHeight: sheetMaxHeight }]}>
+          <View style={styles.handle} />
+          <TextField
+            placeholder={allowCustom ? 'Search or type your own…' : searchPlaceholder}
+            value={search}
+            onChangeText={setSearch}
+            autoFocus
+            autoCapitalize={allowCustom ? 'words' : 'none'}
+            returnKeyType={allowCustom ? 'done' : 'search'}
+            onSubmitEditing={() => {
+              if (showCustom) choose(trimmedSearch);
+              else if (filtered.length === 1) choose(filtered[0]);
+            }}
+            style={styles.search}
+          />
+          {allowCustom ? (
+            <Text style={styles.customHint}>Suggestions below — or type any value of your own.</Text>
+          ) : null}
+          <FlatList
+            data={filtered}
+            keyExtractor={(item) => item}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            style={styles.list}
+            ListHeaderComponent={
+              showCustom ? (
+                <Pressable style={[styles.option, styles.customOption]} onPress={() => choose(trimmedSearch)}>
+                  <View style={styles.customCopy}>
+                    <Text style={styles.customEyebrow}>{customEyebrow}</Text>
+                    <Text style={styles.customValue} numberOfLines={2}>
+                      {customActionLabel?.(trimmedSearch) ?? trimmedSearch}
+                    </Text>
+                  </View>
+                  <CheckIcon size={18} color={Palette.plum} />
                 </Pressable>
-              )}
-              ListEmptyComponent={<Text style={styles.empty}>No results</Text>}
-            />
-            <Button label="Cancel" variant="ghost" onPress={close} style={styles.cancel} />
-          </View>
-        </Pressable>
+              ) : null
+            }
+            renderItem={({ item }) => (
+              <Pressable
+                style={[styles.option, item === value && styles.optionActive]}
+                onPress={() => choose(item)}>
+                <Text style={[styles.optionText, item === value && styles.optionTextActive]}>{item}</Text>
+                {item === value ? <CheckIcon size={18} color={Palette.plum} /> : null}
+              </Pressable>
+            )}
+            ListEmptyComponent={
+              showCustom ? null : (
+                <Text style={styles.empty}>
+                  {allowCustom ? 'Type above to use your own value.' : 'No results'}
+                </Text>
+              )
+            }
+          />
+          <Button label="Cancel" variant="ghost" onPress={close} style={styles.cancel} />
+        </KeyboardSafeSheet>
       </Modal>
     </>
   );
@@ -78,6 +149,8 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.ivoryElevated,
   },
   fieldText: {
+    flex: 1,
+    marginRight: 8,
     fontSize: 15,
     fontFamily: Typography.body,
     color: Palette.espresso,
@@ -96,17 +169,10 @@ const styles = StyleSheet.create({
     color: Palette.error,
     fontFamily: Typography.body,
   },
-  overlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: Palette.liveOverlay,
-  },
   sheet: {
     backgroundColor: Palette.ivory,
     borderTopLeftRadius: Radius.xl,
     borderTopRightRadius: Radius.xl,
-    maxHeight: '70%',
-    paddingBottom: 34,
     ...Shadows.lg,
   },
   handle: {
@@ -122,6 +188,17 @@ const styles = StyleSheet.create({
     marginHorizontal: 18,
     marginBottom: 6,
   },
+  customHint: {
+    marginHorizontal: 18,
+    marginBottom: 8,
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: Typography.body,
+    color: Palette.muted,
+  },
+  list: {
+    flexGrow: 0,
+  },
   option: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -130,6 +207,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Palette.divider,
+  },
+  customOption: {
+    backgroundColor: '#F8ECEF',
+    borderBottomWidth: 1,
+    borderBottomColor: Palette.border,
+  },
+  customCopy: {
+    flex: 1,
+    marginRight: 12,
+    gap: 2,
+  },
+  customEyebrow: {
+    fontSize: 10.5,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.plum,
+  },
+  customValue: {
+    fontSize: 15,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.espresso,
   },
   optionActive: {
     backgroundColor: Palette.ivoryElevated,

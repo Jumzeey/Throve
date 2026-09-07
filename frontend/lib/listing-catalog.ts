@@ -74,17 +74,36 @@ export function sizeIsRequired(catalog: ListingCatalog, productType: string) {
   return required.includes(productType);
 }
 
-export function listingFormIssues(form: ListingForm, catalog: ListingCatalog) {
-  const issues: string[] = [];
-  if ((form.photoUris?.length ?? form.photoCount) < catalog.photo.min) issues.push('At least one photograph');
-  if (!form.title.trim()) issues.push('Item title');
-  if (!form.department.trim()) issues.push('Department');
-  if (!form.category.trim()) issues.push('Category');
-  if (!form.condition.trim()) issues.push('Condition');
-  if (!form.productType.trim()) issues.push('Product type');
+export type ListingFormIssueField =
+  | 'photos'
+  | 'title'
+  | 'department'
+  | 'category'
+  | 'condition'
+  | 'productType'
+  | 'size'
+  | 'price';
+
+export type ListingFormIssue = {
+  field: ListingFormIssueField;
+  label: string;
+};
+
+export function listingFormIssues(form: ListingForm, catalog: ListingCatalog): ListingFormIssue[] {
+  const issues: ListingFormIssue[] = [];
+  if ((form.photoUris?.length ?? form.photoCount) < catalog.photo.min) {
+    issues.push({ field: 'photos', label: 'At least one photograph' });
+  }
+  if (!form.title.trim()) issues.push({ field: 'title', label: 'Item title' });
+  if (!form.department.trim()) issues.push({ field: 'department', label: 'Department' });
+  if (!form.category.trim()) issues.push({ field: 'category', label: 'Category' });
+  if (!form.condition.trim()) issues.push({ field: 'condition', label: 'Condition' });
+  if (!form.productType.trim()) issues.push({ field: 'productType', label: 'Product type' });
   const price = Number(form.price.replace(/[^\d]/g, ''));
-  if (!Number.isFinite(price) || price <= 0) issues.push('Price');
-  if (sizeIsRequired(catalog, form.productType) && !form.size.trim()) issues.push('Size');
+  if (!Number.isFinite(price) || price <= 0) issues.push({ field: 'price', label: 'Price' });
+  if (sizeIsRequired(catalog, form.productType) && !form.size.trim()) {
+    issues.push({ field: 'size', label: 'Size' });
+  }
   return issues;
 }
 
