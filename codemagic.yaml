@@ -41,8 +41,8 @@ workflows:
       cache_paths:
         # npm global cache (safer across lockfile bumps than only node_modules)
         - $HOME/.npm
-        # installed frontend deps
-        - $CM_BUILD_DIR/frontend/node_modules
+        # monorepo workspace install (root lockfile keeps LiveKit's event-target-shim@6)
+        - $CM_BUILD_DIR/node_modules
         # Android Gradle dependency jars (do not cache all of $HOME/.gradle)
         - $HOME/.gradle/caches
         - $HOME/.gradle/wrapper
@@ -57,8 +57,10 @@ workflows:
     scripts:
       - name: Install npm dependencies
         script: |
-          cd frontend
-          npm install
+          # Install from monorepo root so workspace lockfile keeps event-target-shim@6
+          # for LiveKit. frontend-only install can flatten to RN's v5 and crash Live on Android.
+          npm ci || npm install
+          node -e "const p=require('event-target-shim-v6/package.json'); if(p.version!=='6.0.2'){console.error(p);process.exit(1)}; console.log('event-target-shim-v6', p.version)"
       - name: Write Expo env file
         script: |
           set -e
@@ -134,7 +136,7 @@ workflows:
     cache:
       cache_paths:
         - $HOME/.npm
-        - $CM_BUILD_DIR/frontend/node_modules
+        - $CM_BUILD_DIR/node_modules
         # CocoaPods
         - $HOME/Library/Caches/CocoaPods
         # Swift Package Manager (global)
@@ -144,8 +146,8 @@ workflows:
     scripts:
       - name: Install npm dependencies
         script: |
-          cd frontend
-          npm install
+          npm ci || npm install
+          node -e "const p=require('event-target-shim-v6/package.json'); if(p.version!=='6.0.2'){console.error(p);process.exit(1)}; console.log('event-target-shim-v6', p.version)"
       - name: Write Expo env file
         script: |
           set -e

@@ -19,8 +19,8 @@ export function canLoadNativeLiveKit() {
  * repeating it on Android/iOS WebRTC crashes the process.
  *
  * Failures must resolve to null (SimulatedStage) — never throw through to the UI.
- * Common Android device crash without metro event-target-shim@6 redirect:
- * "Super expression must either be null or a function" while loading webrtc.
+ * Android "Super expression must either be null or a function" means Metro resolved
+ * RN's event-target-shim@5 for WebRTC — see metro.config.js + event-target-shim-v6.
  */
 export function loadLiveKitNative() {
   if (loadPromise) return loadPromise;
