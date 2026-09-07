@@ -75,8 +75,8 @@ router.post('/start', requireAuth, async (req, res) => {
     .object({
       listingId: z.string().optional(),
       liveSessionId: z.string().nullable().optional(),
-      liveStreamProductId: z.string().optional(),
-      claimId: z.string().optional(),
+      liveStreamProductId: z.string().nullable().optional(),
+      claimId: z.string().nullable().optional(),
       offerId: z.string().uuid().optional().nullable(),
     })
     .safeParse(req.body);
@@ -87,8 +87,8 @@ router.post('/start', requireAuth, async (req, res) => {
   let itemPrice: number | undefined;
   let listedPrice: number | undefined;
   let offerId = parsed.data.offerId ?? null;
-  let liveStreamProductId = parsed.data.liveStreamProductId;
-  let claimId = parsed.data.claimId;
+  let liveStreamProductId = parsed.data.liveStreamProductId ?? undefined;
+  let claimId = parsed.data.claimId ?? undefined;
   let liveSessionId = parsed.data.liveSessionId ?? null;
 
   if (claimId) {

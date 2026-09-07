@@ -13,7 +13,7 @@ import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatNaira } from '@/lib/format';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 const TABS = ['draft', 'available', 'reserved', 'sold', 'hidden'] as const;
 type Tab = (typeof TABS)[number];
@@ -73,7 +73,7 @@ export default function SellScreen() {
   }, [refresh]);
 
   function goLive() {
-    router.push('/live/host-access');
+    router.push('/live/my-sessions');
   }
 
   function openNew() {
@@ -95,16 +95,11 @@ export default function SellScreen() {
       ? 'Drafts you save while creating a listing will appear here.'
       : `You don't have any ${TAB_LABEL[tab].toLowerCase()} listings right now.`;
 
-  return (
-    <View style={[styles.screen, { paddingTop: top }]}>
-      <View style={styles.header}>
-        <Text style={styles.title}>My listings</Text>
-        <Button label="+ New listing" onPress={openNew} style={styles.newBtn} />
-      </View>
+  const showListings = !(loading && mine.length === 0) && !(visible.length === 0 && !loadError);
 
-      <ScrollView
-        contentContainerStyle={[styles.body, { paddingBottom: tabScrollBottom }]}
-        showsVerticalScrollIndicator={false}>
+  const listHeader = useMemo(
+    () => (
+      <>
         {!isConnected ? (
           <View style={styles.banner}>
             <OfflineBanner title="No connection" message="Reconnect to see your listings." />
@@ -127,6 +122,8 @@ export default function SellScreen() {
 
         <ScrollView
           horizontal
+          nestedScrollEnabled
+          directionalLockEnabled
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.tabs}
           style={styles.tabsScroll}>
@@ -142,24 +139,56 @@ export default function SellScreen() {
           })}
         </ScrollView>
 
-        {loading && mine.length === 0 ? (
-          <MyListingsSkeleton />
-        ) : visible.length === 0 && !loadError ? (
-          <EmptyState
-            title="Nothing here yet"
-            message={emptyMessage}
-            actionLabel={tab === 'draft' ? 'Create listing' : undefined}
-            onAction={tab === 'draft' ? openNew : undefined}
-            style={styles.empty}
-          />
-        ) : (
-          <View style={styles.list}>
-            {visible.map((listing) => (
-              <ListingRow key={listing.id} listing={listing} onPress={() => openListing(listing)} />
-            ))}
-          </View>
-        )}
-      </ScrollView>
+        {loading && mine.length === 0 ? <MyListingsSkeleton /> : null}
+      </>
+    ),
+    [counts, goLive, isConnected, loadError, loading, mine.length, reload, refreshing, tab],
+  );
+
+  const listEmpty = useMemo(
+    () =>
+      visible.length === 0 && !loadError && !(loading && mine.length === 0) ? (
+        <EmptyState
+          title="Nothing here yet"
+          message={emptyMessage}
+          actionLabel={tab === 'draft' ? 'Create listing' : undefined}
+          onAction={tab === 'draft' ? openNew : undefined}
+          style={styles.empty}
+        />
+      ) : null,
+    [emptyMessage, loadError, loading, mine.length, openNew, tab, visible.length],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: Listing }) => <ListingRow listing={item} onPress={() => openListing(item)} />,
+    [openListing],
+  );
+
+  const keyExtractor = useCallback((item: Listing) => item.id, []);
+
+  const itemSeparator = useCallback(() => <View style={styles.listGap} />, []);
+
+  return (
+    <View style={[styles.screen, { paddingTop: top }]}>
+      <View style={styles.header}>
+        <Text style={styles.title}>My listings</Text>
+        <Button label="+ New listing" onPress={openNew} style={styles.newBtn} />
+      </View>
+
+      <FlatList
+        data={showListings ? visible : []}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        ItemSeparatorComponent={itemSeparator}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={listEmpty}
+        contentContainerStyle={[styles.body, { paddingBottom: tabScrollBottom, flexGrow: 1 }]}
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        removeClippedSubviews
+        showsVerticalScrollIndicator={false}
+      />
     </View>
   );
 }
@@ -275,6 +304,7 @@ const styles = StyleSheet.create({
     color: Palette.plum,
   },
   empty: { marginTop: Spacing.md },
+  listGap: { height: 12 },
   list: { gap: 12 },
   row: {
     flexDirection: 'row',

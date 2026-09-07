@@ -5,18 +5,20 @@ import { BellIcon, ImagePlaceholderIcon, SearchIcon } from '@/components/ui/icon
 import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
 import { ListingCard } from '@/components/ui/listing-card';
 import { ListingGrid } from '@/components/ui/listing-grid';
+import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useListings } from '@/context/listings-context';
 import { useLive } from '@/context/live-context';
 import { useNotifications } from '@/context/notifications-context';
 import { filterListings } from '@/data/filter-listings';
-import { getLiveImage, getSellerAvatar } from '@/data/images';
+import { getLiveImage } from '@/data/images';
 import type { LiveSession } from '@/data/types';
 import { DEPARTMENTS } from '@/data/seed';
+import { FOLLOWING_PREVIEW_PER_SELLER, latestPerSeller } from '@/lib/following-feed';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useRouter } from 'expo-router';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 
@@ -50,11 +52,24 @@ function SectionHeading({
   );
 }
 
-function LiveNowCard({ session, onPress }: { session: LiveSession; onPress: () => void }) {
+function sessionCover(session: LiveSession) {
+  if (session.thumbnailUrl?.startsWith('http')) return session.thumbnailUrl;
+  return getLiveImage(session.id);
+}
+
+function LiveNowCard({
+  session,
+  hostPhotoUri,
+  onPress,
+}: {
+  session: LiveSession;
+  hostPhotoUri?: string;
+  onPress: () => void;
+}) {
   return (
     <Pressable onPress={onPress} style={styles.liveCard}>
       <View style={styles.liveImageWrap}>
-        <AppImage source={getLiveImage(session.id)} style={styles.liveImage} />
+        <AppImage source={sessionCover(session)} style={styles.liveImage} />
         <View style={styles.liveBottomGradient} />
         <View style={styles.liveBadges}>
           <View style={styles.liveBadgeRed}>
@@ -69,7 +84,11 @@ function LiveNowCard({ session, onPress }: { session: LiveSession; onPress: () =
             {session.title ?? 'Live session'}
           </Text>
           <View style={styles.liveHostRow}>
-            <AppImage source={getSellerAvatar(session.host)} style={styles.liveHostAvatar} />
+            <ProfileAvatar
+              uri={hostPhotoUri ?? session.hostPhotoUrl}
+              username={session.host}
+              style={styles.liveHostAvatar}
+            />
             <Text style={styles.liveHostName} numberOfLines={1}>
               {session.host}
             </Text>
@@ -129,15 +148,26 @@ function DepartmentCircle({
 export default function HomeScreen() {
   const { top, tabScrollBottom } = useScreenInsets();
   const router = useRouter();
-  const { session } = useAuth();
+  const { session, publicProfiles, ensurePublicProfile } = useAuth();
   const { listings: catalog, followingListings, toggleSave, refresh: refreshListings } = useListings();
   const { unreadCount } = useNotifications();
   const { isConnected } = useNetworkStatus();
   const listings = useMemo(() => filterListings(catalog).slice(0, 4), [catalog]);
-  const followingFeed = useMemo(() => followingListings.slice(0, 6), [followingListings]);
+  const followingFeed = useMemo(
+    () => latestPerSeller(followingListings, FOLLOWING_PREVIEW_PER_SELLER),
+    [followingListings],
+  );
   const { liveNow, upcoming, refresh: refreshLive } = useLive();
 
   const sellers = useMemo(() => Array.from(new Set(catalog.map((l) => l.seller))).slice(0, 3), [catalog]);
+
+  useEffect(() => {
+    const usernames = new Set<string>([...sellers, ...liveNow.map((item) => item.host)]);
+    for (const username of usernames) {
+      if (!username) continue;
+      void ensurePublicProfile(username).catch(() => undefined);
+    }
+  }, [ensurePublicProfile, liveNow, sellers]);
 
   const pullTask = useCallback(async () => {
     await Promise.all([refreshListings(), refreshLive()]);
@@ -212,11 +242,21 @@ export default function HomeScreen() {
         {liveNow.length > 0 ? (
           <View style={styles.section}>
             <SectionHeading title="Live now" liveDot onSeeAll={() => router.push('/(tabs)/live')} />
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.liveRow}>
+            <ScrollView
+              horizontal
+              nestedScrollEnabled
+              directionalLockEnabled
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.liveRow}
+            >
               {liveNow.map((liveSession) => (
                 <LiveNowCard
                   key={liveSession.id}
                   session={liveSession}
+                  hostPhotoUri={
+                    publicProfiles[liveSession.host]?.photoUri ??
+                    (session?.username === liveSession.host ? session.photoUri : undefined)
+                  }
                   onPress={() => router.push(`/live/${liveSession.id}`)}
                 />
               ))}
@@ -241,13 +281,21 @@ export default function HomeScreen() {
 
         {session ? (
           <View style={styles.section}>
-            <SectionHeading title="From sellers you follow" />
+            <SectionHeading
+              title="From sellers you follow"
+              onSeeAll={() => router.push('/following')}
+            />
             {followingFeed.length > 0 ? (
-              <View style={styles.listingsBody}>
-                <ListingGrid
-                  listings={followingFeed.map((listing) => (
+              <ScrollView
+                horizontal
+                nestedScrollEnabled
+                directionalLockEnabled
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.followRow}
+              >
+                {followingFeed.map((listing) => (
+                  <View key={listing.id} style={styles.followCard}>
                     <ListingCard
-                      key={listing.id}
                       listing={listing}
                       meta="condition"
                       showSave
@@ -257,9 +305,9 @@ export default function HomeScreen() {
                       }}
                       onPress={() => router.push(`/product/${listing.id}`)}
                     />
-                  ))}
-                />
-              </View>
+                  </View>
+                ))}
+              </ScrollView>
             ) : (
               <View style={styles.listingsBody}>
                 <EmptyState
@@ -301,13 +349,26 @@ export default function HomeScreen() {
         {sellers.length > 0 ? (
           <View style={styles.section}>
             <SectionHeading title="Sellers to discover" onSeeAll={() => router.push('/search')} />
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sellerRow}>
+            <ScrollView
+              horizontal
+              nestedScrollEnabled
+              directionalLockEnabled
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.sellerRow}
+            >
               {sellers.map((name) => (
                 <Pressable
                   key={name}
                   onPress={() => router.push({ pathname: '/seller/[username]', params: { username: name } })}
                   style={styles.sellerCard}>
-                  <AppImage source={getSellerAvatar(name)} style={styles.sellerAvatar} />
+                  <ProfileAvatar
+                    uri={
+                      publicProfiles[name]?.photoUri ??
+                      (session?.username === name ? session.photoUri : undefined)
+                    }
+                    username={name}
+                    style={styles.sellerAvatar}
+                  />
                   <Text style={styles.sellerName}>{name}</Text>
                   <Text style={styles.sellerView}>View</Text>
                 </Pressable>
@@ -495,6 +556,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   liveRow: { paddingHorizontal: 20, gap: 12 },
+  followRow: { paddingHorizontal: 20, gap: 10, paddingRight: 20 },
+  followCard: { width: 132 },
   liveCard: { width: 208 },
   liveImageWrap: {
     width: 208,

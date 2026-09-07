@@ -1,7 +1,15 @@
 import { Palette } from '@/constants/theme';
 import * as Haptics from 'expo-haptics';
-import { type ReactNode, useCallback, useEffect, useState } from 'react';
-import { Platform, StyleSheet, View, type ScrollViewProps, type StyleProp, type ViewStyle } from 'react-native';
+import { type ReactElement, type ReactNode, useCallback, useEffect, useState } from 'react';
+import {
+  Platform,
+  StyleSheet,
+  View,
+  type FlatListProps,
+  type ScrollViewProps,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Extrapolation,
@@ -40,30 +48,13 @@ export function usePullRefresh(task: RefreshTask) {
   return { refreshing, onRefresh };
 }
 
-type LiquidRefreshScrollViewProps = Omit<ScrollViewProps, 'onScroll' | 'refreshControl'> & {
+type LiquidPullOpts = {
   refreshing: boolean;
   onRefresh: () => void | Promise<void>;
   disabled?: boolean;
-  tintColor?: string;
-  contentContainerStyle?: StyleProp<ViewStyle>;
-  children: ReactNode;
 };
 
-/**
- * System-wide pull-to-refresh ScrollView with a liquid plum droplet indicator.
- * Use instead of ScrollView + RefreshControl anywhere in the app.
- */
-export function LiquidRefreshScrollView({
-  refreshing,
-  onRefresh,
-  disabled = false,
-  tintColor = Palette.plum,
-  children,
-  contentContainerStyle,
-  style,
-  scrollEventThrottle = 16,
-  ...scrollProps
-}: LiquidRefreshScrollViewProps) {
+function useLiquidPull({ refreshing, onRefresh, disabled = false }: LiquidPullOpts) {
   const pull = useSharedValue(0);
   const isRefreshing = useSharedValue(false);
   const scrollY = useSharedValue(0);
@@ -113,7 +104,6 @@ export function LiquidRefreshScrollView({
       'worklet';
       scrollY.value = event.contentOffset.y;
       if (disabledSV.value || isRefreshing.value) return;
-      // iOS rubber-band overscroll drives the liquid stretch
       if (Platform.OS === 'ios' && event.contentOffset.y < 0) {
         const next = Math.min(-event.contentOffset.y, MAX_PULL);
         pull.value = next;
@@ -147,17 +137,16 @@ export function LiquidRefreshScrollView({
     },
   });
 
-  // Android (and iOS fallback): pan from top when scroll is at rest
+  // Android only: pan-from-top. Must fail on upward scroll or it holds the touch.
   const pan = Gesture.Pan()
-    .enabled(!disabled)
-    .activeOffsetY(10)
-    .failOffsetX([-28, 28])
+    .enabled(!disabled && Platform.OS === 'android')
+    .activeOffsetY(12)
+    .failOffsetY(-6)
+    .failOffsetX([-24, 24])
     .onUpdate((event) => {
       'worklet';
       if (disabledSV.value || isRefreshing.value) return;
       if (scrollY.value > 2) return;
-      // On iOS prefer rubber-band path when already overscrolling
-      if (Platform.OS === 'ios' && event.translationY < 8) return;
       if (event.translationY <= 0) {
         if (!isRefreshing.value) pull.value = 0;
         return;
@@ -178,33 +167,152 @@ export function LiquidRefreshScrollView({
       runOnJS(releasePull)();
     });
 
-  // Android needs a spacer so content yields; iOS already rubber-bands.
+  const nativeScroll = Gesture.Native();
+  const composed = Platform.OS === 'android' ? Gesture.Simultaneous(nativeScroll, pan) : undefined;
+
   const spacerStyle = useAnimatedStyle(() => ({
     height: Platform.OS === 'android' ? pull.value : 0,
   }));
 
+  return { pull, pulse, isRefreshing, scrollHandler, composed, spacerStyle, disabled };
+}
+
+type ShellProps = {
+  tintColor: string;
+  pull: SharedValue<number>;
+  pulse: SharedValue<number>;
+  isRefreshing: SharedValue<boolean>;
+  composed: ReturnType<typeof Gesture.Simultaneous> | undefined;
+  children: ReactElement;
+};
+
+function LiquidRefreshShell({ tintColor, pull, pulse, isRefreshing, composed, children }: ShellProps) {
   return (
     <View style={styles.wrap}>
       <View style={styles.indicatorLayer} pointerEvents="none">
         <LiquidDroplet pull={pull} pulse={pulse} color={tintColor} refreshing={isRefreshing} />
       </View>
-      <GestureDetector gesture={pan}>
-        <Animated.ScrollView
-          {...scrollProps}
-          style={style}
-          contentContainerStyle={contentContainerStyle}
-          onScroll={scrollHandler}
-          scrollEventThrottle={scrollEventThrottle}
-          bounces={!disabled}
-          alwaysBounceVertical={!disabled}
-          overScrollMode={disabled ? 'never' : 'always'}
-          showsVerticalScrollIndicator={scrollProps.showsVerticalScrollIndicator ?? false}
-        >
-          <Animated.View style={spacerStyle} />
-          {children}
-        </Animated.ScrollView>
-      </GestureDetector>
+      {composed ? <GestureDetector gesture={composed}>{children}</GestureDetector> : children}
     </View>
+  );
+}
+
+type LiquidRefreshScrollViewProps = Omit<ScrollViewProps, 'onScroll' | 'refreshControl'> & {
+  refreshing: boolean;
+  onRefresh: () => void | Promise<void>;
+  disabled?: boolean;
+  tintColor?: string;
+  contentContainerStyle?: StyleProp<ViewStyle>;
+  children: ReactNode;
+};
+
+/**
+ * System-wide pull-to-refresh ScrollView with a liquid plum droplet indicator.
+ * Prefer LiquidRefreshFlatList for long listing grids.
+ */
+export function LiquidRefreshScrollView({
+  refreshing,
+  onRefresh,
+  disabled = false,
+  tintColor = Palette.plum,
+  children,
+  contentContainerStyle,
+  style,
+  scrollEventThrottle = 16,
+  ...scrollProps
+}: LiquidRefreshScrollViewProps) {
+  const { pull, pulse, isRefreshing, scrollHandler, composed, spacerStyle } = useLiquidPull({
+    refreshing,
+    onRefresh,
+    disabled,
+  });
+
+  return (
+    <LiquidRefreshShell
+      tintColor={tintColor}
+      pull={pull}
+      pulse={pulse}
+      isRefreshing={isRefreshing}
+      composed={composed}
+    >
+      <Animated.ScrollView
+        {...scrollProps}
+        style={style}
+        contentContainerStyle={contentContainerStyle}
+        onScroll={scrollHandler}
+        scrollEventThrottle={scrollEventThrottle}
+        bounces={!disabled}
+        alwaysBounceVertical={!disabled}
+        overScrollMode={disabled ? 'never' : 'always'}
+        showsVerticalScrollIndicator={scrollProps.showsVerticalScrollIndicator ?? false}
+      >
+        <Animated.View style={spacerStyle} />
+        {children}
+      </Animated.ScrollView>
+    </LiquidRefreshShell>
+  );
+}
+
+type LiquidRefreshFlatListProps<ItemT> = Omit<
+  FlatListProps<ItemT>,
+  'onScroll' | 'refreshControl' | 'CellRendererComponent'
+> & {
+  refreshing: boolean;
+  onRefresh: () => void | Promise<void>;
+  disabled?: boolean;
+  tintColor?: string;
+};
+
+/** Virtualized list variant — use for saved/search/browse-style screens. */
+export function LiquidRefreshFlatList<ItemT>({
+  refreshing,
+  onRefresh,
+  disabled = false,
+  tintColor = Palette.plum,
+  style,
+  contentContainerStyle,
+  scrollEventThrottle = 16,
+  ListHeaderComponent,
+  ...listProps
+}: LiquidRefreshFlatListProps<ItemT>) {
+  const { pull, pulse, isRefreshing, scrollHandler, composed, spacerStyle } = useLiquidPull({
+    refreshing,
+    onRefresh,
+    disabled,
+  });
+
+  const header = (
+    <>
+      <Animated.View style={spacerStyle} />
+      {typeof ListHeaderComponent === 'function' ? <ListHeaderComponent /> : ListHeaderComponent}
+    </>
+  );
+
+  return (
+    <LiquidRefreshShell
+      tintColor={tintColor}
+      pull={pull}
+      pulse={pulse}
+      isRefreshing={isRefreshing}
+      composed={composed}
+    >
+      <Animated.FlatList
+        {...listProps}
+        style={style}
+        contentContainerStyle={contentContainerStyle}
+        onScroll={scrollHandler}
+        scrollEventThrottle={scrollEventThrottle}
+        bounces={!disabled}
+        alwaysBounceVertical={!disabled}
+        overScrollMode={disabled ? 'never' : 'always'}
+        showsVerticalScrollIndicator={listProps.showsVerticalScrollIndicator ?? false}
+        ListHeaderComponent={header}
+        initialNumToRender={listProps.initialNumToRender ?? 8}
+        maxToRenderPerBatch={listProps.maxToRenderPerBatch ?? 8}
+        windowSize={listProps.windowSize ?? 7}
+        removeClippedSubviews={listProps.removeClippedSubviews ?? true}
+      />
+    </LiquidRefreshShell>
   );
 }
 

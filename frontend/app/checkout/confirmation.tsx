@@ -9,7 +9,6 @@ import { useLive } from '@/context/live-context';
 import { getDeliveryOption } from '@/data/checkout';
 import { getListingImage } from '@/data/images';
 import type { Order } from '@/data/types';
-import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatNaira } from '@/lib/format';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -19,7 +18,6 @@ type Phase = 'creating' | 'uncertain' | 'confirmed';
 
 export default function CheckoutConfirmationScreen() {
   const router = useRouter();
-  const { bottom } = useScreenInsets();
   const { session } = useAuth();
   const checkout = useCheckout();
   const inbox = useInbox();
@@ -96,7 +94,7 @@ export default function CheckoutConfirmationScreen() {
   if (phase === 'creating' && !order) {
     return (
       <View style={styles.screen}>
-        <View style={[styles.centeredBody, { paddingBottom: bottom + Spacing.xxxl }]}>
+        <View style={[styles.centeredBody, { paddingBottom: Spacing.xxxl }]}>
           <View style={styles.creatingCard}>
             <ActivityIndicator color={Palette.plum} size="large" />
             <Text style={styles.creatingTitle}>Payment confirmed — creating your order…</Text>
@@ -109,7 +107,7 @@ export default function CheckoutConfirmationScreen() {
   if (phase === 'uncertain' && !order) {
     return (
       <View style={styles.screen}>
-        <View style={[styles.centeredBody, { paddingBottom: bottom + Spacing.xxxl }]}>
+        <View style={[styles.centeredBody, { paddingBottom: Spacing.xxxl }]}>
           <View style={styles.uncertainCard}>
             <View style={styles.uncertainBanner}>
               <ClockIcon color={Palette.warning} />
@@ -157,7 +155,6 @@ export default function CheckoutConfirmationScreen() {
 
 function ConfirmedOrderView({ order }: { order: Order }) {
   const router = useRouter();
-  const { bottom } = useScreenInsets();
   const { session } = useAuth();
   const inbox = useInbox();
   const live = useLive();
@@ -188,7 +185,7 @@ function ConfirmedOrderView({ order }: { order: Order }) {
 
   return (
     <View style={styles.screen}>
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl + bottom }]}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl }]}>
         <View style={styles.hero}>
           <View style={styles.successIcon}>
             <CheckIcon size={28} color={Palette.success} strokeWidth={2.2} />

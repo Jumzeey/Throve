@@ -1,5 +1,5 @@
 import { EmptyState } from '@/components/ui/empty-state';
-import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
+import { LiquidRefreshFlatList, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
 import { LoadingSkeleton } from '@/components/ui/loading-skeleton';
 import { OfflineBanner } from '@/components/ui/alert-banner';
 import { Palette, Spacing, Typography } from '@/constants/theme';
@@ -8,8 +8,9 @@ import { useNotifications } from '@/context/notifications-context';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatRelativeTime } from '@/lib/format';
+import type { AppNotification } from '@/data/types';
 import { Redirect, useFocusEffect, useRouter } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 export default function AlertsScreen() {
@@ -31,6 +32,60 @@ export default function AlertsScreen() {
     }, [refresh, session]),
   );
 
+  const listHeader = useMemo(
+    () =>
+      !isConnected ? (
+        <View style={styles.offline}>
+          <OfflineBanner message="Reconnect to see alerts." />
+        </View>
+      ) : null,
+    [isConnected],
+  );
+
+  const listEmpty = useMemo(() => {
+    if (loading && !refreshing && items.length === 0) {
+      return <LoadingSkeleton rows={5} style={styles.skeleton} />;
+    }
+    if (items.length === 0) {
+      return (
+        <EmptyState
+          title="No alerts yet"
+          message="Orders, offers, live updates, and new listings from sellers you follow will show up here."
+          style={styles.empty}
+        />
+      );
+    }
+    return null;
+  }, [items.length, loading, refreshing]);
+
+  const renderItem = useCallback(
+    ({ item }: { item: AppNotification }) => {
+      const unread = !item.readAt;
+      return (
+        <Pressable
+          onPress={() => {
+            void markRead(item.id);
+            if (item.deepLink) router.push(`/${item.deepLink}` as never);
+          }}
+          style={styles.row}>
+          <View style={styles.meta}>
+            <View style={styles.top}>
+              <Text style={styles.name}>{item.title}</Text>
+              <Text style={styles.time}>{formatRelativeTime(item.createdAt)}</Text>
+            </View>
+            <Text style={[styles.preview, unread ? styles.previewUnread : null]} numberOfLines={2}>
+              {item.body}
+            </Text>
+          </View>
+          {unread ? <View style={styles.dot} /> : null}
+        </Pressable>
+      );
+    },
+    [markRead, router],
+  );
+
+  const keyExtractor = useCallback((item: AppNotification) => item.id, []);
+
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
   }
@@ -49,52 +104,18 @@ export default function AlertsScreen() {
           <Text style={[styles.tabLabel, styles.tabLabelOn]}>Alerts</Text>
         </View>
       </View>
-      <LiquidRefreshScrollView
+      <LiquidRefreshFlatList
         refreshing={refreshing}
         onRefresh={onRefresh}
         disabled={!isConnected}
-        contentContainerStyle={[styles.body, { paddingBottom: tabScrollBottom }]}
-      >
-        {!isConnected ? (
-          <View style={styles.offline}>
-            <OfflineBanner message="Reconnect to see alerts." />
-          </View>
-        ) : null}
-        {loading && !refreshing && items.length === 0 ? (
-          <LoadingSkeleton rows={5} style={styles.skeleton} />
-        ) : items.length === 0 ? (
-          <EmptyState
-            title="No alerts yet"
-            message="Orders, offers, live updates, and new listings from sellers you follow will show up here."
-            style={styles.empty}
-          />
-        ) : (
-          items.map((item) => {
-            const unread = !item.readAt;
-            return (
-              <Pressable
-                key={item.id}
-                onPress={() => {
-                  void markRead(item.id);
-                  if (item.deepLink) router.push(`/${item.deepLink}` as never);
-                }}
-                style={styles.row}
-              >
-                <View style={styles.meta}>
-                  <View style={styles.top}>
-                    <Text style={styles.name}>{item.title}</Text>
-                    <Text style={styles.time}>{formatRelativeTime(item.createdAt)}</Text>
-                  </View>
-                  <Text style={[styles.preview, unread ? styles.previewUnread : null]} numberOfLines={2}>
-                    {item.body}
-                  </Text>
-                </View>
-                {unread ? <View style={styles.dot} /> : null}
-              </Pressable>
-            );
-          })
-        )}
-      </LiquidRefreshScrollView>
+        data={loading && !refreshing && items.length === 0 ? [] : items}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={listEmpty}
+        contentContainerStyle={[styles.body, { paddingBottom: tabScrollBottom, flexGrow: 1 }]}
+        showsVerticalScrollIndicator={false}
+      />
     </View>
   );
 }

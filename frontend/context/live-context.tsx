@@ -69,6 +69,8 @@ type LiveContextValue = {
   startLive: (input: StartLiveInput) => Promise<LiveSession>;
   /** Promote an upcoming session to live (host only). */
   goLiveNow: (sessionId: string) => Promise<LiveSession>;
+  /** Re-enter an already-live session as host. */
+  resumeBroadcast: (sessionId: string) => void;
   endLive: (sessionId: string, opts?: { peakViewers?: number; reason?: 'host' | 'connection' }) => Promise<LiveSessionSummary>;
   subscribeSession: (sessionId: string) => () => void;
   prepareModerators: string[];
@@ -555,6 +557,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     return session;
   }, []);
 
+  const resumeBroadcast = useCallback((sessionId: string) => {
+    setActiveBroadcastId(sessionId);
+  }, []);
+
   const endLive = useCallback(async (sessionId: string, opts?: { peakViewers?: number; reason?: 'host' | 'connection' }) => {
     const summary = await apiFetch<LiveSessionSummary>(`/live/sessions/${sessionId}/end`, {
       method: 'POST',
@@ -679,6 +685,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       fetchLiveKitToken,
       startLive,
       goLiveNow,
+      resumeBroadcast,
       endLive,
       subscribeSession,
       prepareModerators,
@@ -718,6 +725,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       releaseListing,
       removeComment,
       resolveListing,
+      resumeBroadcast,
       roomNotice,
       sendComment,
       sessions,

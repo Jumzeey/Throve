@@ -1,7 +1,7 @@
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { AppImage } from '@/components/ui/app-image';
 import { EmptyState } from '@/components/ui/empty-state';
-import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
+import { LiquidRefreshFlatList, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { StatusChip, type OfferChipVariant } from '@/components/ui/status-chip';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
@@ -15,7 +15,7 @@ import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatNaira } from '@/lib/format';
 import { effectiveOfferStatus, offerChipVariant, offerFooter } from '@/lib/offer-display';
 import { Redirect, useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 type Tab = 'received' | 'sent';
@@ -53,14 +53,84 @@ export default function OffersCentreScreen() {
     }, [refresh, session]),
   );
 
+  const me = session?.username ?? '';
+  const { received, sent } = offersFor(me);
+  const list = useMemo(
+    () => (tab === 'received' ? received : sent).slice().sort((a, b) => b.createdAt - a.createdAt),
+    [received, sent, tab],
+  );
+  const isLoading = loading && !refreshing && received.length + sent.length === 0;
+
+  const listHeader = useMemo(
+    () => (
+      <>
+        {!isConnected ? (
+          <OfflineBanner title="No connection" message="Reconnect to see current offer status." />
+        ) : null}
+        {loadError ? (
+          <AlertBanner
+            variant="error"
+            title="We couldn't load your offers"
+            message="Please try again in a moment."
+          />
+        ) : null}
+      </>
+    ),
+    [isConnected, loadError],
+  );
+
+  const listEmpty = useMemo(() => {
+    if (isLoading) return <OffersSkeleton />;
+    if (list.length === 0 && !loadError) {
+      return (
+        <EmptyState
+          title="No offers yet"
+          message="Offers you send or receive will show here."
+          style={styles.empty}
+        />
+      );
+    }
+    return null;
+  }, [isLoading, list.length, loadError]);
+
+  const renderItem = useCallback(
+    ({ item: offer }: { item: Offer }) => {
+      const listing = getListing(offer.listingId);
+      const status = effectiveOfferStatus(offer);
+      const isBuyer = offer.buyer === me;
+      const chip = offerChipVariant(offer, isBuyer, status);
+      const counterpart =
+        tab === 'received'
+          ? offer.initiator === 'buyer'
+            ? offer.buyer
+            : offer.seller
+          : offer.buyer === me
+            ? offer.seller
+            : offer.buyer;
+      const direction = tab === 'received' ? `From ${counterpart}` : `To ${counterpart}`;
+      const footer = offerFooter(offer, status, now);
+
+      return (
+        <OfferRow
+          offer={offer}
+          title={listing?.title ?? 'Listing'}
+          listPrice={listing?.price}
+          direction={direction}
+          chip={chip}
+          footer={footer}
+          thumb={listing ? getListingImageSource(listing) : null}
+          onPress={() => router.push(`/inbox/offer/${offer.id}`)}
+        />
+      );
+    },
+    [getListing, me, now, router, tab],
+  );
+
+  const keyExtractor = useCallback((item: Offer) => item.id, []);
+
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
   }
-
-  const me = session.username;
-  const { received, sent } = offersFor(me);
-  const list = (tab === 'received' ? received : sent).slice().sort((a, b) => b.createdAt - a.createdAt);
-  const isLoading = loading && !refreshing && received.length + sent.length === 0;
 
   return (
     <View style={styles.screen}>
@@ -81,63 +151,18 @@ export default function OffersCentreScreen() {
         </Pressable>
       </View>
 
-      <LiquidRefreshScrollView
+      <LiquidRefreshFlatList
         refreshing={refreshing}
         onRefresh={onRefresh}
         disabled={!isConnected}
-        contentContainerStyle={[styles.body, { paddingBottom: sheetBottom + 24 }]}>
-        {!isConnected ? (
-          <OfflineBanner title="No connection" message="Reconnect to see current offer status." />
-        ) : null}
-        {loadError ? (
-          <AlertBanner
-            variant="error"
-            title="We couldn't load your offers"
-            message="Please try again in a moment."
-          />
-        ) : null}
-
-        {isLoading ? (
-          <OffersSkeleton />
-        ) : list.length === 0 && !loadError ? (
-          <EmptyState
-            title="No offers yet"
-            message="Offers you send or receive will show here."
-            style={styles.empty}
-          />
-        ) : (
-          list.map((offer) => {
-            const listing = getListing(offer.listingId);
-            const status = effectiveOfferStatus(offer);
-            const isBuyer = offer.buyer === me;
-            const chip = offerChipVariant(offer, isBuyer, status);
-            const counterpart =
-              tab === 'received'
-                ? offer.initiator === 'buyer'
-                  ? offer.buyer
-                  : offer.seller
-                : offer.buyer === me
-                  ? offer.seller
-                  : offer.buyer;
-            const direction = tab === 'received' ? `From ${counterpart}` : `To ${counterpart}`;
-            const footer = offerFooter(offer, status, now);
-
-            return (
-              <OfferRow
-                key={offer.id}
-                offer={offer}
-                title={listing?.title ?? 'Listing'}
-                listPrice={listing?.price}
-                direction={direction}
-                chip={chip}
-                footer={footer}
-                thumb={listing ? getListingImageSource(listing) : null}
-                onPress={() => router.push(`/inbox/offer/${offer.id}`)}
-              />
-            );
-          })
-        )}
-      </LiquidRefreshScrollView>
+        data={isLoading ? [] : list}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={listEmpty}
+        contentContainerStyle={[styles.body, { paddingBottom: sheetBottom + 24, flexGrow: 1 }]}
+        showsVerticalScrollIndicator={false}
+      />
     </View>
   );
 }

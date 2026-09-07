@@ -1,8 +1,9 @@
 import { AppImage } from '@/components/ui/app-image';
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
-import { CalendarIcon, EyeIcon, ImagePlaceholderIcon, UserIcon, VideoIcon } from '@/components/ui/icons';
+import { CalendarIcon, EyeIcon, ImagePlaceholderIcon, VideoIcon } from '@/components/ui/icons';
 import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
+import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { getLiveImage } from '@/data/images';
@@ -12,7 +13,7 @@ import { formatLiveSchedule, formatNaira } from '@/lib/format';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 
@@ -35,7 +36,7 @@ function categoryLine(session: LiveSession, includeCategory = true) {
 export default function LiveDiscoveryScreen() {
   const { top, tabScrollBottom } = useScreenInsets();
   const router = useRouter();
-  const { session } = useAuth();
+  const { session, publicProfiles, ensurePublicProfile } = useAuth();
   const { liveNow, upcoming, recentlyEnded, loading, loadError, refresh, goLiveNow } = useLive();
   const { isConnected } = useNetworkStatus();
   const [startingId, setStartingId] = useState<string | null>(null);
@@ -47,6 +48,14 @@ export default function LiveDiscoveryScreen() {
       return () => setStatusBarStyle('dark');
     }, [refresh]),
   );
+
+  useEffect(() => {
+    const hosts = [...liveNow, ...upcoming, ...recentlyEnded].map((item) => item.host);
+    for (const username of new Set(hosts)) {
+      if (!username) continue;
+      void ensurePublicProfile(username).catch(() => undefined);
+    }
+  }, [ensurePublicProfile, liveNow, upcoming, recentlyEnded]);
 
   const pullTask = useCallback(async () => {
     await refresh();
@@ -119,6 +128,10 @@ export default function LiveDiscoveryScreen() {
             ) : featured ? (
               <FeaturedLiveCard
                 session={featured}
+                hostPhotoUri={
+                  publicProfiles[featured.host]?.photoUri ??
+                  (session?.username === featured.host ? session.photoUri : undefined)
+                }
                 onWatch={() => router.push(`/live/${featured.id}`)}
                 onOpenHost={() =>
                   router.push({ pathname: '/seller/[username]', params: { username: featured.host } })
@@ -127,7 +140,13 @@ export default function LiveDiscoveryScreen() {
             ) : null}
 
             {moreLive.length > 0 ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.liveRow}>
+              <ScrollView
+                horizontal
+                nestedScrollEnabled
+                directionalLockEnabled
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.liveRow}
+              >
                 {moreLive.map((session) => (
                   <CompactLiveCard
                     key={session.id}
@@ -197,10 +216,12 @@ export default function LiveDiscoveryScreen() {
 
 function FeaturedLiveCard({
   session,
+  hostPhotoUri,
   onWatch,
   onOpenHost,
 }: {
   session: LiveSession;
+  hostPhotoUri?: string;
   onWatch: () => void;
   onOpenHost: () => void;
 }) {
@@ -236,11 +257,11 @@ function FeaturedLiveCard({
             }}
             style={styles.hostAvatar}
           >
-            {session.hostPhotoUrl ? (
-              <AppImage source={session.hostPhotoUrl} style={styles.hostAvatarImage} />
-            ) : (
-              <UserIcon size={15} color={Palette.muted3} />
-            )}
+            <ProfileAvatar
+              uri={hostPhotoUri ?? session.hostPhotoUrl}
+              username={session.host}
+              style={styles.hostAvatarImage}
+            />
           </Pressable>
           <Pressable
             onPress={(e) => {

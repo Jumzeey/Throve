@@ -3,7 +3,7 @@ import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { CloseIcon, HeartIcon, ImagePlaceholderIcon } from '@/components/ui/icons';
-import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
+import { LiquidRefreshFlatList, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
 import { OfferSheet } from '@/components/ui/offer-sheet';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { StatusChip, type ListingChipVariant } from '@/components/ui/status-chip';
@@ -18,7 +18,7 @@ import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatNaira } from '@/lib/format';
 import { Redirect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 export default function SavedItemsScreen() {
@@ -41,31 +41,25 @@ export default function SavedItemsScreen() {
   }, [refresh]);
   const { refreshing, onRefresh } = usePullRefresh(pullTask);
 
-  if (!session) {
-    return <Redirect href="/(auth)/welcome" />;
-  }
+  const username = session?.username ?? '';
+  const isLoading = Boolean(session) && loading && !refreshing && saved.length === 0;
 
-  const username = session.username;
-  const isLoading = loading && !refreshing && saved.length === 0;
+  const buyNow = useCallback(
+    async (listing: Listing) => {
+      if (listing.status !== 'available' || !username) return;
+      try {
+        await checkout.startCheckout({ listingId: listing.id, buyer: username });
+        router.push('/checkout/shipping');
+      } catch {
+        /* Keep on saved — reservation may have failed */
+      }
+    },
+    [checkout, router, username],
+  );
 
-  async function buyNow(listing: Listing) {
-    if (listing.status !== 'available') return;
-    const started = await checkout.startCheckout({ listingId: listing.id, buyer: username, liveSessionId: null });
-    if (started) router.push('/checkout/shipping');
-  }
-
-  return (
-    <View style={styles.screen}>
-      <ScreenHeader title="Saved" onBack={() => router.back()} large />
-      <Text style={styles.subtitle}>
-        {saved.length} item{saved.length === 1 ? '' : 's'}
-      </Text>
-
-      <LiquidRefreshScrollView
-        refreshing={refreshing}
-        onRefresh={onRefresh}
-        disabled={!isConnected}
-        contentContainerStyle={[styles.body, { paddingBottom: sheetBottom + 24 }]}>
+  const listHeader = useMemo(
+    () => (
+      <>
         {!isConnected ? (
           <OfflineBanner title="No connection" message="Reconnect to see current item status." />
         ) : null}
@@ -76,39 +70,71 @@ export default function SavedItemsScreen() {
             message="Please try again in a moment."
           />
         ) : null}
+        {isLoading ? <SavedSkeleton /> : null}
+      </>
+    ),
+    [isConnected, isLoading, loadError],
+  );
 
-        {isLoading ? (
-          <SavedSkeleton />
-        ) : saved.length === 0 && !loadError ? (
-          <EmptyState
-            title="Nothing saved yet"
-            message="Tap the heart on any listing to keep it here."
-            actionLabel="Start browsing"
-            onAction={() => router.push('/(tabs)')}
-            style={styles.empty}
-          />
-        ) : (
-          <View style={styles.list}>
-            {saved.map((item) => (
-              <SavedRow
-                key={item.id}
-                listing={item}
-                onOpen={() => {
-                  if (item.status === 'removed') return;
-                  router.push(`/product/${item.id}`);
-                }}
-                onSeller={() => {
-                  if (item.status === 'removed') return;
-                  router.push({ pathname: '/seller/[username]', params: { username: item.seller } });
-                }}
-                onUnsave={() => void toggleSave(item.id, username)}
-                onOffer={() => setOfferFor(item)}
-                onBuy={() => void buyNow(item)}
-              />
-            ))}
-          </View>
-        )}
-      </LiquidRefreshScrollView>
+  const listEmpty = useMemo(
+    () =>
+      !isLoading && saved.length === 0 && !loadError ? (
+        <EmptyState
+          title="Nothing saved yet"
+          message="Tap the heart on any listing to keep it here."
+          actionLabel="Start browsing"
+          onAction={() => router.push('/(tabs)')}
+          style={styles.empty}
+        />
+      ) : null,
+    [isLoading, loadError, router, saved.length],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: Listing }) => (
+      <SavedRow
+        listing={item}
+        onOpen={() => {
+          if (item.status === 'removed') return;
+          router.push(`/product/${item.id}`);
+        }}
+        onSeller={() => {
+          if (item.status === 'removed') return;
+          router.push({ pathname: '/seller/[username]', params: { username: item.seller } });
+        }}
+        onUnsave={() => void toggleSave(item.id, username)}
+        onOffer={() => setOfferFor(item)}
+        onBuy={() => void buyNow(item)}
+      />
+    ),
+    [buyNow, router, toggleSave, username],
+  );
+
+  const keyExtractor = useCallback((item: Listing) => item.id, []);
+
+  if (!session) {
+    return <Redirect href="/(auth)/welcome" />;
+  }
+
+  return (
+    <View style={styles.screen}>
+      <ScreenHeader title="Saved" onBack={() => router.back()} large />
+      <Text style={styles.subtitle}>
+        {saved.length} item{saved.length === 1 ? '' : 's'}
+      </Text>
+
+      <LiquidRefreshFlatList
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        disabled={!isConnected}
+        data={isLoading ? [] : saved}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={listEmpty}
+        contentContainerStyle={[styles.body, { paddingBottom: sheetBottom + 24, flexGrow: 1 }]}
+        showsVerticalScrollIndicator={false}
+      />
 
       <OfferSheet
         visible={Boolean(offerFor)}

@@ -1,6 +1,8 @@
 import { ModeratorBadge } from '@/components/ui/status-chip';
 import { AppImage } from '@/components/ui/app-image';
+import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import {
+  ChevronBackIcon,
   CloseIcon,
   EyeIcon,
   MoreHorizontalIcon,
@@ -310,13 +312,7 @@ export function LiveHostChip({
 }) {
   return (
     <Pressable onPress={onPress} style={styles.hostChip}>
-      <View style={styles.hostAvatar}>
-        {photoUrl ? (
-          <AppImage source={photoUrl} style={styles.hostAvatarImage} />
-        ) : (
-          <UserIcon size={17} color={Palette.muted3} />
-        )}
-      </View>
+      <ProfileAvatar uri={photoUrl} username={host} style={styles.hostAvatar} />
       <View>
         <Text style={styles.hostName}>{host}</Text>
         {subtitle ? <Text style={styles.hostSub}>{subtitle}</Text> : null}
@@ -545,15 +541,23 @@ export function LiveHostTopBar({
   viewers,
   duration,
   onEnd,
+  onLeave,
   onModeration,
 }: {
   viewers?: number;
   duration?: string;
   onEnd: () => void;
+  /** Leave the studio UI without ending the live session. */
+  onLeave?: () => void;
   onModeration?: () => void;
 }) {
   return (
     <View style={styles.hostTopBar}>
+      {onLeave ? (
+        <LiveIconButton onPress={onLeave}>
+          <ChevronBackIcon size={18} color={Palette.ivory} />
+        </LiveIconButton>
+      ) : null}
       <LiveBadgeRow viewers={viewers} duration={duration} />
       <View style={styles.hostTopSpacer} />
       {onModeration ? (

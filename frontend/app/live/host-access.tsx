@@ -68,7 +68,7 @@ export default function HostAccessScreen() {
   }
 
   if (accessState === 'allowed') {
-    return <Redirect href="/live/prepare" />;
+    return <Redirect href="/live/my-sessions" />;
   }
 
   if (accessState === 'checking') {

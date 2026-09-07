@@ -1,6 +1,7 @@
 import { apiFetch } from '@/lib/api';
 import type { CheckoutDraft, DeliveryMethod, Order, OrderStatus, Review } from '@/data/types';
 import { useAuth } from '@/context/auth-context';
+import { useListings } from '@/context/listings-context';
 import { CHECKOUT_RESERVE_MS, useLive } from '@/context/live-context';
 import type { Href } from 'expo-router';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -80,6 +81,7 @@ const CheckoutContext = createContext<CheckoutContextValue | null>(null);
 export function CheckoutProvider({ children }: { children: ReactNode }) {
   const { session, isReady } = useAuth();
   const live = useLive();
+  const { applyLocalStatus } = useListings();
   const [draft, setDraft] = useState<CheckoutDraft | null>(null);
   const [lastOrder, setLastOrder] = useState<Order | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -139,15 +141,18 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
       listedPrice?: number | null;
     }) => {
       try {
+        // Omit nulls — production Zod rejects null for optional string fields.
+        const body: Record<string, unknown> = {
+          listingId: input.listingId,
+        };
+        if (input.liveSessionId) body.liveSessionId = input.liveSessionId;
+        if (input.liveStreamProductId) body.liveStreamProductId = input.liveStreamProductId;
+        if (input.claimId) body.claimId = input.claimId;
+        if (input.offerId) body.offerId = input.offerId;
+
         const started = await apiFetch<CheckoutDraft>('/checkout/start', {
           method: 'POST',
-          body: JSON.stringify({
-            listingId: input.listingId,
-            liveSessionId: input.liveSessionId ?? null,
-            liveStreamProductId: input.liveStreamProductId ?? null,
-            claimId: input.claimId ?? null,
-            offerId: input.offerId ?? null,
-          }),
+          body: JSON.stringify(body),
         });
         setDraft({
           listingId: started.listingId,
@@ -167,13 +172,18 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
           deliveryMethod: null,
           expiresAt: started.expiresAt ?? Date.now() + CHECKOUT_RESERVE_MS,
         });
+        // Catalog holds reserve on the server — keep local cards in sync.
+        if (!input.liveSessionId && !input.liveStreamProductId) {
+          applyLocalStatus(started.listingId, 'reserved');
+        }
         setNow(Date.now());
         return true;
-      } catch {
-        return false;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Couldn’t start checkout. Try again.';
+        throw new Error(message);
       }
     },
-    [],
+    [applyLocalStatus],
   );
 
   const updateDraft = useCallback(
@@ -197,10 +207,11 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
       }
     } else if (draft) {
       await live.releaseListing(draft.listingId);
+      applyLocalStatus(draft.listingId, 'available');
     }
     setDraft(null);
     return liveId;
-  }, [draft, live]);
+  }, [applyLocalStatus, draft, live]);
 
   const checkoutBody = useCallback(() => {
     if (!draft || !draft.deliveryMethod) return null;

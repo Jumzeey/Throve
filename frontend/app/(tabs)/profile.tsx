@@ -28,7 +28,7 @@ import { apiFetch } from '@/lib/api';
 import { formatNaira } from '@/lib/format';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 type Tab = 'active' | 'sold';
 
@@ -95,6 +95,175 @@ export default function ProfileScreen() {
       .catch(() => undefined);
   }, [checkout, username]);
 
+  const listHeader = useMemo(
+    () => {
+      if (!session) return null;
+      return (
+      <View style={styles.headerContent}>
+        {!isConnected ? (
+          <OfflineBanner title="No connection" message="Reconnect to load your profile." />
+        ) : null}
+
+        {loadError && isConnected ? (
+          <AlertBanner
+            variant="error"
+            title="We couldn't load your profile"
+            message="Please try again in a moment."
+          />
+        ) : null}
+
+        {loadError && isConnected ? (
+          <Button label="Try again" variant="secondary" onPress={() => void reload()} />
+        ) : null}
+
+        <View style={styles.identity}>
+          <ProfileAvatar uri={session.photoUri} username={session.username} style={styles.avatar} />
+          <View style={styles.identityMeta}>
+            <Text style={styles.username}>{session.username}</Text>
+            {stats.count > 0 ? (
+              <View style={styles.ratingLine}>
+                <StarIcon size={13} />
+                <Text style={styles.ratingValue}>{stats.avg.toFixed(1)}</Text>
+                <Text style={styles.ratingCount}>
+                  · {stats.count} review{stats.count === 1 ? '' : 's'}
+                </Text>
+              </View>
+            ) : (
+              <Text style={styles.ratingEmpty}>No reviews yet</Text>
+            )}
+            {session.location ? (
+              <View style={styles.locationRow}>
+                <MapPinIcon size={13} color={Palette.muted} />
+                <Text style={styles.location}>{session.location}</Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+
+        {session.bio ? <Text style={styles.bio}>{session.bio}</Text> : null}
+
+        {profileIncomplete ? (
+          <View style={styles.incompleteBlock}>
+            <View style={styles.incompleteBanner}>
+              <AlertCircleIcon color={Palette.warning} />
+              <View style={styles.incompleteCopy}>
+                <Text style={styles.incompleteTitle}>{incompleteTitle}</Text>
+                <Text style={styles.incompleteBody}>{incompleteBody}</Text>
+              </View>
+            </View>
+            <Button
+              label="Complete profile"
+              variant="secondary"
+              onPress={() => router.push('/profile/edit')}
+            />
+          </View>
+        ) : (
+          <Button label="Edit profile" variant="secondary" onPress={() => router.push('/profile/edit')} />
+        )}
+
+        <View style={styles.menu}>
+          <MenuRow
+            icon={<ListingsIcon />}
+            label="My listings"
+            hint={String(mine.filter((i) => i.status !== 'draft' && i.status !== 'removed').length)}
+            onPress={() => router.push('/(tabs)/sell')}
+          />
+          <MenuRow
+            icon={<HeartIcon size={18} color={Palette.plum} />}
+            label="Saved items"
+            hint={String(savedCount)}
+            onPress={() => router.push('/profile/saved')}
+          />
+          <MenuRow icon={<BagIcon />} label="Orders" onPress={() => router.push('/profile/orders')} />
+            <MenuRow
+              icon={<VideoIcon size={18} color={Palette.plum} />}
+              label="My live sessions"
+              last
+              onPress={() => router.push('/live/my-sessions')}
+            />
+        </View>
+
+        <View style={styles.tabs}>
+          <Pressable onPress={() => setTab('active')} style={[styles.tab, tab === 'active' && styles.tabOn]}>
+            <Text style={[styles.tabLabel, tab === 'active' && styles.tabLabelOn]}>
+              Active · {activeListings.length}
+            </Text>
+          </Pressable>
+          <Pressable onPress={() => setTab('sold')} style={[styles.tab, tab === 'sold' && styles.tabOn]}>
+            <Text style={[styles.tabLabel, tab === 'sold' && styles.tabLabelOn]}>
+              Sold · {soldListings.length}
+            </Text>
+          </Pressable>
+        </View>
+
+        {tab === 'active' && shown.length === 0 ? (
+          <View style={styles.emptyActive}>
+            <Text style={styles.emptyActiveTitle}>Nothing listed right now</Text>
+            <Button
+              label="Create listing"
+              onPress={() => {
+                router.push('/sell/create');
+              }}
+            />
+          </View>
+        ) : null}
+
+        {tab === 'sold' && shown.length === 0 ? (
+          <View style={styles.emptyStack}>
+            <View style={styles.emptyDashed}>
+              <Text style={styles.emptyMuted}>You haven't sold anything yet.</Text>
+            </View>
+            {myLiveSessions.length === 0 ? (
+              <View style={styles.emptyDashed}>
+                <Text style={styles.emptyMuted}>No live sessions yet.</Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+      </View>
+      );
+    },
+    [
+      session,
+      activeListings.length,
+      incompleteBody,
+      incompleteTitle,
+      isConnected,
+      loadError,
+      mine,
+      myLiveSessions.length,
+      profileIncomplete,
+      reload,
+      router,
+      savedCount,
+      shown.length,
+      soldListings.length,
+      stats.avg,
+      stats.count,
+      tab,
+    ],
+  );
+
+  const listFooter = useMemo(
+    () => (
+      <Text style={styles.privacyNote}>
+        Email, phone number, delivery address, banking and KYC information never appear on the profile surface.
+      </Text>
+    ),
+    [],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: Listing }) => (
+      <View style={styles.cell}>
+        <ListingTile listing={item} onPress={() => router.push(`/sell/${item.id}`)} />
+      </View>
+    ),
+    [router],
+  );
+
+  const keyExtractor = useCallback((item: Listing) => item.id, []);
+
   if (!session) return null;
 
   return (
@@ -109,144 +278,21 @@ export default function ProfileScreen() {
       {showSkeleton ? (
         <SellerProfileSkeleton />
       ) : (
-        <ScrollView contentContainerStyle={[styles.body, { paddingBottom: tabScrollBottom }]}>
-          {!isConnected ? (
-            <OfflineBanner title="No connection" message="Reconnect to load your profile." />
-          ) : null}
-
-          {loadError && isConnected ? (
-            <AlertBanner
-              variant="error"
-              title="We couldn't load your profile"
-              message="Please try again in a moment."
-            />
-          ) : null}
-
-          {loadError && isConnected ? (
-            <Button label="Try again" variant="secondary" onPress={() => void reload()} />
-          ) : null}
-
-          <View style={styles.identity}>
-            <ProfileAvatar uri={session.photoUri} username={session.username} style={styles.avatar} />
-            <View style={styles.identityMeta}>
-              <Text style={styles.username}>{session.username}</Text>
-              {stats.count > 0 ? (
-                <View style={styles.ratingLine}>
-                  <StarIcon size={13} />
-                  <Text style={styles.ratingValue}>{stats.avg.toFixed(1)}</Text>
-                  <Text style={styles.ratingCount}>
-                    · {stats.count} review{stats.count === 1 ? '' : 's'}
-                  </Text>
-                </View>
-              ) : (
-                <Text style={styles.ratingEmpty}>No reviews yet</Text>
-              )}
-              {session.location ? (
-                <View style={styles.locationRow}>
-                  <MapPinIcon size={13} color={Palette.muted} />
-                  <Text style={styles.location}>{session.location}</Text>
-                </View>
-              ) : null}
-            </View>
-          </View>
-
-          {session.bio ? <Text style={styles.bio}>{session.bio}</Text> : null}
-
-          {profileIncomplete ? (
-            <View style={styles.incompleteBlock}>
-              <View style={styles.incompleteBanner}>
-                <AlertCircleIcon color={Palette.warning} />
-                <View style={styles.incompleteCopy}>
-                  <Text style={styles.incompleteTitle}>{incompleteTitle}</Text>
-                  <Text style={styles.incompleteBody}>{incompleteBody}</Text>
-                </View>
-              </View>
-              <Button
-                label="Complete profile"
-                variant="secondary"
-                onPress={() => router.push('/profile/edit')}
-              />
-            </View>
-          ) : (
-            <Button label="Edit profile" variant="secondary" onPress={() => router.push('/profile/edit')} />
-          )}
-
-          <View style={styles.menu}>
-            <MenuRow
-              icon={<ListingsIcon />}
-              label="My listings"
-              hint={String(mine.filter((i) => i.status !== 'draft' && i.status !== 'removed').length)}
-              onPress={() => router.push('/(tabs)/sell')}
-            />
-            <MenuRow
-              icon={<HeartIcon size={18} color={Palette.plum} />}
-              label="Saved items"
-              hint={String(savedCount)}
-              onPress={() => router.push('/profile/saved')}
-            />
-            <MenuRow icon={<BagIcon />} label="Orders" onPress={() => router.push('/profile/orders')} />
-            <MenuRow
-              icon={<VideoIcon size={18} color={Palette.plum} />}
-              label="My live sessions"
-              last
-              onPress={() => router.push('/live/host-access')}
-            />
-          </View>
-
-          <View style={styles.tabs}>
-            <Pressable onPress={() => setTab('active')} style={[styles.tab, tab === 'active' && styles.tabOn]}>
-              <Text style={[styles.tabLabel, tab === 'active' && styles.tabLabelOn]}>
-                Active · {activeListings.length}
-              </Text>
-            </Pressable>
-            <Pressable onPress={() => setTab('sold')} style={[styles.tab, tab === 'sold' && styles.tabOn]}>
-              <Text style={[styles.tabLabel, tab === 'sold' && styles.tabLabelOn]}>
-                Sold · {soldListings.length}
-              </Text>
-            </Pressable>
-          </View>
-
-          {tab === 'active' && shown.length === 0 ? (
-            <View style={styles.emptyActive}>
-              <Text style={styles.emptyActiveTitle}>Nothing listed right now</Text>
-              <Button
-                label="Create listing"
-                onPress={() => {
-                  router.push('/sell/create');
-                }}
-              />
-            </View>
-          ) : null}
-
-          {tab === 'sold' && shown.length === 0 ? (
-            <View style={styles.emptyStack}>
-              <View style={styles.emptyDashed}>
-                <Text style={styles.emptyMuted}>You haven't sold anything yet.</Text>
-              </View>
-              {myLiveSessions.length === 0 ? (
-                <View style={styles.emptyDashed}>
-                  <Text style={styles.emptyMuted}>No live sessions yet.</Text>
-                </View>
-              ) : null}
-            </View>
-          ) : null}
-
-          {shown.length > 0 ? (
-            <View style={styles.grid}>
-              {shown.map((listing) => (
-                <ListingTile
-                  key={listing.id}
-                  listing={listing}
-                  onPress={() => router.push(`/sell/${listing.id}`)}
-                />
-              ))}
-            </View>
-          ) : null}
-
-          <Text style={styles.privacyNote}>
-            Email, phone number, delivery address, banking and KYC information never appear on the profile surface.
-          </Text>
-        </ScrollView>
+        <FlatList
+          data={shown.length > 0 ? shown : []}
+          keyExtractor={keyExtractor}
+          renderItem={renderItem}
+          numColumns={2}
+          columnWrapperStyle={styles.gridRow}
+          ListHeaderComponent={listHeader}
+          ListFooterComponent={listFooter}
+          contentContainerStyle={[styles.body, { paddingBottom: tabScrollBottom }]}
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          removeClippedSubviews
+        />
       )}
     </View>
   );
@@ -321,7 +367,17 @@ const styles = StyleSheet.create({
   body: {
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.md,
+  },
+  headerContent: {
     gap: Spacing.lg,
+    marginBottom: Spacing.lg,
+  },
+  gridRow: {
+    gap: 16,
+    marginBottom: 16,
+  },
+  cell: {
+    flex: 1,
   },
   identity: {
     flexDirection: 'row',
@@ -460,14 +516,8 @@ const styles = StyleSheet.create({
     fontFamily: Typography.bodySemiBold,
     color: Palette.plum,
   },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 16,
-    justifyContent: 'space-between',
-  },
   tile: {
-    width: '47%',
+    flex: 1,
     gap: 4,
   },
   tileImage: {

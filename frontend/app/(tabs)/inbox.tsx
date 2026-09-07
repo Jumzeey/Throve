@@ -1,7 +1,7 @@
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { AppImage } from '@/components/ui/app-image';
 import { EmptyState } from '@/components/ui/empty-state';
-import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
+import { LiquidRefreshFlatList, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
 import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
@@ -14,7 +14,7 @@ import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatInboxTime } from '@/lib/format';
 import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 export default function InboxScreen() {
@@ -66,6 +66,63 @@ export default function InboxScreen() {
 
   const isLoading = loading && !refreshing && conversations.length === 0;
 
+  const listHeader = useMemo(
+    () => (
+      <>
+        {!isConnected ? (
+          <View style={styles.banner}>
+            <OfflineBanner title="No connection" message="Reconnect to load new messages and offers." />
+          </View>
+        ) : null}
+        {loadError ? (
+          <View style={styles.banner}>
+            <AlertBanner
+              variant="error"
+              title="We couldn't load your inbox"
+              message="Please try again in a moment."
+            />
+          </View>
+        ) : null}
+      </>
+    ),
+    [isConnected, loadError],
+  );
+
+  const listEmpty = useMemo(() => {
+    if (isLoading) return <ConversationSkeleton />;
+    if (conversations.length === 0 && !loadError) {
+      return (
+        <EmptyState
+          title="No messages yet"
+          message="Message a seller from a listing and the conversation appears here."
+          style={styles.empty}
+        />
+      );
+    }
+    return null;
+  }, [conversations.length, isLoading, loadError]);
+
+  const renderItem = useCallback(
+    ({ item: conv }: { item: Conversation }) => {
+      const other = otherParticipant(conv, me);
+      const listing = getListing(conv.listingId);
+      const unread = conv.unreadBy.includes(me);
+      return (
+        <ConversationRow
+          conversation={conv}
+          other={other}
+          avatarUri={publicProfiles[other]?.photoUri}
+          listing={listing}
+          unread={unread}
+          onPress={() => router.push(`/inbox/chat/${conv.id}`)}
+        />
+      );
+    },
+    [getListing, me, otherParticipant, publicProfiles, router],
+  );
+
+  const keyExtractor = useCallback((item: Conversation) => item.id, []);
+
   return (
     <View style={[styles.screen, { paddingTop: top }]}>
       <Text style={styles.title}>Inbox</Text>
@@ -96,53 +153,18 @@ export default function InboxScreen() {
         </Pressable>
       </View>
 
-      <LiquidRefreshScrollView
+      <LiquidRefreshFlatList
         refreshing={refreshing}
         onRefresh={onRefresh}
         disabled={!isConnected}
-        contentContainerStyle={[styles.body, { paddingBottom: tabScrollBottom }]}>
-        {!isConnected ? (
-          <View style={styles.banner}>
-            <OfflineBanner title="No connection" message="Reconnect to load new messages and offers." />
-          </View>
-        ) : null}
-        {loadError ? (
-          <View style={styles.banner}>
-            <AlertBanner
-              variant="error"
-              title="We couldn't load your inbox"
-              message="Please try again in a moment."
-            />
-          </View>
-        ) : null}
-
-        {isLoading ? (
-          <ConversationSkeleton />
-        ) : conversations.length === 0 && !loadError ? (
-          <EmptyState
-            title="No messages yet"
-            message="Message a seller from a listing and the conversation appears here."
-            style={styles.empty}
-          />
-        ) : (
-          conversations.map((conv) => {
-            const other = otherParticipant(conv, me);
-            const listing = getListing(conv.listingId);
-            const unread = conv.unreadBy.includes(me);
-            return (
-              <ConversationRow
-                key={conv.id}
-                conversation={conv}
-                other={other}
-                avatarUri={publicProfiles[other]?.photoUri}
-                listing={listing}
-                unread={unread}
-                onPress={() => router.push(`/inbox/chat/${conv.id}`)}
-              />
-            );
-          })
-        )}
-      </LiquidRefreshScrollView>
+        data={isLoading ? [] : conversations}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={listEmpty}
+        contentContainerStyle={[styles.body, { paddingBottom: tabScrollBottom, flexGrow: 1 }]}
+        showsVerticalScrollIndicator={false}
+      />
     </View>
   );
 }

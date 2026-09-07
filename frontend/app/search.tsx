@@ -11,7 +11,6 @@ import {
   StarIcon,
 } from '@/components/ui/icons';
 import { ListingCard } from '@/components/ui/listing-card';
-import { ListingGrid } from '@/components/ui/listing-grid';
 import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { Palette, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
@@ -26,8 +25,8 @@ import { searchCatalog, type SearchBrand, type SearchSeller } from '@/lib/catalo
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 function sellerCity(location: string) {
   return location.split(',')[0]?.trim() || location;
@@ -101,8 +100,6 @@ export default function SearchScreen() {
     return chips;
   }, [filters]);
 
-  if (!session) return <Redirect href="/(auth)/welcome" />;
-
   function goBack() {
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)');
@@ -131,6 +128,142 @@ export default function SearchScreen() {
       brand: current.brand === brand ? '' : brand,
     }));
   }
+
+  const showItemResults =
+    searched && !searching && !searchError && results.length > 0;
+
+  const listHeader = useMemo(() => {
+    if (!searched) {
+      return (
+        <EmptyState
+          title="What are you looking for?"
+          message="Search items, brands or sellers. Filters and sorting narrow your results."
+        />
+      );
+    }
+    if (searching) return <ListingGridSkeleton count={4} />;
+    if (searchError) {
+      return (
+        <AlertBanner variant="error" title="Search didn't complete" message="Please try again in a moment." />
+      );
+    }
+    if (results.length === 0 && sellers.length === 0 && brands.length === 0) {
+      return (
+        <EmptyState
+          title="No matches"
+          message={
+            query.trim()
+              ? `Nothing available for “${query.trim()}” with these filters.`
+              : 'Try different keywords or adjust your filters.'
+          }
+          actionLabel="Clear filters"
+          onAction={clearAll}
+        />
+      );
+    }
+    return (
+      <>
+        {sellers.length > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.kicker}>Sellers</Text>
+            <View style={styles.sellerList}>
+              {sellers.map((seller) => {
+                const city = sellerCity(seller.location);
+                return (
+                  <Pressable
+                    key={seller.username}
+                    onPress={() =>
+                      router.push({ pathname: '/seller/[username]', params: { username: seller.username } })
+                    }
+                    style={styles.sellerRow}>
+                    <ProfileAvatar uri={seller.photoUri} username={seller.username} style={styles.sellerAvatar} />
+                    <View style={styles.sellerCopy}>
+                      <Text style={styles.sellerName} numberOfLines={1}>
+                        {seller.username}
+                      </Text>
+                      <View style={styles.sellerMetaRow}>
+                        {seller.count > 0 ? (
+                          <>
+                            <StarIcon size={10} />
+                            <Text style={styles.sellerMeta} numberOfLines={1}>
+                              {seller.avg.toFixed(1)} · {seller.count} reviews{city ? ` · ${city}` : ''}
+                            </Text>
+                          </>
+                        ) : (
+                          <Text style={styles.sellerMeta} numberOfLines={1}>
+                            {city || 'New seller'}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                    <View style={styles.viewBtn}>
+                      <Text style={styles.viewBtnLabel}>View</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+
+        {brands.length > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.kicker}>Brands</Text>
+            <View style={styles.brandWrap}>
+              {brands.map((brand) => {
+                const active = filters.brand === brand.name;
+                return (
+                  <Pressable
+                    key={brand.name}
+                    onPress={() => applyBrand(brand.name)}
+                    style={[styles.brandChip, active && styles.brandChipActive]}>
+                    <Text style={[styles.brandChipLabel, active && styles.brandChipLabelActive]}>
+                      {brand.name} · {brand.count} {brand.count === 1 ? 'item' : 'items'}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+
+        {results.length > 0 ? (
+          <View style={styles.itemsHeader}>
+            <Text style={styles.itemsTitle}>Items</Text>
+            <Text style={styles.itemsCount}>{results.length} available</Text>
+          </View>
+        ) : null}
+      </>
+    );
+  }, [
+    brands,
+    clearAll,
+    filters.brand,
+    query,
+    results.length,
+    router,
+    searchError,
+    searched,
+    searching,
+    sellers,
+  ]);
+
+  const renderItem = useCallback(
+    ({ item }: { item: Listing }) => (
+      <View style={styles.cell}>
+        <ListingCard
+          listing={item}
+          meta="condition"
+          onPress={() => router.push(`/product/${item.id}`)}
+        />
+      </View>
+    ),
+    [router],
+  );
+
+  const keyExtractor = useCallback((item: Listing) => item.id, []);
+
+  if (!session) return <Redirect href="/(auth)/welcome" />;
 
   return (
     <View style={styles.screen}>
@@ -161,6 +294,8 @@ export default function SearchScreen() {
 
       <ScrollView
         horizontal
+        nestedScrollEnabled
+        directionalLockEnabled
         showsHorizontalScrollIndicator={false}
         style={styles.chipScroll}
         contentContainerStyle={styles.chipRow}
@@ -193,114 +328,22 @@ export default function SearchScreen() {
         </View>
       ) : null}
 
-      <ScrollView style={styles.results} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-        {!searched ? (
-          <EmptyState
-            title="What are you looking for?"
-            message="Search items, brands or sellers. Filters and sorting narrow your results."
-          />
-        ) : searching ? (
-          <ListingGridSkeleton count={4} />
-        ) : searchError ? (
-          <AlertBanner variant="error" title="Search didn't complete" message="Please try again in a moment." />
-        ) : results.length === 0 && sellers.length === 0 && brands.length === 0 ? (
-          <EmptyState
-            title="No matches"
-            message={
-              query.trim()
-                ? `Nothing available for “${query.trim()}” with these filters.`
-                : 'Try different keywords or adjust your filters.'
-            }
-            actionLabel="Clear filters"
-            onAction={clearAll}
-          />
-        ) : (
-          <>
-            {sellers.length > 0 ? (
-              <View style={styles.section}>
-                <Text style={styles.kicker}>Sellers</Text>
-                <View style={styles.sellerList}>
-                  {sellers.map((seller) => {
-                    const city = sellerCity(seller.location);
-                    return (
-                      <Pressable
-                        key={seller.username}
-                        onPress={() =>
-                          router.push({ pathname: '/seller/[username]', params: { username: seller.username } })
-                        }
-                        style={styles.sellerRow}>
-                        <ProfileAvatar uri={seller.photoUri} username={seller.username} style={styles.sellerAvatar} />
-                        <View style={styles.sellerCopy}>
-                          <Text style={styles.sellerName} numberOfLines={1}>
-                            {seller.username}
-                          </Text>
-                          <View style={styles.sellerMetaRow}>
-                            {seller.count > 0 ? (
-                              <>
-                                <StarIcon size={10} />
-                                <Text style={styles.sellerMeta} numberOfLines={1}>
-                                  {seller.avg.toFixed(1)} · {seller.count} reviews{city ? ` · ${city}` : ''}
-                                </Text>
-                              </>
-                            ) : (
-                              <Text style={styles.sellerMeta} numberOfLines={1}>
-                                {city || 'New seller'}
-                              </Text>
-                            )}
-                          </View>
-                        </View>
-                        <View style={styles.viewBtn}>
-                          <Text style={styles.viewBtnLabel}>View</Text>
-                        </View>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              </View>
-            ) : null}
-
-            {brands.length > 0 ? (
-              <View style={styles.section}>
-                <Text style={styles.kicker}>Brands</Text>
-                <View style={styles.brandWrap}>
-                  {brands.map((brand) => {
-                    const active = filters.brand === brand.name;
-                    return (
-                      <Pressable
-                        key={brand.name}
-                        onPress={() => applyBrand(brand.name)}
-                        style={[styles.brandChip, active && styles.brandChipActive]}>
-                        <Text style={[styles.brandChipLabel, active && styles.brandChipLabelActive]}>
-                          {brand.name} · {brand.count} {brand.count === 1 ? 'item' : 'items'}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              </View>
-            ) : null}
-
-            {results.length > 0 ? (
-              <>
-                <View style={styles.itemsHeader}>
-                  <Text style={styles.itemsTitle}>Items</Text>
-                  <Text style={styles.itemsCount}>{results.length} available</Text>
-                </View>
-                <ListingGrid
-                  listings={results.map((listing) => (
-                    <ListingCard
-                      key={listing.id}
-                      listing={listing}
-                      meta="condition"
-                      onPress={() => router.push(`/product/${listing.id}`)}
-                    />
-                  ))}
-                />
-              </>
-            ) : null}
-          </>
-        )}
-      </ScrollView>
+      <FlatList
+        style={styles.results}
+        contentContainerStyle={styles.body}
+        keyboardShouldPersistTaps="handled"
+        data={showItemResults ? results : []}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        numColumns={2}
+        columnWrapperStyle={styles.gridRow}
+        ListHeaderComponent={listHeader}
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        removeClippedSubviews
+        showsVerticalScrollIndicator={false}
+      />
 
       <FiltersSheet
         visible={filtersOpen}
@@ -388,7 +431,9 @@ const styles = StyleSheet.create({
   chipLabelFilled: { color: Palette.ivory },
   chipLabelOutline: { color: Palette.body },
   offline: { marginHorizontal: 20, marginBottom: 8 },
-  body: { paddingHorizontal: 20, paddingBottom: 24 },
+  body: { paddingHorizontal: 20, paddingBottom: 24, flexGrow: 1 },
+  gridRow: { gap: 10, marginBottom: 16 },
+  cell: { flex: 1, backgroundColor: Palette.background },
   section: { marginBottom: 18 },
   kicker: {
     fontSize: 10,

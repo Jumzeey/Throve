@@ -11,14 +11,12 @@ import { useListings } from '@/context/listings-context';
 import { checkoutTotals } from '@/data/checkout';
 import { getListingImageSource } from '@/data/images';
 import { useNetworkStatus } from '@/hooks/use-network-status';
-import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatCountdown, formatNaira } from '@/lib/format';
 import { Redirect, useRouter } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export default function CheckoutSummaryScreen() {
   const router = useRouter();
-  const { bottom } = useScreenInsets();
   const live = useLive();
   const { getListing } = useListings();
   const checkout = useCheckout();
@@ -33,7 +31,15 @@ export default function CheckoutSummaryScreen() {
   const remaining = checkout.remaining;
   const expired = remaining <= 0;
   const sold = listing?.status === 'sold' || listing?.status === 'removed';
-  const reservedOk = listing?.status === 'reserved' || Boolean(draft.liveSessionId) || Boolean(draft.offerId);
+  // Catalog Buy now may still show status "available" locally until refresh — an active draft is the hold.
+  const holdActive =
+    !expired &&
+    Boolean(listing) &&
+    (listing?.status === 'reserved' ||
+      listing?.status === 'available' ||
+      Boolean(draft.liveSessionId) ||
+      Boolean(draft.offerId));
+  const isLiveCheckout = Boolean(draft.liveSessionId || draft.claimId);
 
   if (!draft.deliveryMethod && !expired && !sold) {
     return <Redirect href="/checkout/delivery" />;
@@ -54,10 +60,11 @@ export default function CheckoutSummaryScreen() {
   const deliveryLabelText =
     totals.delivery.value === 'Express' ? 'Express delivery' : 'Standard delivery';
   const deliveryEta = totals.delivery.eta.replace(/^Estimated\s+/i, '');
+  const listingId = draft.listingId;
 
   async function leave() {
     const liveId = await checkout.cancelCheckout();
-    leaveCheckout(router, liveId, draft.listingId);
+    leaveCheckout(router, liveId, listingId);
   }
 
   return (
@@ -65,7 +72,7 @@ export default function CheckoutSummaryScreen() {
       <ScreenHeader title="Review order" onBack={() => router.back()} />
       <CheckoutProgress step={3} />
 
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl + bottom }]}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl }]}>
         {!isConnected ? (
           <OfflineBanner title="No connection" message="Reconnect to continue checkout." />
         ) : null}
@@ -100,14 +107,10 @@ export default function CheckoutSummaryScreen() {
           </View>
         ) : null}
 
-        {!expired && !sold && listing ? (
+        {!expired && !sold && listing && isLiveCheckout ? (
           <View style={styles.holdBox}>
             <ClockIcon color={Palette.warning} />
-            <Text style={styles.holdCopy}>
-              {draft.liveSessionId
-                ? 'A Live claim keeps its own approved 5-minute window.'
-                : 'Held for you while you check out'}
-            </Text>
+            <Text style={styles.holdCopy}>Your live claim is held while you check out</Text>
             <Text style={styles.holdTimer}>{formatCountdown(remaining)}</Text>
           </View>
         ) : null}
@@ -209,18 +212,13 @@ export default function CheckoutSummaryScreen() {
             <Button
               label="Continue to payment"
               onPress={() => router.push('/checkout/payment')}
-              disabled={!isConnected || !listing || !reservedOk}
+              disabled={!isConnected || !listing || !holdActive}
             />
             <Text style={styles.disclaimer}>
               Reviewing this page doesn't buy the item — the purchase completes once payment succeeds.
             </Text>
           </>
         )}
-
-        <Text style={styles.footerNote}>
-          Buyer checkout shows item, delivery and Buyer Protection only — seller commission, processing fees and payout
-          never appear here.
-        </Text>
       </ScrollView>
     </View>
   );
@@ -493,15 +491,5 @@ const styles = StyleSheet.create({
     fontFamily: Typography.body,
     color: Palette.muted,
     textAlign: 'center',
-  },
-  footerNote: {
-    marginTop: 4,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: Palette.divider,
-    fontSize: 11.5,
-    lineHeight: 18,
-    fontFamily: Typography.body,
-    color: Palette.muted,
   },
 });

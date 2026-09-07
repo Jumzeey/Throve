@@ -48,6 +48,7 @@ export default function ProductScreen() {
   const [descOpen, setDescOpen] = useState(false);
   const [protectOpen, setProtectOpen] = useState(false);
   const [sellerStats, setSellerStats] = useState({ avg: 0, count: 0 });
+  const [buying, setBuying] = useState(false);
 
   useEffect(() => {
     if (!banner) return;
@@ -105,8 +106,20 @@ export default function ProductScreen() {
   }
 
   async function buyNow() {
-    const started = await checkout.startCheckout({ listingId: product.id, buyer: username, liveSessionId: null });
-    if (started) router.push('/checkout/shipping');
+    if (buying || !canTrade) return;
+    setBuying(true);
+    try {
+      await checkout.startCheckout({
+        listingId: product.id,
+        buyer: username,
+        liveSessionId: null,
+      });
+      router.push('/checkout/shipping');
+    } catch (err) {
+      setBanner(err instanceof Error ? err.message : "Couldn't start checkout. Try again.");
+    } finally {
+      setBuying(false);
+    }
   }
 
   async function shareListing() {
@@ -171,6 +184,8 @@ export default function ProductScreen() {
         {photoTotal > 1 ? (
           <ScrollView
             horizontal
+            nestedScrollEnabled
+            directionalLockEnabled
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.thumbs}
             keyboardShouldPersistTaps="handled">
@@ -328,22 +343,23 @@ export default function ProductScreen() {
         ) : null}
         {isOwn ? null : (
           <Pressable
-            disabled={!canTrade}
+            disabled={!canTrade || buying}
             onPress={() => void buyNow()}
             style={[
               styles.footerBtn,
               styles.footerBuy,
               product.status === 'reserved' && styles.footerBuyReserved,
               product.status === 'sold' && styles.footerBuyDisabled,
+              buying && { opacity: 0.7 },
             ]}
-            accessibilityState={{ disabled: !canTrade }}>
+            accessibilityState={{ disabled: !canTrade || buying }}>
             <Text
               style={[
                 styles.footerBuyLabel,
                 product.status === 'reserved' && styles.footerBuyReservedLabel,
                 product.status === 'sold' && styles.footerDisabledLabel,
               ]}>
-              Buy now
+              {buying ? 'Starting…' : 'Buy now'}
             </Text>
           </Pressable>
         )}

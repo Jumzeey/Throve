@@ -102,6 +102,8 @@ export default function ListingPreviewScreen() {
         {photoCount > 1 ? (
           <ScrollView
             horizontal
+            nestedScrollEnabled
+            directionalLockEnabled
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.thumbs}
             keyboardShouldPersistTaps="handled">

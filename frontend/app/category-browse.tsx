@@ -1,23 +1,21 @@
 import { OfflineBanner } from '@/components/ui/alert-banner';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SearchIcon } from '@/components/ui/icons';
-import { ListingGridSkeleton } from '@/components/ui/loading-skeleton';
 import { DepartmentChips } from '@/components/ui/department-chips';
 import { FiltersButton } from '@/components/ui/filters-button';
 import { FiltersSheet } from '@/components/ui/filters-sheet';
 import { ListingCard } from '@/components/ui/listing-card';
-import { ListingGrid } from '@/components/ui/listing-grid';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { Palette, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useListings } from '@/context/listings-context';
 import { DEFAULT_FILTERS, filterListings } from '@/data/filter-listings';
 import { DEPARTMENTS, getCategoriesForDepartment } from '@/data/seed';
-import type { ListingFilters } from '@/data/types';
+import type { Listing, ListingFilters } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 const DEPARTMENT_CHIPS = [{ label: 'All', value: '' }, ...DEPARTMENTS.map((department) => ({ label: department, value: department }))];
 
@@ -50,6 +48,17 @@ export default function CategoryBrowseScreen() {
       sort: filters.sort,
     });
   }, [catalog, category, department, filters]);
+
+  const renderItem = useCallback(
+    ({ item }: { item: Listing }) => (
+      <View style={styles.cell}>
+        <ListingCard listing={item} meta="condition" onPress={() => router.push(`/product/${item.id}`)} />
+      </View>
+    ),
+    [router],
+  );
+
+  const keyExtractor = useCallback((item: Listing) => item.id, []);
 
   if (!session) return <Redirect href="/(auth)/welcome" />;
 
@@ -94,17 +103,22 @@ export default function CategoryBrowseScreen() {
         <Text style={styles.count}>{listings.length} items</Text>
         <FiltersButton onPress={() => setSheetOpen(true)} />
       </View>
-      <ScrollView contentContainerStyle={styles.body}>
-        {listings.length === 0 ? (
+      <FlatList
+        data={listings}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        numColumns={2}
+        columnWrapperStyle={styles.row}
+        contentContainerStyle={styles.body}
+        ListEmptyComponent={
           <EmptyState title="Nothing here yet" message="Try another department or category, or check back later." />
-        ) : (
-          <ListingGrid
-            listings={listings.map((item) => (
-              <ListingCard key={item.id} listing={item} meta="condition" onPress={() => router.push(`/product/${item.id}`)} />
-            ))}
-          />
-        )}
-      </ScrollView>
+        }
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        removeClippedSubviews
+        showsVerticalScrollIndicator={false}
+      />
       <FiltersSheet
         visible={sheetOpen}
         value={{ ...filters, department, category }}
@@ -157,5 +171,7 @@ const styles = StyleSheet.create({
     fontFamily: Typography.body,
     color: Palette.muted,
   },
-  body: { paddingHorizontal: 20, paddingBottom: 24 },
+  body: { paddingHorizontal: 20, paddingBottom: 24, flexGrow: 1 },
+  row: { gap: 10, marginBottom: 16 },
+  cell: { flex: 1, backgroundColor: Palette.background },
 });

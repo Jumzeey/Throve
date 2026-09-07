@@ -55,6 +55,8 @@ export function PhotoPager({ count, listingId, uris, index, onIndexChange, aspec
       <ScrollView
         ref={scrollRef}
         horizontal
+        nestedScrollEnabled
+        directionalLockEnabled
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         onScroll={onScroll}

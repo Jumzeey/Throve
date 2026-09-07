@@ -308,7 +308,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return card;
       }
       const cached = publicProfilesRef.current[username];
-      if (cached && cached.followerCount !== undefined) return cached;
+      // Refresh when we only have a stub without a photo — discovery cards need real avatars.
+      if (cached && cached.followerCount !== undefined && cached.photoUri) return cached;
       const inflight = publicProfileInflight.current[username];
       if (inflight) return inflight;
 

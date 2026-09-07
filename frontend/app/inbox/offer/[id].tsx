@@ -84,16 +84,18 @@ export default function OfferDetailsScreen() {
   async function startBuy() {
     if (!listing || !canCheckout) return;
     await runAction(async () => {
-      const started = await checkout.startCheckout({
-        listingId: listing.id,
-        buyer: me,
-        liveSessionId: null,
-        offerId: offer.id,
-        itemPrice: offer.amount,
-        listedPrice: listing.price,
-      });
-      if (started) router.push('/checkout/shipping');
-      else setActionError(true);
+      try {
+        await checkout.startCheckout({
+          listingId: listing.id,
+          buyer: me,
+          offerId: offer.id,
+          itemPrice: offer.amount,
+          listedPrice: listing.price,
+        });
+        router.push('/checkout/shipping');
+      } catch {
+        setActionError(true);
+      }
     });
   }
 

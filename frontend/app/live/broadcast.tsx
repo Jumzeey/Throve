@@ -25,7 +25,7 @@ import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { BackHandler, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 function formatLiveDuration(ms: number) {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -53,6 +53,7 @@ export default function LiveBroadcastScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [goingLive, setGoingLive] = useState(true);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intentionalLeaveRef = useRef(false);
   const peakRef = useRef(0);
 
   const broadcastId = live.activeBroadcastId;
@@ -129,9 +130,19 @@ export default function LiveBroadcastScreen() {
     [ending, live, liveSession, router],
   );
 
+  const leaveStudio = useCallback(() => {
+    intentionalLeaveRef.current = true;
+    if (reconnectTimer.current) {
+      clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
+    }
+    // Keep the session live; host can re-enter from My live sessions.
+    router.replace('/live/my-sessions');
+  }, [router]);
+
   const onConnectionChange = useCallback(
     (state: LiveConnection) => {
-      if (!liveSession) return;
+      if (intentionalLeaveRef.current || !liveSession) return;
       live.setConnection(liveSession.id, state);
       if (state === 'reconnecting' || state === 'lost') {
         if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
@@ -153,6 +164,14 @@ export default function LiveBroadcastScreen() {
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
     };
   }, []);
+
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      leaveStudio();
+      return true;
+    });
+    return () => sub.remove();
+  }, [leaveStudio]);
 
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
@@ -226,6 +245,7 @@ export default function LiveBroadcastScreen() {
           <LiveHostTopBar
             viewers={liveSession.viewers ?? 0}
             duration={duration}
+            onLeave={leaveStudio}
             onEnd={() => setEndOpen(true)}
             onModeration={() => setModsOpen(true)}
           />

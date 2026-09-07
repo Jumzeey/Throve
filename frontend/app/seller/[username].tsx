@@ -28,8 +28,8 @@ import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { apiFetch } from '@/lib/api';
 import { formatNaira } from '@/lib/format';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 const PREVIEW_REVIEWS = 2;
 
@@ -139,13 +139,13 @@ export default function SellerProfileScreen() {
   const blocked = inbox.isBlocked(username);
   const showSkeleton = !profileReady || (listingsLoading && mine.length === 0);
 
-  async function message() {
+  const message = useCallback(async () => {
     if (!messageListing) return;
     const conv = await inbox.openOrCreateConversation(username, messageListing.id, me);
     router.push(`/inbox/chat/${conv.id}`);
-  }
+  }, [inbox, me, messageListing, router, username]);
 
-  async function toggleFollow() {
+  const toggleFollow = useCallback(async () => {
     if (!username || followBusy || isOwn) return;
     setFollowBusy(true);
     try {
@@ -175,7 +175,195 @@ export default function SellerProfileScreen() {
     } finally {
       setFollowBusy(false);
     }
-  }
+  }, [
+    followBusy,
+    isFollowing,
+    isOwn,
+    profile.bio,
+    profile.location,
+    profile.photoUri,
+    refreshListings,
+    upsertPublicProfile,
+    username,
+  ]);
+
+  const listHeader = useMemo(
+    () => (
+      <>
+        {!isConnected ? (
+          <View style={styles.bannerGap}>
+            <OfflineBanner title="No connection" message="Reconnect to view this seller." />
+          </View>
+        ) : null}
+        {banner ? (
+          <AlertBanner
+            variant={banner.startsWith('Could') ? 'error' : 'success'}
+            title={banner}
+            style={styles.bannerGap}
+          />
+        ) : null}
+        {profileError && !isOwn ? (
+          <AlertBanner
+            variant="error"
+            title="We couldn't load this profile"
+            message="Please try again in a moment."
+            style={styles.bannerGap}
+          />
+        ) : null}
+
+        <View style={styles.identity}>
+          <ProfileAvatar uri={profile.photoUri} username={username} style={styles.avatar} />
+          <Text style={styles.name}>{username}</Text>
+          {stats.count > 0 ? (
+            <View style={styles.ratingLine}>
+              <StarIcon size={13} />
+              <Text style={styles.ratingValue}>{stats.avg.toFixed(1)}</Text>
+              <Text style={styles.ratingCountInline}>{stats.count} reviews</Text>
+            </View>
+          ) : (
+            <Text style={styles.ratingCount}>No reviews yet</Text>
+          )}
+          <Text style={styles.followMeta}>
+            {followerCount} {followerCount === 1 ? 'follower' : 'followers'}
+          </Text>
+          {profile.location ? (
+            <View style={styles.locationRow}>
+              <MapPinIcon size={13} color={Palette.muted} />
+              <Text style={styles.location}>{profile.location}</Text>
+            </View>
+          ) : null}
+          {profile.bio ? <Text style={styles.bio}>{profile.bio}</Text> : null}
+        </View>
+
+        {!isOwn ? (
+          <View style={styles.actionRow}>
+            <Button
+              label={isFollowing ? 'Following' : 'Follow'}
+              variant={isFollowing ? 'secondary' : 'primary'}
+              loading={followBusy}
+              onPress={() => void toggleFollow()}
+              style={styles.followBtn}
+            />
+            <Pressable
+              onPress={() => void message()}
+              disabled={!messageListing}
+              style={[styles.messageBtn, !messageListing && styles.messageBtnOff]}>
+              <ChatBubbleIcon size={16} color={Palette.plum} />
+              <Text style={styles.messageLabel}>Message</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {liveNow ? (
+          <LiveNowCard session={liveNow} onPress={() => router.push(`/live/${liveNow.id}`)} />
+        ) : upcoming ? (
+          <UpcomingLiveCard session={upcoming} onPress={() => router.push(`/live/${upcoming.id}`)} />
+        ) : (
+          <EmptyBox dashed message="This seller isn't live and has nothing scheduled." />
+        )}
+
+        <View style={styles.tabs}>
+          <Pressable onPress={() => setTab('active')} style={[styles.tab, tab === 'active' && styles.tabOn]}>
+            <Text style={[styles.tabLabel, tab === 'active' && styles.tabLabelOn]}>
+              Active · {activeListings.length}
+            </Text>
+          </Pressable>
+          <Pressable onPress={() => setTab('sold')} style={[styles.tab, tab === 'sold' && styles.tabOn]}>
+            <Text style={[styles.tabLabel, tab === 'sold' && styles.tabLabelOn]}>Sold · {soldListings.length}</Text>
+          </Pressable>
+        </View>
+
+        {shown.length === 0 ? (
+          tab === 'sold' ? (
+            <EmptyBox
+              dashed
+              title="No sales yet"
+              message="This seller hasn't sold an item yet."
+              style={styles.sectionGap}
+            />
+          ) : (
+            <EmptyBox
+              dashed
+              title="Nothing listed right now"
+              message="This seller has no active listings."
+              style={styles.sectionGap}
+            />
+          )
+        ) : null}
+      </>
+    ),
+    [
+      activeListings.length,
+      banner,
+      followBusy,
+      followerCount,
+      isConnected,
+      isFollowing,
+      isOwn,
+      liveNow,
+      messageListing,
+      profile.bio,
+      profile.location,
+      profile.photoUri,
+      profileError,
+      soldListings.length,
+      shown.length,
+      stats.avg,
+      stats.count,
+      tab,
+      upcoming,
+      username,
+      message,
+      toggleFollow,
+      router,
+    ],
+  );
+
+  const listFooter = useMemo(
+    () => (
+      <View style={shown.length > 0 ? styles.reviewsSection : undefined}>
+        <View style={styles.reviewsHead}>
+          <Text style={styles.reviewsTitle}>Seller reviews</Text>
+          {reviews.length > 0 ? (
+            <Pressable onPress={() => setReviewsOpen(true)} hitSlop={8}>
+              <Text style={styles.seeAll}>See all</Text>
+            </Pressable>
+          ) : null}
+        </View>
+        {reviews.length === 0 ? (
+          <EmptyBox message="No reviews yet." filled />
+        ) : (
+          <>
+            <View style={styles.summary}>
+              <Text style={styles.summaryScore}>{stats.avg.toFixed(1)}</Text>
+              <StarRating rating={stats.avg} size={16} />
+              <Text style={styles.summaryCopy}>
+                {stats.count} review{stats.count === 1 ? '' : 's'} from completed orders
+              </Text>
+            </View>
+            {previewReviews.map((review, index) => (
+              <ReviewRow key={`${review.buyer}-${index}`} review={review} last={index === previewReviews.length - 1} />
+            ))}
+            <Text style={styles.disclaimer}>
+              Only buyers from completed Throve orders can leave a review — one per order.
+            </Text>
+          </>
+        )}
+      </View>
+    ),
+    [previewReviews, reviews.length, shown.length, stats.avg, stats.count],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: Listing }) => (
+      <View style={styles.cell}>
+        <SellerListingCard listing={item} onPress={() => router.push(`/product/${item.id}`)} />
+      </View>
+    ),
+    [router],
+  );
+
+  const keyExtractor = useCallback((item: Listing) => item.id, []);
 
   return (
     <View style={styles.screen}>
@@ -194,142 +382,21 @@ export default function SellerProfileScreen() {
       {showSkeleton ? (
         <SellerProfileSkeleton />
       ) : (
-        <ScrollView contentContainerStyle={styles.body}>
-          {!isConnected ? (
-            <View style={styles.bannerGap}>
-              <OfflineBanner title="No connection" message="Reconnect to view this seller." />
-            </View>
-          ) : null}
-          {banner ? (
-            <AlertBanner
-              variant={banner.startsWith('Could') ? 'error' : 'success'}
-              title={banner}
-              style={styles.bannerGap}
-            />
-          ) : null}
-          {profileError && !isOwn ? (
-            <AlertBanner
-              variant="error"
-              title="We couldn't load this profile"
-              message="Please try again in a moment."
-              style={styles.bannerGap}
-            />
-          ) : null}
-
-          <View style={styles.identity}>
-            <ProfileAvatar uri={profile.photoUri} username={username} style={styles.avatar} />
-            <Text style={styles.name}>{username}</Text>
-            {stats.count > 0 ? (
-              <View style={styles.ratingLine}>
-                <StarIcon size={13} />
-                <Text style={styles.ratingValue}>{stats.avg.toFixed(1)}</Text>
-                <Text style={styles.ratingCountInline}>{stats.count} reviews</Text>
-              </View>
-            ) : (
-              <Text style={styles.ratingCount}>No reviews yet</Text>
-            )}
-            <Text style={styles.followMeta}>
-              {followerCount} {followerCount === 1 ? 'follower' : 'followers'}
-            </Text>
-            {profile.location ? (
-              <View style={styles.locationRow}>
-                <MapPinIcon size={13} color={Palette.muted} />
-                <Text style={styles.location}>{profile.location}</Text>
-              </View>
-            ) : null}
-            {profile.bio ? <Text style={styles.bio}>{profile.bio}</Text> : null}
-          </View>
-
-          {!isOwn ? (
-            <View style={styles.actionRow}>
-              <Button
-                label={isFollowing ? 'Following' : 'Follow'}
-                variant={isFollowing ? 'secondary' : 'primary'}
-                loading={followBusy}
-                onPress={() => void toggleFollow()}
-                style={styles.followBtn}
-              />
-              <Pressable
-                onPress={() => void message()}
-                disabled={!messageListing}
-                style={[styles.messageBtn, !messageListing && styles.messageBtnOff]}>
-                <ChatBubbleIcon size={16} color={Palette.plum} />
-                <Text style={styles.messageLabel}>Message</Text>
-              </Pressable>
-            </View>
-          ) : null}
-
-          {liveNow ? (
-            <LiveNowCard session={liveNow} onPress={() => router.push(`/live/${liveNow.id}`)} />
-          ) : upcoming ? (
-            <UpcomingLiveCard session={upcoming} onPress={() => router.push(`/live/${upcoming.id}`)} />
-          ) : (
-            <EmptyBox dashed message="This seller isn't live and has nothing scheduled." />
-          )}
-
-          <View style={styles.tabs}>
-            <Pressable onPress={() => setTab('active')} style={[styles.tab, tab === 'active' && styles.tabOn]}>
-              <Text style={[styles.tabLabel, tab === 'active' && styles.tabLabelOn]}>
-                Active · {activeListings.length}
-              </Text>
-            </Pressable>
-            <Pressable onPress={() => setTab('sold')} style={[styles.tab, tab === 'sold' && styles.tabOn]}>
-              <Text style={[styles.tabLabel, tab === 'sold' && styles.tabLabelOn]}>Sold · {soldListings.length}</Text>
-            </Pressable>
-          </View>
-
-          {shown.length === 0 ? (
-            tab === 'sold' ? (
-              <EmptyBox
-                dashed
-                title="No sales yet"
-                message="This seller hasn't sold an item yet."
-                style={styles.sectionGap}
-              />
-            ) : (
-              <EmptyBox
-                dashed
-                title="Nothing listed right now"
-                message="This seller has no active listings."
-                style={styles.sectionGap}
-              />
-            )
-          ) : (
-            <View style={styles.grid}>
-              {shown.map((item) => (
-                <SellerListingCard key={item.id} listing={item} onPress={() => router.push(`/product/${item.id}`)} />
-              ))}
-            </View>
-          )}
-
-          <View style={styles.reviewsHead}>
-            <Text style={styles.reviewsTitle}>Seller reviews</Text>
-            {reviews.length > 0 ? (
-              <Pressable onPress={() => setReviewsOpen(true)} hitSlop={8}>
-                <Text style={styles.seeAll}>See all</Text>
-              </Pressable>
-            ) : null}
-          </View>
-          {reviews.length === 0 ? (
-            <EmptyBox message="No reviews yet." filled />
-          ) : (
-            <>
-              <View style={styles.summary}>
-                <Text style={styles.summaryScore}>{stats.avg.toFixed(1)}</Text>
-                <StarRating rating={stats.avg} size={16} />
-                <Text style={styles.summaryCopy}>
-                  {stats.count} review{stats.count === 1 ? '' : 's'} from completed orders
-                </Text>
-              </View>
-              {previewReviews.map((review, index) => (
-                <ReviewRow key={`${review.buyer}-${index}`} review={review} last={index === previewReviews.length - 1} />
-              ))}
-              <Text style={styles.disclaimer}>
-                Only buyers from completed Throve orders can leave a review — one per order.
-              </Text>
-            </>
-          )}
-        </ScrollView>
+        <FlatList
+          data={shown}
+          keyExtractor={keyExtractor}
+          renderItem={renderItem}
+          numColumns={2}
+          columnWrapperStyle={styles.gridRow}
+          ListHeaderComponent={listHeader}
+          ListFooterComponent={listFooter}
+          contentContainerStyle={styles.body}
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          removeClippedSubviews
+        />
       )}
 
       {banner ? (
@@ -704,8 +771,10 @@ const styles = StyleSheet.create({
   tabOn: { borderBottomColor: Palette.plum },
   tabLabel: { fontSize: 13.5, fontFamily: Typography.bodySemiBold, color: Palette.muted3 },
   tabLabelOn: { color: Palette.plum },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 28 },
-  card: { width: '47.5%' },
+  gridRow: { gap: 12, marginBottom: 12 },
+  cell: { flex: 1 },
+  reviewsSection: { marginTop: 16 },
+  card: { flex: 1 },
   photo: {
     borderRadius: Radius.sm,
     overflow: 'hidden',

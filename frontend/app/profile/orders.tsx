@@ -1,7 +1,7 @@
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
-import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
+import { LiquidRefreshFlatList, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { StatusChip } from '@/components/ui/status-chip';
 import { Palette, Spacing, Typography } from '@/constants/theme';
@@ -40,12 +40,68 @@ export default function OrdersScreen() {
   }, [refresh]);
   const { refreshing, onRefresh } = usePullRefresh(pullTask);
 
+  const showSkeleton = loading && orders.length === 0 && !refreshing;
+  const showError = loadError && !showSkeleton && orders.length === 0;
+
+  const listHeader = useMemo(
+    () => (
+      <>
+        {!isConnected ? (
+          <OfflineBanner title="No connection" message="Reconnect to see current order status." />
+        ) : null}
+
+        {showError ? (
+          <AlertBanner
+            variant="error"
+            title="We couldn't load your orders"
+            message="Please try again in a moment."
+          />
+        ) : null}
+      </>
+    ),
+    [isConnected, showError],
+  );
+
+  const listEmpty = useMemo(() => {
+    if (showSkeleton) return <OrdersSkeleton />;
+    if (visible.length === 0 && !showError) {
+      return tab === 'purchases' ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptyTitleSerif}>No purchases yet</Text>
+          <Text style={styles.emptyBody}>Orders you place will appear here.</Text>
+          <Button
+            label="Start browsing"
+            variant="secondary"
+            style={styles.emptyBtn}
+            onPress={() => router.replace('/(tabs)')}
+          />
+        </View>
+      ) : (
+        <View style={styles.empty}>
+          <Text style={styles.emptyTitle}>No sales yet</Text>
+          <Text style={styles.emptyBody}>Once someone buys from you, the order appears here.</Text>
+        </View>
+      );
+    }
+    return null;
+  }, [router, showError, showSkeleton, tab, visible.length]);
+
+  const renderItem = useCallback(
+    ({ item: order }: { item: Order }) => (
+      <OrderRow
+        order={order}
+        role={tab}
+        onPress={() => router.push(`/checkout/order?id=${order.id}`)}
+      />
+    ),
+    [router, tab],
+  );
+
+  const keyExtractor = useCallback((item: Order) => item.id, []);
+
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
   }
-
-  const showSkeleton = loading && orders.length === 0 && !refreshing;
-  const showError = loadError && !showSkeleton && orders.length === 0;
 
   return (
     <View style={styles.screen}>
@@ -66,57 +122,18 @@ export default function OrdersScreen() {
         </Pressable>
       </View>
 
-      <LiquidRefreshScrollView
+      <LiquidRefreshFlatList
         refreshing={refreshing}
         onRefresh={onRefresh}
         disabled={!isConnected}
-        contentContainerStyle={styles.body}
-      >
-        {!isConnected ? (
-          <OfflineBanner title="No connection" message="Reconnect to see current order status." />
-        ) : null}
-
-        {showError ? (
-          <AlertBanner
-            variant="error"
-            title="We couldn't load your orders"
-            message="Please try again in a moment."
-          />
-        ) : null}
-
-        {showSkeleton ? (
-          <OrdersSkeleton />
-        ) : visible.length === 0 && !showError ? (
-          tab === 'purchases' ? (
-            <View style={styles.empty}>
-              <Text style={styles.emptyTitleSerif}>No purchases yet</Text>
-              <Text style={styles.emptyBody}>Orders you place will appear here.</Text>
-              <Button
-                label="Start browsing"
-                variant="secondary"
-                style={styles.emptyBtn}
-                onPress={() => router.replace('/(tabs)')}
-              />
-            </View>
-          ) : (
-            <View style={styles.empty}>
-              <Text style={styles.emptyTitle}>No sales yet</Text>
-              <Text style={styles.emptyBody}>Once someone buys from you, the order appears here.</Text>
-            </View>
-          )
-        ) : (
-          <View style={styles.list}>
-            {visible.map((order) => (
-              <OrderRow
-                key={order.id}
-                order={order}
-                role={tab}
-                onPress={() => router.push(`/checkout/order?id=${order.id}`)}
-              />
-            ))}
-          </View>
-        )}
-      </LiquidRefreshScrollView>
+        data={showSkeleton || visible.length === 0 ? [] : visible}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={listEmpty}
+        contentContainerStyle={[styles.body, { flexGrow: 1 }]}
+        showsVerticalScrollIndicator={false}
+      />
     </View>
   );
 }

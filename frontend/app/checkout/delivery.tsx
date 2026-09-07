@@ -5,10 +5,10 @@ import { ScreenHeader } from '@/components/ui/screen-header';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useCheckout } from '@/context/checkout-context';
 import { useLive } from '@/context/live-context';
+import { useListings } from '@/context/listings-context';
 import { DELIVERY_OPTIONS, getDeliveryOption } from '@/data/checkout';
 import type { DeliveryMethod } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
-import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatNaira } from '@/lib/format';
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -17,8 +17,8 @@ import { ExpiredCheckout } from './shipping';
 
 export default function DeliveryMethodScreen() {
   const router = useRouter();
-  const { bottom } = useScreenInsets();
   const live = useLive();
+  const { getListing } = useListings();
   const checkout = useCheckout();
   const { isConnected } = useNetworkStatus();
   const [loadingOptions, setLoadingOptions] = useState(true);
@@ -49,9 +49,14 @@ export default function DeliveryMethodScreen() {
     return <Redirect href="/(tabs)" />;
   }
 
-  const listing = live.resolveListing(draft.listingId);
+  const listing = live.resolveListing(draft.listingId) ?? getListing(draft.listingId);
   const remaining = checkout.remaining;
-  if (!listing || listing.status === 'available' || remaining <= 0) {
+  const checkoutDead =
+    !listing ||
+    remaining <= 0 ||
+    listing.status === 'sold' ||
+    listing.status === 'removed';
+  if (checkoutDead) {
     return <ExpiredCheckout />;
   }
 
@@ -73,7 +78,7 @@ export default function DeliveryMethodScreen() {
       <ScreenHeader title="Checkout" onBack={() => router.back()} />
       <CheckoutProgress step={2} />
 
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: 140 + bottom }]}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: 140 }]}>
         {!isConnected ? (
           <OfflineBanner title="No connection" message="Reconnect to continue checkout." />
         ) : null}
@@ -119,12 +124,9 @@ export default function DeliveryMethodScreen() {
         )}
 
         <Text style={styles.note}>One delivery method applies to the order.</Text>
-        <Text style={styles.footerNote}>
-          Standard and Express are the only current rates — no location tiers, courier choice or seller-set pricing.
-        </Text>
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: Math.max(bottom, 12) + 8 }]}>
+      <View style={[styles.footer, styles.footerPad]}>
         <View style={styles.footerRow}>
           <Text style={styles.footerLabel}>Delivery</Text>
           <Text style={styles.footerValue}>{deliveryFee != null ? formatNaira(deliveryFee) : '—'}</Text>
@@ -233,16 +235,6 @@ const styles = StyleSheet.create({
     fontFamily: Typography.body,
     color: Palette.muted,
   },
-  footerNote: {
-    marginTop: Spacing.sm,
-    paddingTop: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: Palette.divider,
-    fontSize: 11.5,
-    lineHeight: 18,
-    fontFamily: Typography.body,
-    color: Palette.muted,
-  },
   skeletonList: {
     gap: 10,
     marginTop: Spacing.sm,
@@ -259,6 +251,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xl,
     paddingTop: 12,
     gap: 10,
+  },
+  footerPad: {
+    paddingBottom: 16,
   },
   footerRow: {
     flexDirection: 'row',

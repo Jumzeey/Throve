@@ -208,14 +208,14 @@ export default function LiveViewerScreen() {
     setClaimError(null);
     try {
       const nextClaim = await live.claimProduct(activeSession.id, pinnedProduct.id, 1);
-      const started = await checkout.startCheckout({
+      await checkout.startCheckout({
         listingId: pinnedProduct.listingId,
         liveSessionId: activeSession.id,
         liveStreamProductId: pinnedProduct.id,
         claimId: nextClaim.id,
         buyer: username,
       });
-      if (started) router.push('/checkout/shipping');
+      router.push('/checkout/shipping');
     } catch (err) {
       setClaimError(err instanceof Error ? err.message : 'Claim failed');
     } finally {
@@ -226,14 +226,18 @@ export default function LiveViewerScreen() {
 
   async function goCheckout() {
     if (!pinnedProduct) return;
-    const started = await checkout.startCheckout({
-      listingId: pinnedProduct.listingId,
-      liveSessionId: activeSession.id,
-      liveStreamProductId: pinnedProduct.id,
-      claimId: claim?.id,
-      buyer: username,
-    });
-    if (started) router.push('/checkout/shipping');
+    try {
+      await checkout.startCheckout({
+        listingId: pinnedProduct.listingId,
+        liveSessionId: activeSession.id,
+        liveStreamProductId: pinnedProduct.id,
+        claimId: claim?.id,
+        buyer: username,
+      });
+      router.push('/checkout/shipping');
+    } catch (err) {
+      setClaimError(err instanceof Error ? err.message : 'Checkout failed');
+    }
   }
 
   const sizeLabel =

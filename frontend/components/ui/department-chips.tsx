@@ -6,7 +6,13 @@ type Props = { chips: Chip[]; selected: string; onSelect: (value: string) => voi
 
 export function DepartmentChips({ chips, selected, onSelect }: Props) {
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+    <ScrollView
+      horizontal
+      nestedScrollEnabled
+      directionalLockEnabled
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.row}
+    >
       {chips.map((chip) => {
         const active = selected === chip.value;
         return (

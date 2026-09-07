@@ -2,7 +2,18 @@ import { apiFetch } from '@/lib/api';
 import { Palette } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import type { ChatMessage, Conversation, Offer, OfferStatus } from '@/data/types';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { supabase } from '@/lib/supabase';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 type InboxContextValue = {
   loading: boolean;
@@ -18,6 +29,8 @@ type InboxContextValue = {
     imageUrl?: string | null,
   ) => Promise<boolean>;
   markRead: (convId: string, username: string) => Promise<void>;
+  /** Keep a conversation hot: realtime + light poll while the chat screen is open. */
+  subscribeConversation: (convId: string) => () => void;
   otherParticipant: (conv: Conversation, me: string) => string;
   offersFor: (username: string) => { received: Offer[]; sent: Offer[] };
   offersOnListing: (listingId: string) => Offer[];
@@ -67,6 +80,23 @@ export function validateOfferAmount(amount: number, listingPrice: number) {
   return null;
 }
 
+function mergeMessages(existing: ChatMessage[] | undefined, next: ChatMessage[]) {
+  const byId = new Map<string, ChatMessage>();
+  for (const item of existing ?? []) byId.set(item.id, item);
+  for (const item of next) {
+    const prev = byId.get(item.id);
+    byId.set(item.id, prev ? { ...prev, ...item } : item);
+  }
+  return [...byId.values()].sort((a, b) => a.createdAt - b.createdAt);
+}
+
+function previewFor(message: Pick<ChatMessage, 'text' | 'imageUrl'>) {
+  const trimmed = message.text?.trim() ?? '';
+  if (trimmed) return trimmed;
+  if (message.imageUrl) return 'Sent a photo';
+  return '';
+}
+
 export function InboxProvider({ children }: { children: ReactNode }) {
   const { session, isReady } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -74,6 +104,14 @@ export function InboxProvider({ children }: { children: ReactNode }) {
   const [offers, setOffers] = useState<Offer[]>([]);
   const [blocked, setBlocked] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const activeChatRef = useRef<string | null>(null);
+  const usernameRef = useRef(session?.username ?? '');
+  const channelsRef = useRef<Record<string, RealtimeChannel>>({});
+  const inboxChannelRef = useRef<RealtimeChannel | null>(null);
+
+  useEffect(() => {
+    usernameRef.current = session?.username ?? '';
+  }, [session?.username]);
 
   const refresh = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) setLoading(true);
@@ -93,6 +131,33 @@ export function InboxProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const loadMessages = useCallback(async (convId: string, ack: 'none' | 'delivered' | 'read' = 'none') => {
+    const query = ack === 'none' ? '' : `?ack=${ack}`;
+    const data = await apiFetch<ChatMessage[]>(`/inbox/conversations/${convId}/messages${query}`);
+    setMessagesByConv((current) => ({ ...current, [convId]: mergeMessages(current[convId], data) }));
+    return data;
+  }, []);
+
+  const ackReceipt = useCallback(async (convId: string, level: 'delivered' | 'read') => {
+    try {
+      const data = await apiFetch<ChatMessage[]>(`/inbox/conversations/${convId}/receipts`, {
+        method: 'POST',
+        body: JSON.stringify({ level }),
+      });
+      setMessagesByConv((current) => ({ ...current, [convId]: mergeMessages(current[convId], data) }));
+      if (level === 'read') {
+        const me = usernameRef.current;
+        setConversations((current) =>
+          current.map((item) =>
+            item.id === convId ? { ...item, unreadBy: item.unreadBy.filter((user) => user !== me) } : item,
+          ),
+        );
+      }
+    } catch {
+      /* ignore — next poll/open will catch up */
+    }
+  }, []);
+
   useEffect(() => {
     if (!isReady) return;
     if (!session) {
@@ -101,10 +166,106 @@ export function InboxProvider({ children }: { children: ReactNode }) {
       setBlocked([]);
       setMessagesByConv({});
       setLoading(false);
+      if (inboxChannelRef.current) {
+        void supabase.removeChannel(inboxChannelRef.current);
+        inboxChannelRef.current = null;
+      }
       return;
     }
     void refresh();
-  }, [isReady, session?.userId, refresh]);
+  }, [isReady, session?.userId, refresh, session]);
+
+  // Inbox-wide realtime: new messages + receipt updates across conversations.
+  useEffect(() => {
+    if (!session?.userId) return;
+
+    if (inboxChannelRef.current) {
+      void supabase.removeChannel(inboxChannelRef.current);
+      inboxChannelRef.current = null;
+    }
+
+    const channel = supabase
+      .channel(`inbox:${session.userId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
+        const row = payload.new as {
+          id?: string;
+          conversation_id?: string;
+        };
+        if (!row.id || !row.conversation_id) return;
+        try {
+          const data = await apiFetch<ChatMessage[]>(
+            `/inbox/conversations/${row.conversation_id}/messages`,
+          );
+          const message = data.find((item) => item.id === row.id);
+          setMessagesByConv((current) => ({
+            ...current,
+            [row.conversation_id!]: mergeMessages(current[row.conversation_id!], data),
+          }));
+          if (!message) return;
+          const fromMe = message.from === usernameRef.current;
+          setConversations((current) => {
+            const preview = previewFor(message);
+            if (!current.some((item) => item.id === row.conversation_id)) {
+              void refresh({ silent: true });
+              return current;
+            }
+            return current
+              .map((item) =>
+                item.id === row.conversation_id
+                  ? {
+                      ...item,
+                      lastMessage: preview || item.lastMessage,
+                      updatedAt: Math.max(item.updatedAt, message.createdAt),
+                      unreadBy:
+                        fromMe || activeChatRef.current === row.conversation_id
+                          ? item.unreadBy.filter((u) => u !== usernameRef.current)
+                          : Array.from(new Set([...item.unreadBy, usernameRef.current])),
+                    }
+                  : item,
+              )
+              .sort((a, b) => b.updatedAt - a.updatedAt);
+          });
+          if (!fromMe) {
+            const level = activeChatRef.current === row.conversation_id ? 'read' : 'delivered';
+            void ackReceipt(row.conversation_id, level);
+          }
+        } catch {
+          /* ignore */
+        }
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (payload) => {
+        const row = payload.new as {
+          id?: string;
+          conversation_id?: string;
+          delivered_at?: string | null;
+          read_at?: string | null;
+        };
+        if (!row.id || !row.conversation_id) return;
+        setMessagesByConv((current) => {
+          const list = current[row.conversation_id!] ?? [];
+          if (!list.some((item) => item.id === row.id)) return current;
+          return {
+            ...current,
+            [row.conversation_id!]: list.map((item) =>
+              item.id === row.id
+                ? {
+                    ...item,
+                    deliveredAt: row.delivered_at ? new Date(row.delivered_at).getTime() : item.deliveredAt ?? null,
+                    readAt: row.read_at ? new Date(row.read_at).getTime() : item.readAt ?? null,
+                  }
+                : item,
+            ),
+          };
+        });
+      })
+      .subscribe();
+
+    inboxChannelRef.current = channel;
+    return () => {
+      void supabase.removeChannel(channel);
+      if (inboxChannelRef.current === channel) inboxChannelRef.current = null;
+    };
+  }, [ackReceipt, refresh, session?.userId]);
 
   const getConversation = useCallback((id: string) => conversations.find((item) => item.id === id), [conversations]);
 
@@ -133,12 +294,6 @@ export function InboxProvider({ children }: { children: ReactNode }) {
 
   const messages = useCallback((convId: string) => messagesByConv[convId] ?? [], [messagesByConv]);
 
-  const loadMessages = useCallback(async (convId: string) => {
-    const data = await apiFetch<ChatMessage[]>(`/inbox/conversations/${convId}/messages`);
-    setMessagesByConv((current) => ({ ...current, [convId]: data }));
-    return data;
-  }, []);
-
   const sendMessage = useCallback(
     async (convId: string, from: string, text: string, imageUrl?: string | null) => {
       const trimmed = text.trim();
@@ -149,32 +304,83 @@ export function InboxProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ text: trimmed, imageUrl: image }),
       });
       const preview = trimmed || 'Sent a photo';
-      setMessagesByConv((current) => ({ ...current, [convId]: [...(current[convId] ?? []), message] }));
+      setMessagesByConv((current) => ({
+        ...current,
+        [convId]: mergeMessages(current[convId], [message]),
+      }));
       setConversations((current) =>
-        current.map((item) =>
-          item.id === convId
-            ? {
-                ...item,
-                lastMessage: preview,
-                updatedAt: message.createdAt,
-                unreadBy: item.participants.filter((u) => u !== from),
-              }
-            : item,
-        ),
+        current
+          .map((item) =>
+            item.id === convId
+              ? {
+                  ...item,
+                  lastMessage: preview,
+                  updatedAt: message.createdAt,
+                  unreadBy: item.participants.filter((u) => u !== from),
+                }
+              : item,
+          )
+          .sort((a, b) => b.updatedAt - a.updatedAt),
       );
       return true;
     },
     [],
   );
 
-  const markRead = useCallback(async (convId: string, username: string) => {
-    await loadMessages(convId);
-    setConversations((current) =>
-      current.map((item) =>
-        item.id === convId ? { ...item, unreadBy: item.unreadBy.filter((user) => user !== username) } : item,
-      ),
-    );
-  }, [loadMessages]);
+  const markRead = useCallback(
+    async (convId: string, username: string) => {
+      await loadMessages(convId, 'read');
+      setConversations((current) =>
+        current.map((item) =>
+          item.id === convId ? { ...item, unreadBy: item.unreadBy.filter((user) => user !== username) } : item,
+        ),
+      );
+    },
+    [loadMessages],
+  );
+
+  const subscribeConversation = useCallback(
+    (convId: string) => {
+      activeChatRef.current = convId;
+      void loadMessages(convId, 'read').catch(() => undefined);
+
+      // Backup poll while the thread is open (covers missed realtime events).
+      const poll = setInterval(() => {
+        void loadMessages(convId, 'none').catch(() => undefined);
+      }, 2500);
+
+      if (!channelsRef.current[convId]) {
+        const channel = supabase
+          .channel(`chat:${convId}`)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'messages', filter: `conversation_id=eq.${convId}` },
+            async () => {
+              try {
+                // While actively viewing, keep receipts at read for new inbound messages.
+                const data = await apiFetch<ChatMessage[]>(`/inbox/conversations/${convId}/messages?ack=read`);
+                setMessagesByConv((current) => ({ ...current, [convId]: mergeMessages(current[convId], data) }));
+              } catch {
+                /* ignore */
+              }
+            },
+          )
+          .subscribe();
+        channelsRef.current[convId] = channel;
+      }
+
+      return () => {
+        clearInterval(poll);
+        if (activeChatRef.current === convId) activeChatRef.current = null;
+        const channel = channelsRef.current[convId];
+        if (channel) {
+          void supabase.removeChannel(channel);
+          delete channelsRef.current[convId];
+        }
+      };
+    },
+    [loadMessages],
+  );
 
   const getOffer = useCallback((id: string) => offers.find((item) => item.id === id), [offers]);
 
@@ -281,6 +487,7 @@ export function InboxProvider({ children }: { children: ReactNode }) {
       messages,
       sendMessage,
       markRead,
+      subscribeConversation,
       otherParticipant,
       offersFor,
       offersOnListing,
@@ -316,9 +523,9 @@ export function InboxProvider({ children }: { children: ReactNode }) {
       refresh,
       rejectOffer,
       sendMessage,
+      subscribeConversation,
       toggleBlock,
       withdrawOffer,
-      counterOffer,
       reportChat,
     ],
   );

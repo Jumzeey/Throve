@@ -11,6 +11,7 @@ import {
 } from '../lib/email/templates/offers.js';
 import { getProfileById, getProfileByUsername } from '../lib/mappers.js';
 import { notifyUser } from '../lib/notify.js';
+import { createServiceClient } from '../lib/supabase.js';
 import { type AuthedRequest, requireAuth } from '../middleware/auth.js';
 
 const router = Router();
@@ -27,6 +28,55 @@ async function listingTitle(
 ) {
   const { data } = await supabase.from('listings').select('title').eq('id', listingId).maybeSingle();
   return (data?.title as string) || 'your listing';
+}
+
+async function mapMessageRow(
+  supabase: ReturnType<typeof import('../lib/supabase.js').createSupabaseClient>,
+  row: DbRow,
+) {
+  const sender = await getProfileById(supabase, row.sender_id);
+  return {
+    id: row.id,
+    from: sender?.username ?? 'unknown',
+    text: row.text ?? '',
+    imageUrl: row.image_url ?? null,
+    createdAt: new Date(row.created_at).getTime(),
+    deliveredAt: row.delivered_at ? new Date(row.delivered_at).getTime() : null,
+    readAt: row.read_at ? new Date(row.read_at).getTime() : null,
+  };
+}
+
+async function applyReceipts(
+  conversationId: string,
+  recipientUserId: string,
+  level: 'delivered' | 'read',
+) {
+  const admin = createServiceClient();
+  const now = new Date().toISOString();
+
+  if (level === 'delivered') {
+    await admin
+      .from('messages')
+      .update({ delivered_at: now })
+      .eq('conversation_id', conversationId)
+      .neq('sender_id', recipientUserId)
+      .is('delivered_at', null);
+    return;
+  }
+
+  await admin
+    .from('messages')
+    .update({ read_at: now })
+    .eq('conversation_id', conversationId)
+    .neq('sender_id', recipientUserId)
+    .is('read_at', null);
+
+  await admin
+    .from('messages')
+    .update({ delivered_at: now })
+    .eq('conversation_id', conversationId)
+    .neq('sender_id', recipientUserId)
+    .is('delivered_at', null);
 }
 
 router.get('/conversations', requireAuth, async (req, res) => {
@@ -126,6 +176,7 @@ router.post('/conversations', requireAuth, async (req, res) => {
 
 router.get('/conversations/:id/messages', requireAuth, async (req, res) => {
   const { supabase, userId } = req as AuthedRequest;
+  const ack = typeof req.query.ack === 'string' ? req.query.ack : 'none';
 
   const { data: conv, error: convError } = await supabase
     .from('conversations')
@@ -145,21 +196,52 @@ router.get('/conversations/:id/messages', requireAuth, async (req, res) => {
 
   if (error) return handleSupabaseError(res, error);
 
-  const mapped = await Promise.all(
-    (data ?? []).map(async (row: DbRow) => {
-      const sender = await getProfileById(supabase, row.sender_id);
-      return {
-        id: row.id,
-        from: sender?.username ?? 'unknown',
-        text: row.text ?? '',
-        imageUrl: row.image_url ?? null,
-        createdAt: new Date(row.created_at).getTime(),
-      };
-    }),
-  );
+  if (ack === 'read' || ack === 'delivered') {
+    await applyReceipts(String(req.params.id), userId, ack);
+    if (ack === 'read') {
+      await supabase.from('conversation_unread').delete().eq('conversation_id', req.params.id).eq('user_id', userId);
+    }
+    const { data: fresh } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('conversation_id', req.params.id)
+      .order('created_at', { ascending: true });
+    const remapped = await Promise.all((fresh ?? []).map((row: DbRow) => mapMessageRow(supabase, row)));
+    return res.json(remapped);
+  }
 
-  await supabase.from('conversation_unread').delete().eq('conversation_id', req.params.id).eq('user_id', userId);
+  const mapped = await Promise.all((data ?? []).map((row: DbRow) => mapMessageRow(supabase, row)));
+  return res.json(mapped);
+});
 
+router.post('/conversations/:id/receipts', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const parsed = z.object({ level: z.enum(['delivered', 'read']) }).safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, 'Invalid receipt');
+
+  const { data: conv, error: convError } = await supabase
+    .from('conversations')
+    .select('*')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  if (convError) return handleSupabaseError(res, convError);
+  if (!conv || (conv.participant_a !== userId && conv.participant_b !== userId)) {
+    return sendError(res, 403, 'Conversation not available');
+  }
+
+  await applyReceipts(String(req.params.id), userId, parsed.data.level);
+  if (parsed.data.level === 'read') {
+    await supabase.from('conversation_unread').delete().eq('conversation_id', req.params.id).eq('user_id', userId);
+  }
+
+  const { data, error } = await supabase
+    .from('messages')
+    .select('*')
+    .eq('conversation_id', req.params.id)
+    .order('created_at', { ascending: true });
+  if (error) return handleSupabaseError(res, error);
+
+  const mapped = await Promise.all((data ?? []).map((row: DbRow) => mapMessageRow(supabase, row)));
   return res.json(mapped);
 });
 
@@ -251,6 +333,8 @@ router.post('/conversations/:id/messages', requireAuth, async (req, res) => {
     text: message.text ?? '',
     imageUrl: message.image_url ?? null,
     createdAt: new Date(message.created_at).getTime(),
+    deliveredAt: null,
+    readAt: null,
   });
 });
 

@@ -17,7 +17,6 @@ import { useLive } from '@/context/live-context';
 import { checkoutTotals } from '@/data/checkout';
 import { getListingImageSource } from '@/data/images';
 import { useNetworkStatus } from '@/hooks/use-network-status';
-import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatNaira } from '@/lib/format';
 import { Redirect, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -39,7 +38,6 @@ type PayUiState =
 
 export default function PaymentScreen() {
   const router = useRouter();
-  const { bottom } = useScreenInsets();
   const live = useLive();
   const { getListing } = useListings();
   const checkout = useCheckout();
@@ -81,7 +79,12 @@ export default function PaymentScreen() {
 
   const listing = live.resolveListing(draft.listingId) ?? getListing(draft.listingId);
   const remaining = checkout.remaining;
-  if (!listing || listing.status === 'available' || remaining <= 0) {
+  if (
+    !listing ||
+    remaining <= 0 ||
+    listing.status === 'sold' ||
+    listing.status === 'removed'
+  ) {
     return <ExpiredCheckout />;
   }
 
@@ -203,7 +206,7 @@ export default function PaymentScreen() {
       <ScreenHeader title="Payment" onBack={actionLocked ? undefined : () => router.back()} />
       <CheckoutProgress step={4} />
 
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl + bottom }]}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl }]}>
         <View style={styles.amountBlock}>
           <Text style={styles.amountLabel}>Total to pay</Text>
           <Text style={styles.amount}>{formatNaira(totals.total)}</Text>

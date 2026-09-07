@@ -178,16 +178,26 @@ router.get('/following', requireAuth, async (req, res) => {
   const sellerIds = (follows ?? []).map((row) => row.seller_id as string);
   if (!sellerIds.length) return res.json([]);
 
-  const { data, error } = await supabase
-    .from('listings')
-    .select('*')
-    .in('seller_id', sellerIds)
-    .eq('status', 'available')
-    .order('created_at', { ascending: false })
-    .limit(40);
-  if (error) return handleSupabaseError(res, error);
+  // Fair window per seller so one busy shop can't fill the whole feed.
+  const perSeller = Math.min(Math.max(Number(req.query.perSeller) || 12, 1), 40);
+  const batches: DbRow[][] = [];
+  for (const sellerId of sellerIds) {
+    const { data, error } = await supabase
+      .from('listings')
+      .select('*')
+      .eq('seller_id', sellerId)
+      .eq('status', 'available')
+      .order('created_at', { ascending: false })
+      .limit(perSeller);
+    if (error) return handleSupabaseError(res, error);
+    batches.push((data ?? []) as DbRow[]);
+  }
 
-  return res.json(await enrichListings(supabase, data ?? [], userId));
+  const rows = batches.flat().sort((a, b) => {
+    return new Date(b.created_at as string).getTime() - new Date(a.created_at as string).getTime();
+  });
+
+  return res.json(await enrichListings(supabase, rows, userId));
 });
 
 router.get('/saved/me', requireAuth, async (req, res) => {

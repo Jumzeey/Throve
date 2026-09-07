@@ -292,7 +292,13 @@ export default function PrepareLiveScreen() {
           />
 
           <Text style={styles.sectionLabel}>Category</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+          <ScrollView
+            horizontal
+            nestedScrollEnabled
+            directionalLockEnabled
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chipRow}
+          >
             {CATEGORY_CHIPS.map((chip) => {
               const on = chip.key === categoryKey;
               return (
@@ -326,7 +332,13 @@ export default function PrepareLiveScreen() {
               <Text style={styles.editLink}>Edit selection</Text>
             </Pressable>
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.productRow}>
+          <ScrollView
+            horizontal
+            nestedScrollEnabled
+            directionalLockEnabled
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.productRow}
+          >
             {products.map((listing) => {
               const on = selected.includes(listing.id);
               return (

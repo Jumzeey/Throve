@@ -6,6 +6,7 @@ import {
   ChevronBackIcon,
   CloseIcon,
   ImagePlaceholderIcon,
+  MessageChecksIcon,
   MoreHorizontalIcon,
   ProhibitedIcon,
   SendIcon,
@@ -63,7 +64,7 @@ export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { session, publicProfiles, ensurePublicProfile } = useAuth();
   const inbox = useInbox();
-  const { markRead, offersOnListing } = inbox;
+  const { markRead, offersOnListing, subscribeConversation } = inbox;
   const { getListing } = useListings();
   const { isConnected } = useNetworkStatus();
   const scrollRef = useRef<ScrollView>(null);
@@ -129,6 +130,11 @@ export default function ChatScreen() {
       if (err instanceof ApiError && err.status === 403) setAccessDenied(true);
     });
   }, [id, markRead, username]);
+
+  useEffect(() => {
+    if (!id) return;
+    return subscribeConversation(id);
+  }, [id, subscribeConversation]);
 
   useEffect(() => {
     if (!reportDone) return;
@@ -215,10 +221,16 @@ export default function ChatScreen() {
   const offerChip =
     activeOffer && offerStatus ? offerChipVariant(activeOffer, activeOffer.buyer === me, offerStatus) : null;
 
-  function deliveryLabel(message: ChatMessage) {
+  function deliveryStatus(message: ChatMessage): 'sent' | 'delivered' | 'read' | null {
     if (message.from !== me) return null;
+    if (message.readAt) return 'read';
+    if (message.deliveredAt) return 'delivered';
+    // Legacy threads (no receipt columns yet / API not returning them):
+    // a later reply from them, or them having cleared unread, means read.
     const laterFromThem = thread.some((item) => item.from !== me && item.createdAt > message.createdAt);
-    return laterFromThem ? 'Read' : 'Sent';
+    if (laterFromThem) return 'read';
+    if (other && conv && !conv.unreadBy.includes(other)) return 'read';
+    return 'sent';
   }
 
   async function send() {
@@ -359,7 +371,7 @@ export default function ChatScreen() {
                 <Text style={styles.dayLabel}>{group.label}</Text>
                 {group.items.map((message) => {
                   const mine = message.from === me;
-                  const delivery = deliveryLabel(message);
+                  const status = deliveryStatus(message);
                   return (
                     <Pressable
                       key={message.id}
@@ -384,10 +396,18 @@ export default function ChatScreen() {
                           </Text>
                         ) : null}
                       </View>
-                      <Text style={[styles.meta, mine ? styles.metaMine : styles.metaTheirs]}>
-                        {formatChatClock(message.createdAt)}
-                        {delivery ? ` · ${delivery}` : ''}
-                      </Text>
+                      <View style={[styles.metaRow, mine ? styles.metaMine : styles.metaTheirs]}>
+                        <Text style={[styles.meta, mine ? styles.metaMineText : styles.metaTheirsText]}>
+                          {formatChatClock(message.createdAt)}
+                        </Text>
+                        {status ? (
+                          <MessageChecksIcon
+                            size={13}
+                            double={status !== 'sent'}
+                            color={status === 'read' ? Palette.plum : Palette.muted3}
+                          />
+                        ) : null}
+                      </View>
                     </Pressable>
                   );
                 })}
@@ -817,17 +837,27 @@ const styles = StyleSheet.create({
     fontFamily: Typography.body,
     color: Palette.body,
   },
-  meta: {
+  metaRow: {
     marginTop: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  meta: {
     fontSize: 10.5,
     fontFamily: Typography.body,
-    color: Palette.muted3,
   },
   metaMine: {
-    textAlign: 'right',
+    justifyContent: 'flex-end',
   },
   metaTheirs: {
-    textAlign: 'left',
+    justifyContent: 'flex-start',
+  },
+  metaMineText: {
+    color: Palette.muted3,
+  },
+  metaTheirsText: {
+    color: Palette.muted3,
   },
   failedMeta: {
     marginTop: 6,

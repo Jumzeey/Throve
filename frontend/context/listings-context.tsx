@@ -40,6 +40,8 @@ type ListingsContextValue = {
   updateListing: (id: string, patch: Partial<Listing>) => Promise<void>;
   setStatus: (id: string, status: ListingStatus) => Promise<void>;
   clearReservation: (id: string) => Promise<void>;
+  /** Local-only status patch (e.g. after /checkout/start reserved the listing). */
+  applyLocalStatus: (id: string, status: ListingStatus) => void;
   removeListing: (id: string) => Promise<boolean>;
   canDelete: (id: string) => boolean;
   toggleSave: (listingId: string, username: string) => Promise<void>;
@@ -257,6 +259,12 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const applyLocalStatus = useCallback((id: string, status: ListingStatus) => {
+    setListings((current) => current.map((item) => (item.id === id ? { ...item, status } : item)));
+    setSavedListings((current) => current.map((item) => (item.id === id ? { ...item, status } : item)));
+    setFollowingListings((current) => current.map((item) => (item.id === id ? { ...item, status } : item)));
+  }, []);
+
   const canDelete = useCallback(
     (id: string) => {
       const listing = listings.find((item) => item.id === id);
@@ -343,6 +351,7 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
       updateListing,
       setStatus,
       clearReservation,
+      applyLocalStatus,
       removeListing,
       canDelete,
       toggleSave,
@@ -350,6 +359,7 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
       savedListingsFor,
     }),
     [
+      applyLocalStatus,
       canDelete,
       clearReservation,
       followingListings,

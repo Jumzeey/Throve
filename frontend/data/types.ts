@@ -279,6 +279,10 @@ export type ChatMessage = {
   text: string;
   imageUrl?: string | null;
   createdAt: number;
+  /** Recipient device received the message. */
+  deliveredAt?: number | null;
+  /** Recipient opened the conversation. */
+  readAt?: number | null;
 };
 
 export type PreferredLoginMethod = 'password' | 'magic_link';

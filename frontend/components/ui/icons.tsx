@@ -111,6 +111,28 @@ export function CheckIcon({ size = 17, color = Palette.successText, strokeWidth 
   );
 }
 
+/** Single / double ticks for chat delivery status. Both ticks share the same path size. */
+export function MessageChecksIcon({
+  size = 14,
+  color = Palette.muted3,
+  double = false,
+  strokeWidth = 2,
+}: IconProps & { double?: boolean }) {
+  if (!double) {
+    return (
+      <Svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+        <Path d="m1.5 8 3 3 6.5-7" />
+      </Svg>
+    );
+  }
+  return (
+    <Svg width={Math.round(size * 1.4)} height={size} viewBox="0 0 22 16" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="m1.5 8 3 3 6.5-7" />
+      <Path d="m7.5 8 3 3 6.5-7" />
+    </Svg>
+  );
+}
+
 export function InfoCircleIcon({ size = 18, color = Palette.plum, strokeWidth = 1.7 }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round">
