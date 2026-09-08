@@ -7,6 +7,7 @@ import {
   EyeIcon,
   MoreHorizontalIcon,
   SendIcon,
+  CameraSwitchIcon,
   ShieldIcon,
   SpinnerArcIcon,
   UserIcon,
@@ -16,9 +17,9 @@ import {
 import { SimulatedStage } from '@/components/ui/simulated-stage';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import type { LiveConnection, LiveComment, LiveMediaCredentials } from '@/data/types';
-import { loadLiveKitNative, resetLiveKitNativeLoad, type LiveKitNative } from '@/lib/livekit-native';
+import { loadLiveKitNative, resetLiveKitNativeLoad, getLiveKitLoadFailure, getLiveKitLoadFailureDetail, type LiveKitNative } from '@/lib/livekit-native';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
-import { memo, useCallback, useEffect, useState, type ReactNode } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 type Props = {
@@ -33,6 +34,27 @@ type Props = {
 
 type LiveKitModule = typeof import('@livekit/react-native');
 type LivekitClient = typeof import('livekit-client');
+type CameraFacing = 'user' | 'environment';
+
+type HostCameraApi = {
+  ready: boolean;
+  switching: boolean;
+  facing: CameraFacing;
+  switchCamera: () => void;
+};
+
+const idleCamera: HostCameraApi = {
+  ready: false,
+  switching: false,
+  facing: 'user',
+  switchCamera: () => {},
+};
+
+const HostCameraContext = createContext<HostCameraApi>(idleCamera);
+
+function useHostCamera() {
+  return useContext(HostCameraContext);
+}
 
 const LIVE_IVORY_60 = 'rgba(255,247,240,0.6)';
 const LIVE_IVORY_62 = 'rgba(255,247,240,0.62)';
@@ -49,19 +71,23 @@ export function LiveStage({
   onConnectionChange,
   children,
 }: Props) {
+  const [camera, setCamera] = useState<HostCameraApi>(idleCamera);
   return (
-    <View style={styles.room}>
-      <LiveVideoLayer
-        credentials={credentials}
-        isHost={isHost}
-        mediaStatus={mediaStatus}
-        mediaErrorMessage={mediaErrorMessage}
-        onConnectionChange={onConnectionChange}
-      />
-      <View style={styles.overlay} pointerEvents="box-none">
-        {children}
+    <HostCameraContext.Provider value={camera}>
+      <View style={styles.room}>
+        <LiveVideoLayer
+          credentials={credentials}
+          isHost={isHost}
+          mediaStatus={mediaStatus}
+          mediaErrorMessage={mediaErrorMessage}
+          onConnectionChange={onConnectionChange}
+          onCameraApi={setCamera}
+        />
+        <View style={styles.overlay} pointerEvents="box-none">
+          {children}
+        </View>
       </View>
-    </View>
+    </HostCameraContext.Provider>
   );
 }
 
@@ -107,13 +133,19 @@ const LiveVideoLayer = memo(function LiveVideoLayer({
   mediaStatus,
   mediaErrorMessage,
   onConnectionChange,
+  onCameraApi,
 }: {
   credentials: LiveMediaCredentials | null;
   isHost: boolean;
   mediaStatus: 'loading' | 'ready' | 'error';
   mediaErrorMessage?: string | null;
   onConnectionChange?: (state: LiveConnection) => void;
+  onCameraApi?: (api: HostCameraApi) => void;
 }) {
+  useEffect(() => {
+    if (!isHost) onCameraApi?.(idleCamera);
+  }, [isHost, onCameraApi]);
+
   if (!credentials) {
     if (mediaStatus === 'error') {
       return (
@@ -123,7 +155,9 @@ const LiveVideoLayer = memo(function LiveVideoLayer({
         />
       );
     }
-    return <ConnectingStage label={isHost ? 'Starting camera…' : 'Connecting stream…'} />;
+    return (
+      <ConnectingStage label={isHost ? 'Getting stream credentials…' : 'Connecting stream…'} />
+    );
   }
 
   const provider = credentials.provider ?? 'livekit';
@@ -142,7 +176,12 @@ const LiveVideoLayer = memo(function LiveVideoLayer({
   }
 
   return (
-    <LiveKitVideoLayer credentials={credentials} isHost={isHost} onConnectionChange={onConnectionChange} />
+    <LiveKitVideoLayer
+      credentials={credentials}
+      isHost={isHost}
+      onConnectionChange={onConnectionChange}
+      onCameraApi={onCameraApi}
+    />
   );
 });
 
@@ -243,13 +282,17 @@ const LiveKitVideoLayer = memo(function LiveKitVideoLayer({
   credentials,
   isHost,
   onConnectionChange,
+  onCameraApi,
 }: {
   credentials: LiveMediaCredentials;
   isHost: boolean;
   onConnectionChange?: (state: LiveConnection) => void;
+  onCameraApi?: (api: HostCameraApi) => void;
 }) {
   const [mods, setMods] = useState<LiveKitNative | null>(null);
   const [failed, setFailed] = useState(false);
+  const [failureReason, setFailureReason] = useState<'expo_go' | 'failed' | null>(null);
+  const [failureDetail, setFailureDetail] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
@@ -257,15 +300,21 @@ const LiveKitVideoLayer = memo(function LiveKitVideoLayer({
     (async () => {
       if (!credentials.token || !credentials.url) {
         setFailed(true);
+        setFailureReason('failed');
+        setFailureDetail('Missing LiveKit token or server URL from the backend.');
         return;
       }
       const loaded = await loadLiveKitNative();
       if (cancelled) return;
       if (!loaded) {
         setFailed(true);
+        setFailureReason(getLiveKitLoadFailure() ?? 'failed');
+        setFailureDetail(getLiveKitLoadFailureDetail());
         return;
       }
       setFailed(false);
+      setFailureReason(null);
+      setFailureDetail(null);
       setMods(loaded);
     })();
     return () => {
@@ -275,31 +324,58 @@ const LiveKitVideoLayer = memo(function LiveKitVideoLayer({
 
   const onConnected = useCallback(() => onConnectionChange?.('live'), [onConnectionChange]);
   const onDisconnected = useCallback(() => onConnectionChange?.('lost'), [onConnectionChange]);
-  const onError = useCallback(() => onConnectionChange?.('reconnecting'), [onConnectionChange]);
+  const onError = useCallback(
+    (err?: unknown) => {
+      console.warn('[livekit] room error', err);
+      onConnectionChange?.('reconnecting');
+    },
+    [onConnectionChange],
+  );
 
   const retryNative = useCallback(() => {
     resetLiveKitNativeLoad();
     setMods(null);
     setFailed(false);
+    setFailureReason(null);
+    setFailureDetail(null);
     setRetryKey((n) => n + 1);
   }, []);
 
   if (failed) {
+    const expoGo = failureReason === 'expo_go';
+    const detail = failureDetail?.trim();
+    const isShimCrash = /Super expression must either be null or a function/i.test(detail ?? '');
     return (
       <MediaUnavailableStage
-        title={isHost ? 'Camera failed to start' : 'Could not join stream'}
-        message={
-          isHost
-            ? 'LiveKit could not open your camera or microphone. Close other apps using the camera, check permissions, and try again.'
-            : 'The live video connection could not be established.'
+        title={
+          expoGo
+            ? 'Needs Throve app build'
+            : isShimCrash
+              ? 'Live build needs update'
+              : isHost
+                ? 'Camera failed to start'
+                : 'Could not join stream'
         }
-        onRetry={retryNative}
+        message={
+          expoGo
+            ? 'Camera and mic need a development or release build of Throve. Expo Go cannot run LiveKit WebRTC — install the Codemagic/APK build and open that instead.'
+            : isShimCrash
+              ? 'WebRTC failed to initialize in this app binary. Install the latest Codemagic build (shim fix), then try again.'
+              : isHost
+                ? detail
+                  ? `LiveKit could not start: ${detail}`
+                  : 'LiveKit could not open your camera or microphone. Close other apps using the camera, check permissions, and try again.'
+                : detail
+                  ? `Could not join: ${detail}`
+                  : 'The live video connection could not be established.'
+        }
+        onRetry={expoGo ? undefined : retryNative}
       />
     );
   }
 
   if (!mods) {
-    return <ConnectingStage label={isHost ? 'Starting camera…' : 'Connecting stream…'} />;
+    return <ConnectingStage label={isHost ? 'Starting camera…' : 'Joining stream…'} />;
   }
 
   const { LiveKitRoom } = mods.rn;
@@ -312,11 +388,17 @@ const LiveKitVideoLayer = memo(function LiveKitVideoLayer({
         connect
         audio={isHost}
         video={isHost}
+        options={{ adaptiveStream: { pixelDensity: 'screen' } }}
         onConnected={onConnected}
         onDisconnected={onDisconnected}
         onError={onError}
       >
-        <CameraLayer rn={mods.rn} client={mods.client} isHost={isHost} />
+        <CameraLayer
+          rn={mods.rn}
+          client={mods.client}
+          isHost={isHost}
+          onCameraApi={onCameraApi}
+        />
       </LiveKitRoom>
     </View>
   );
@@ -326,34 +408,111 @@ function CameraLayer({
   rn,
   client,
   isHost,
+  onCameraApi,
 }: {
   rn: LiveKitModule;
   client: LivekitClient;
   isHost: boolean;
+  onCameraApi?: (api: HostCameraApi) => void;
 }) {
   const { VideoTrack, useTracks, useLocalParticipant } = rn;
   const { localParticipant } = useLocalParticipant();
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [facing, setFacing] = useState<CameraFacing>('user');
+  const [switching, setSwitching] = useState(false);
 
   useEffect(() => {
     if (!isHost || !localParticipant) return;
-    void localParticipant.setCameraEnabled(true).catch(() => undefined);
-    void localParticipant.setMicrophoneEnabled(true).catch(() => undefined);
+    let cancelled = false;
+    (async () => {
+      try {
+        await localParticipant.setCameraEnabled(true, { facingMode: facing });
+        await localParticipant.setMicrophoneEnabled(true);
+        if (!cancelled) setPublishError(null);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Camera or microphone permission denied';
+        console.warn('[livekit] publish failed', err);
+        if (!cancelled) setPublishError(message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Publish once when the participant is ready; facing changes go through switchCamera.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHost, localParticipant]);
+
+  const switchCamera = useCallback(() => {
+    if (!isHost || !localParticipant || switching) return;
+    const next: CameraFacing = facing === 'user' ? 'environment' : 'user';
+    setSwitching(true);
+    void (async () => {
+      try {
+        const publication = localParticipant.getTrackPublication(client.Track.Source.Camera);
+        const track = publication?.track as
+          | {
+              restartTrack?: (opts: { facingMode: CameraFacing }) => Promise<void>;
+              mediaStreamTrack?: { _switchCamera?: () => void };
+            }
+          | undefined;
+        if (typeof track?.restartTrack === 'function') {
+          await track.restartTrack({ facingMode: next });
+        } else if (typeof track?.mediaStreamTrack?._switchCamera === 'function') {
+          track.mediaStreamTrack._switchCamera();
+        } else {
+          await localParticipant.setCameraEnabled(false);
+          await localParticipant.setCameraEnabled(true, { facingMode: next });
+        }
+        setFacing(next);
+      } catch (err) {
+        console.warn('[livekit] switch camera failed', err);
+        try {
+          await localParticipant.setCameraEnabled(false);
+          await localParticipant.setCameraEnabled(true, { facingMode: next });
+          setFacing(next);
+        } catch (fallbackErr) {
+          console.warn('[livekit] switch camera fallback failed', fallbackErr);
+        }
+      } finally {
+        setSwitching(false);
+      }
+    })();
+  }, [client.Track.Source.Camera, facing, isHost, localParticipant, switching]);
 
   const tracks = useTracks([client.Track.Source.Camera], { onlySubscribed: !isHost });
   const track = tracks[0];
+  const cameraReady = Boolean(isHost && localParticipant && track);
+
+  useEffect(() => {
+    onCameraApi?.({
+      ready: cameraReady,
+      switching,
+      facing,
+      switchCamera,
+    });
+  }, [cameraReady, facing, onCameraApi, switchCamera, switching]);
+
+  useEffect(() => {
+    return () => onCameraApi?.(idleCamera);
+  }, [onCameraApi]);
 
   if (!track) {
     return (
       <View style={styles.placeholder}>
         <VideoIcon size={34} color="rgba(255,247,240,0.28)" />
         <Text style={styles.placeholderLabel}>{isHost ? 'YOUR CAMERA' : 'LIVE VIDEO'}</Text>
-        <Text style={styles.placeholderText}>{isHost ? 'Opening camera…' : 'Waiting for host…'}</Text>
+        <Text style={styles.placeholderText}>
+          {isHost
+            ? publishError
+              ? publishError
+              : 'Opening camera…'
+            : 'Waiting for host…'}
+        </Text>
       </View>
     );
   }
 
-  return <VideoTrack trackRef={track} style={styles.video} objectFit="cover" />;
+  return <VideoTrack trackRef={track} style={styles.video} objectFit="cover" mirror={isHost && facing === 'user'} />;
 }
 
 export function LiveBadgeRow({ viewers, duration }: { viewers?: number; duration?: string }) {
@@ -377,9 +536,23 @@ export function LiveBadgeRow({ viewers, duration }: { viewers?: number; duration
   );
 }
 
-export function LiveIconButton({ onPress, children }: { onPress?: () => void; children: ReactNode }) {
+export function LiveIconButton({
+  onPress,
+  children,
+  accessibilityLabel,
+}: {
+  onPress?: () => void;
+  children: ReactNode;
+  accessibilityLabel?: string;
+}) {
   return (
-    <Pressable onPress={onPress} style={styles.iconButton} hitSlop={8}>
+    <Pressable
+      onPress={onPress}
+      style={styles.iconButton}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+    >
       {children}
     </Pressable>
   );
@@ -623,6 +796,22 @@ export function EndLiveDialog({
   );
 }
 
+export function LiveHostCameraSwitch() {
+  const camera = useHostCamera();
+  if (!camera.ready) return null;
+  return (
+    <View style={styles.sideRail} pointerEvents="box-none">
+      <LiveIconButton
+        onPress={camera.switching ? undefined : camera.switchCamera}
+        accessibilityLabel={camera.facing === 'user' ? 'Switch to back camera' : 'Switch to front camera'}
+      >
+        <CameraSwitchIcon size={18} color={camera.switching ? 'rgba(255,247,240,0.45)' : Palette.ivory} />
+      </LiveIconButton>
+      <Text style={styles.sideRailLabel}>{camera.facing === 'user' ? 'Front' : 'Back'}</Text>
+    </View>
+  );
+}
+
 export function LiveHostTopBar({
   viewers,
   duration,
@@ -832,6 +1021,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 1,
   },
   liveBadge: {
     backgroundColor: Palette.liveRed,
@@ -1133,17 +1323,19 @@ const styles = StyleSheet.create({
   hostTopBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   hostTopSpacer: {
     flex: 1,
+    minWidth: 4,
   },
   endLiveBtn: {
+    flexShrink: 0,
     minHeight: 34,
     borderWidth: 1,
     borderColor: 'rgba(255,247,240,0.4)',
     borderRadius: 17,
-    paddingHorizontal: 13,
+    paddingHorizontal: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1151,5 +1343,17 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     fontFamily: Typography.bodySemiBold,
     color: Palette.ivory,
+  },
+  sideRail: {
+    alignItems: 'center',
+    gap: 5,
+  },
+  sideRailLabel: {
+    fontSize: 10,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.ivory,
+    textShadowColor: 'rgba(27,17,19,0.7)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
 });

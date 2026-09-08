@@ -2,18 +2,9 @@
   "name": "event-target-shim-v6",
   "version": "6.0.2",
   "description": "An implementation of WHATWG EventTarget interface.",
-  "main": "index.js",
+  "main": "hermes.js",
   "exports": {
-    ".": {
-      "require": "./index.js",
-      "import": "./index.js",
-      "default": "./index.js"
-    },
-    "./index": {
-      "require": "./index.js",
-      "import": "./index.js",
-      "default": "./index.js"
-    },
+    ".": "./hermes.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -109,5 +100,6 @@
   "homepage": "https://github.com/mysticatea/event-target-shim",
   "funding": "https://github.com/sponsors/mysticatea",
   "sideEffects": false,
-  "unpkg": "umd.js"
+  "unpkg": "umd.js",
+  "module": "hermes.js"
 }

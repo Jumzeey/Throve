@@ -5,6 +5,7 @@ import {
   LiveCommentRow,
   LiveComposer,
   LiveConnectionOverlay,
+  LiveHostCameraSwitch,
   LiveHostTopBar,
   LiveStage,
 } from '@/components/live/live-stage';
@@ -79,10 +80,13 @@ export default function LiveBroadcastScreen() {
     return 'available';
   }, [pinnedProduct]);
 
+  const subscribeSession = live.subscribeSession;
+  const fetchLiveMedia = live.fetchLiveMedia;
+
   useEffect(() => {
     if (!liveSession?.id) return;
-    return live.subscribeSession(liveSession.id);
-  }, [live, liveSession?.id]);
+    return subscribeSession(liveSession.id);
+  }, [subscribeSession, liveSession?.id]);
 
   useEffect(() => {
     void (async () => {
@@ -97,11 +101,12 @@ export default function LiveBroadcastScreen() {
 
   useEffect(() => {
     if (!liveSession?.id) return;
+    let cancelled = false;
     setMediaStatus('loading');
     setMediaErrorMessage(null);
-    live
-      .fetchLiveMedia(liveSession.id)
+    fetchLiveMedia(liveSession.id)
       .then((creds) => {
+        if (cancelled) return;
         setCredentials(creds);
         setMediaStatus('ready');
         if (creds.provider === 'simulated') {
@@ -109,6 +114,7 @@ export default function LiveBroadcastScreen() {
         }
       })
       .catch((err) => {
+        if (cancelled) return;
         setCredentials(null);
         setMediaStatus('error');
         const message =
@@ -120,7 +126,10 @@ export default function LiveBroadcastScreen() {
         setMediaErrorMessage(message);
         setNotice(message);
       });
-  }, [live, liveSession?.id]);
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchLiveMedia, liveSession?.id]);
 
   useEffect(() => {
     const timer = setTimeout(() => setGoingLive(false), 2200);
@@ -341,7 +350,11 @@ export default function LiveBroadcastScreen() {
           ) : null}
         </View>
 
-        <View style={styles.flex} />
+        <View style={styles.flex} pointerEvents="box-none">
+          <View style={styles.leftRail} pointerEvents="box-none">
+            <LiveHostCameraSwitch />
+          </View>
+        </View>
 
         <View style={styles.commentsArea}>
           {comments.length === 0 ? (
@@ -515,6 +528,11 @@ function ProductPickerSheet({
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Palette.liveDark },
   flex: { flex: 1 },
+  leftRail: {
+    alignSelf: 'flex-start',
+    paddingLeft: 16,
+    paddingTop: 12,
+  },
   topArea: {
     gap: 10,
     paddingHorizontal: 16,

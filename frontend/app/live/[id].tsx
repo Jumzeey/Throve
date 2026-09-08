@@ -46,10 +46,13 @@ export default function LiveViewerScreen() {
   if (liveSession) heldSession.current = liveSession;
   const viewSession = liveSession ?? heldSession.current;
 
+  const subscribeSession = live.subscribeSession;
+  const fetchLiveMedia = live.fetchLiveMedia;
+
   useEffect(() => {
     if (!sessionId || viewSession?.status === 'ended') return;
-    return live.subscribeSession(sessionId);
-  }, [live, sessionId, viewSession?.status]);
+    return subscribeSession(sessionId);
+  }, [subscribeSession, sessionId, viewSession?.status]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -59,20 +62,25 @@ export default function LiveViewerScreen() {
       setMediaErrorMessage('This live has ended.');
       return;
     }
+    let cancelled = false;
     setMediaStatus('loading');
     setMediaErrorMessage(null);
-    live
-      .fetchLiveMedia(sessionId)
+    fetchLiveMedia(sessionId)
       .then((creds) => {
+        if (cancelled) return;
         setCredentials(creds);
         setMediaStatus('ready');
       })
       .catch((err) => {
+        if (cancelled) return;
         setCredentials(null);
         setMediaStatus('error');
         setMediaErrorMessage(err instanceof Error ? err.message : 'Could not join stream.');
       });
-  }, [live, sessionId, viewSession?.status]);
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchLiveMedia, sessionId, viewSession?.status]);
 
   useEffect(() => {
     if (live.roomNotice) setNote(live.roomNotice);

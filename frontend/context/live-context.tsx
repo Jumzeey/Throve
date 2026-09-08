@@ -504,7 +504,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   }, [claimsBySession, releaseClaim]);
 
   const fetchLiveMedia = useCallback(async (sessionId: string) => {
-    return apiFetch<LiveMediaCredentials>(`/live/sessions/${sessionId}/media`, { method: 'POST' });
+    return apiFetch<LiveMediaCredentials>(`/live/sessions/${sessionId}/media`, {
+      method: 'POST',
+      timeoutMs: 15_000,
+    });
   }, []);
 
   const fetchLiveKitToken = useCallback(async (sessionId: string) => {

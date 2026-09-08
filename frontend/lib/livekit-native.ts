@@ -4,43 +4,48 @@ type LiveKitModule = typeof import('@livekit/react-native');
 type LivekitClient = typeof import('livekit-client');
 
 export type LiveKitNative = { rn: LiveKitModule; client: LivekitClient };
+export type LiveKitLoadFailure = 'expo_go' | 'failed';
 
 let loadPromise: Promise<LiveKitNative | null> | null = null;
 let registered = false;
 let audioSessionStarted = false;
+let lastFailure: LiveKitLoadFailure | null = null;
+let lastFailureDetail: string | null = null;
 
 export function canLoadNativeLiveKit() {
-  // Expo Go cannot load WebRTC native modules. Standalone / production builds can.
-  // Prefer executionEnvironment — appOwnership is deprecated and unreliable.
+  // Expo Go cannot load WebRTC native modules. Standalone / production / local debug builds can.
   return Constants.executionEnvironment !== ExecutionEnvironment.StoreClient;
 }
 
-type GlobalErrorUtils = {
-  getGlobalHandler?: () => ((error: unknown, isFatal?: boolean) => void) | undefined;
-  setGlobalHandler?: (handler: (error: unknown, isFatal?: boolean) => void) => void;
-};
+export function getLiveKitLoadFailure(): LiveKitLoadFailure | null {
+  return lastFailure;
+}
 
-function withSuppressedSuperExpression<T>(run: () => Promise<T>): Promise<T> {
-  const errorUtils = (globalThis as { ErrorUtils?: GlobalErrorUtils }).ErrorUtils;
-  const previous = errorUtils?.getGlobalHandler?.();
-  let suppressed: unknown = null;
+export function getLiveKitLoadFailureDetail(): string | null {
+  return lastFailureDetail;
+}
 
-  errorUtils?.setGlobalHandler?.((error, isFatal) => {
-    const message = error instanceof Error ? error.message : String(error ?? '');
-    if (/Super expression must either be null or a function/i.test(message)) {
-      suppressed = error;
-      return;
-    }
-    previous?.(error, isFatal);
+function errorMessage(err: unknown) {
+  if (err instanceof Error) return err.message;
+  return String(err ?? 'Unknown error');
+}
+
+const LOAD_TIMEOUT_MS = 15_000;
+
+function withTimeout<T>(run: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    run.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
   });
-
-  return run()
-    .catch((err) => {
-      throw suppressed ?? err;
-    })
-    .finally(() => {
-      if (previous) errorUtils?.setGlobalHandler?.(previous);
-    });
 }
 
 /** Clear a failed load so the next live attempt can retry after a rebuild or fix. */
@@ -48,42 +53,89 @@ export function resetLiveKitNativeLoad() {
   loadPromise = null;
   registered = false;
   audioSessionStarted = false;
+  lastFailure = null;
+  lastFailureDetail = null;
 }
 
 /**
- * Load LiveKit once. registerGlobals must not run on every live-screen mount.
- * Failures resolve to null — callers should show an explicit media error, not pretend LIVE.
+ * Load LiveKit once. Failures resolve to null — callers show an explicit media error.
+ * AudioSession is best-effort: a mic-session failure must not block camera module load.
  */
 export function loadLiveKitNative() {
   if (loadPromise) return loadPromise;
   loadPromise = (async () => {
     if (!canLoadNativeLiveKit()) {
+      lastFailure = 'expo_go';
+      lastFailureDetail = 'Expo Go cannot load WebRTC. Use a Throve development or release build.';
       console.warn('[livekit] skipped — Expo Go / store client cannot load WebRTC');
       return null;
     }
     try {
-      return await withSuppressedSuperExpression(async () => {
-        await import('@livekit/react-native-webrtc');
-        const rn = await import('@livekit/react-native');
-        if (!rn?.registerGlobals || !rn?.LiveKitRoom || !rn?.AudioSession) {
-          console.warn('[livekit] react-native module incomplete');
-          loadPromise = null;
-          return null;
-        }
-        const client = await import('livekit-client');
-        if (!registered) {
-          rn.registerGlobals();
-          registered = true;
-        }
-        if (!audioSessionStarted) {
-          await rn.AudioSession.startAudioSession();
-          audioSessionStarted = true;
-        }
-        return { rn, client };
-      });
+      return await withTimeout(
+        (async () => {
+          console.log('[livekit] loading native impl');
+          // Named static imports live in a dedicated module so Metro binds exports correctly.
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const impl = require('./livekit-native-impl') as typeof import('./livekit-native-impl') | undefined;
+          if (!impl || typeof impl.createLiveKitNative !== 'function') {
+            throw new Error(
+              'LiveKit native module failed to evaluate (WebRTC EventTarget shim). Try again after a reload.',
+            );
+          }
+          const { rn, client } = impl.createLiveKitNative();
+          console.log('[livekit] native impl ready', {
+            registerGlobals: typeof rn.registerGlobals,
+            LiveKitRoom: typeof rn.LiveKitRoom,
+            AudioSession: typeof rn.AudioSession,
+            Track: typeof client?.Track,
+          });
+
+          if (
+            typeof rn.registerGlobals !== 'function' ||
+            !rn.LiveKitRoom ||
+            !rn.AudioSession ||
+            !client?.Track
+          ) {
+            lastFailure = 'failed';
+            lastFailureDetail =
+              'LiveKit static bindings incomplete (registerGlobals/LiveKitRoom/AudioSession/Track).';
+            console.warn('[livekit] static bindings incomplete', {
+              registerGlobals: typeof rn.registerGlobals,
+              LiveKitRoom: typeof rn.LiveKitRoom,
+              AudioSession: typeof rn.AudioSession,
+              Track: typeof client?.Track,
+            });
+            return null;
+          }
+
+          if (!registered) {
+            rn.registerGlobals();
+            registered = true;
+          }
+          // Never block camera on AudioSession — native start can hang on some devices.
+          if (!audioSessionStarted) {
+            void rn.AudioSession.startAudioSession()
+              .then(() => {
+                audioSessionStarted = true;
+              })
+              .catch((audioErr: unknown) => {
+                console.warn('[livekit] AudioSession.startAudioSession failed', audioErr);
+              });
+          }
+          lastFailure = null;
+          lastFailureDetail = null;
+          return { rn: rn as unknown as LiveKitModule, client: client as unknown as LivekitClient };
+        })(),
+        LOAD_TIMEOUT_MS,
+        'LiveKit took too long to start. Check camera permission and try again.',
+      );
     } catch (err) {
+      lastFailure = 'failed';
+      lastFailureDetail = errorMessage(err);
+      const stack = err instanceof Error ? err.stack : undefined;
       console.warn('[livekit] native load failed', err);
-      loadPromise = null;
+      if (stack) console.warn('[livekit] native load stack', stack);
+      // Cache failure until resetLiveKitNativeLoad() — avoids spam re-require on every render.
       return null;
     }
   })();
@@ -93,8 +145,9 @@ export function loadLiveKitNative() {
 export async function stopLiveKitAudioSession() {
   if (!audioSessionStarted) return;
   try {
-    const rn = await import('@livekit/react-native');
-    await rn.AudioSession.stopAudioSession();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const impl = require('./livekit-native-impl') as typeof import('./livekit-native-impl');
+    await impl.createLiveKitNative().rn.AudioSession.stopAudioSession();
   } catch {
     /* ignore */
   } finally {
