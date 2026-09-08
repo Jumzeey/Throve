@@ -568,6 +568,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         peakViewers: opts?.peakViewers,
         reason: opts?.reason ?? 'host',
       }),
+      timeoutMs: 12_000,
     });
     setSessions((current) =>
       current.map((session) => (session.id === sessionId ? { ...session, status: 'ended' } : session)),

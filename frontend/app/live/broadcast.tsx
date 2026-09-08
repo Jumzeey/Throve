@@ -18,10 +18,12 @@ import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
 import { MAX_LIVE_MODERATORS, useLive, useLiveClock } from '@/context/live-context';
 import { getListingImageSource } from '@/data/images';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, ApiError } from '@/lib/api';
 import { formatNaira } from '@/lib/format';
+import { stopLiveKitAudioSession } from '@/lib/livekit-native';
 import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
+import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { Redirect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -44,6 +46,8 @@ export default function LiveBroadcastScreen() {
   const inbox = useInbox();
   const live = useLive();
   const [credentials, setCredentials] = useState<LiveMediaCredentials | null>(null);
+  const [mediaStatus, setMediaStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [mediaErrorMessage, setMediaErrorMessage] = useState<string | null>(null);
   const [endOpen, setEndOpen] = useState(false);
   const [ending, setEnding] = useState(false);
   const [modsOpen, setModsOpen] = useState(false);
@@ -55,6 +59,8 @@ export default function LiveBroadcastScreen() {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intentionalLeaveRef = useRef(false);
   const peakRef = useRef(0);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [micPermission, requestMicPermission] = useMicrophonePermissions();
 
   const broadcastId = live.activeBroadcastId;
   const liveSession = broadcastId
@@ -79,11 +85,41 @@ export default function LiveBroadcastScreen() {
   }, [live, liveSession?.id]);
 
   useEffect(() => {
+    void (async () => {
+      try {
+        if (!cameraPermission?.granted) await requestCameraPermission();
+        if (!micPermission?.granted) await requestMicPermission();
+      } catch {
+        /* permission prompts are best-effort; LiveKit will surface failure */
+      }
+    })();
+  }, [cameraPermission?.granted, micPermission?.granted, requestCameraPermission, requestMicPermission]);
+
+  useEffect(() => {
     if (!liveSession?.id) return;
+    setMediaStatus('loading');
+    setMediaErrorMessage(null);
     live
       .fetchLiveMedia(liveSession.id)
-      .then(setCredentials)
-      .catch(() => setCredentials(null));
+      .then((creds) => {
+        setCredentials(creds);
+        setMediaStatus('ready');
+        if (creds.provider === 'simulated') {
+          setNotice('Live media is in preview mode — camera and mic are not connected.');
+        }
+      })
+      .catch((err) => {
+        setCredentials(null);
+        setMediaStatus('error');
+        const message =
+          err instanceof ApiError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : 'Could not start camera.';
+        setMediaErrorMessage(message);
+        setNotice(message);
+      });
   }, [live, liveSession?.id]);
 
   useEffect(() => {
@@ -104,6 +140,24 @@ export default function LiveBroadcastScreen() {
     async (reason: 'host' | 'connection') => {
       if (!liveSession || ending) return;
       setEnding(true);
+      intentionalLeaveRef.current = true;
+      if (reconnectTimer.current) {
+        clearTimeout(reconnectTimer.current);
+        reconnectTimer.current = null;
+      }
+      void stopLiveKitAudioSession();
+
+      const startedMs = liveSession.startedAt
+        ? new Date(liveSession.startedAt).getTime()
+        : Date.now();
+      const optimistic = {
+        title: liveSession.title,
+        durationMinutes: Math.max(1, Math.round((Date.now() - startedMs) / 60000)),
+        peakViewers: peakRef.current,
+        productsShown: liveSession.productsShown ?? 0,
+        productsSold: 0,
+      };
+
       try {
         const summary = await live.endLive(liveSession.id, {
           peakViewers: peakRef.current,
@@ -121,7 +175,17 @@ export default function LiveBroadcastScreen() {
           },
         });
       } catch {
-        router.replace('/(tabs)/live');
+        router.replace({
+          pathname: '/live/summary',
+          params: {
+            title: optimistic.title,
+            durationMinutes: String(optimistic.durationMinutes),
+            peakViewers: String(optimistic.peakViewers),
+            productsShown: String(optimistic.productsShown),
+            productsSold: String(optimistic.productsSold),
+            reason,
+          },
+        });
       } finally {
         setEnding(false);
         setEndOpen(false);
@@ -240,7 +304,13 @@ export default function LiveBroadcastScreen() {
   return (
     <View style={styles.screen}>
       <StatusBar style="light" />
-      <LiveStage credentials={credentials} isHost onConnectionChange={onConnectionChange}>
+      <LiveStage
+        credentials={credentials}
+        isHost
+        mediaStatus={mediaStatus}
+        mediaErrorMessage={mediaErrorMessage}
+        onConnectionChange={onConnectionChange}
+      >
         <View style={[styles.topArea, { paddingTop: top + 8 }]}>
           <LiveHostTopBar
             viewers={liveSession.viewers ?? 0}

@@ -43,25 +43,32 @@ async function getAccessToken() {
   return data.session?.access_token ?? null;
 }
 
-export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function apiFetch<T>(
+  path: string,
+  init: RequestInit & { timeoutMs?: number } = {},
+): Promise<T> {
   const token = await getAccessToken();
-  const headers = new Headers(init.headers);
+  const { timeoutMs = 45_000, ...requestInit } = init;
+  const headers = new Headers(requestInit.headers);
   headers.set('Content-Type', 'application/json');
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
-  const timeoutMs = 45_000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  if (init.signal) {
-    if (init.signal.aborted) controller.abort();
-    else init.signal.addEventListener('abort', () => controller.abort(), { once: true });
+  if (requestInit.signal) {
+    if (requestInit.signal.aborted) controller.abort();
+    else requestInit.signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
 
   let response: Response;
   try {
-    response = await fetch(`${API_URL}${path}`, { ...init, headers, signal: controller.signal });
+    response = await fetch(`${API_URL}${path}`, {
+      ...requestInit,
+      headers,
+      signal: controller.signal,
+    });
   } catch (err) {
-    if (init.signal?.aborted) throw err;
+    if (requestInit.signal?.aborted) throw err;
     if (controller.signal.aborted) {
       throw new ApiError('Request timed out. Check your connection and try again.', 'TIMEOUT');
     }

@@ -7,11 +7,12 @@ export type LiveKitNative = { rn: LiveKitModule; client: LivekitClient };
 
 let loadPromise: Promise<LiveKitNative | null> | null = null;
 let registered = false;
+let audioSessionStarted = false;
 
 export function canLoadNativeLiveKit() {
-  if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) return false;
-  if (Constants.appOwnership === 'expo') return false;
-  return true;
+  // Expo Go cannot load WebRTC native modules. Standalone / production builds can.
+  // Prefer executionEnvironment — appOwnership is deprecated and unreliable.
+  return Constants.executionEnvironment !== ExecutionEnvironment.StoreClient;
 }
 
 type GlobalErrorUtils = {
@@ -42,24 +43,31 @@ function withSuppressedSuperExpression<T>(run: () => Promise<T>): Promise<T> {
     });
 }
 
+/** Clear a failed load so the next live attempt can retry after a rebuild or fix. */
+export function resetLiveKitNativeLoad() {
+  loadPromise = null;
+  registered = false;
+  audioSessionStarted = false;
+}
+
 /**
- * Load LiveKit once. registerGlobals must not run on every live-screen mount —
- * repeating it on Android/iOS WebRTC crashes the process.
- *
- * Failures must resolve to null (SimulatedStage) — never throw through to the UI.
- * Android "Super expression must either be null or a function" means WebRTC got
- * event-target-shim@5 — see metro.config.js + scripts/patch-livekit-webrtc-shim.js.
+ * Load LiveKit once. registerGlobals must not run on every live-screen mount.
+ * Failures resolve to null — callers should show an explicit media error, not pretend LIVE.
  */
 export function loadLiveKitNative() {
   if (loadPromise) return loadPromise;
   loadPromise = (async () => {
-    if (!canLoadNativeLiveKit()) return null;
+    if (!canLoadNativeLiveKit()) {
+      console.warn('[livekit] skipped — Expo Go / store client cannot load WebRTC');
+      return null;
+    }
     try {
       return await withSuppressedSuperExpression(async () => {
         await import('@livekit/react-native-webrtc');
         const rn = await import('@livekit/react-native');
-        if (!rn?.registerGlobals || !rn?.LiveKitRoom) {
+        if (!rn?.registerGlobals || !rn?.LiveKitRoom || !rn?.AudioSession) {
           console.warn('[livekit] react-native module incomplete');
+          loadPromise = null;
           return null;
         }
         const client = await import('livekit-client');
@@ -67,12 +75,29 @@ export function loadLiveKitNative() {
           rn.registerGlobals();
           registered = true;
         }
+        if (!audioSessionStarted) {
+          await rn.AudioSession.startAudioSession();
+          audioSessionStarted = true;
+        }
         return { rn, client };
       });
     } catch (err) {
       console.warn('[livekit] native load failed', err);
+      loadPromise = null;
       return null;
     }
   })();
   return loadPromise;
+}
+
+export async function stopLiveKitAudioSession() {
+  if (!audioSessionStarted) return;
+  try {
+    const rn = await import('@livekit/react-native');
+    await rn.AudioSession.stopAudioSession();
+  } catch {
+    /* ignore */
+  } finally {
+    audioSessionStarted = false;
+  }
 }

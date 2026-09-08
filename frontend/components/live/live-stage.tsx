@@ -16,7 +16,7 @@ import {
 import { SimulatedStage } from '@/components/ui/simulated-stage';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import type { LiveConnection, LiveComment, LiveMediaCredentials } from '@/data/types';
-import { loadLiveKitNative, type LiveKitNative } from '@/lib/livekit-native';
+import { loadLiveKitNative, resetLiveKitNativeLoad, type LiveKitNative } from '@/lib/livekit-native';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { memo, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -24,6 +24,9 @@ import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-nativ
 type Props = {
   credentials: LiveMediaCredentials | null;
   isHost: boolean;
+  /** When credentials are still null: loading vs hard media failure. */
+  mediaStatus?: 'loading' | 'ready' | 'error';
+  mediaErrorMessage?: string | null;
   onConnectionChange?: (state: LiveConnection) => void;
   children?: ReactNode;
 };
@@ -36,12 +39,25 @@ const LIVE_IVORY_62 = 'rgba(255,247,240,0.62)';
 const LIVE_IVORY_16 = 'rgba(255,247,240,0.16)';
 
 /**
- * Media stage adapter. LiveKit today; IVS later; SimulatedStage when creds/native missing.
+ * Media stage adapter. LiveKit today; IVS later; SimulatedStage only for explicit simulated provider.
  */
-export function LiveStage({ credentials, isHost, onConnectionChange, children }: Props) {
+export function LiveStage({
+  credentials,
+  isHost,
+  mediaStatus = 'loading',
+  mediaErrorMessage,
+  onConnectionChange,
+  children,
+}: Props) {
   return (
     <View style={styles.room}>
-      <LiveVideoLayer credentials={credentials} isHost={isHost} onConnectionChange={onConnectionChange} />
+      <LiveVideoLayer
+        credentials={credentials}
+        isHost={isHost}
+        mediaStatus={mediaStatus}
+        mediaErrorMessage={mediaErrorMessage}
+        onConnectionChange={onConnectionChange}
+      />
       <View style={styles.overlay} pointerEvents="box-none">
         {children}
       </View>
@@ -49,22 +65,75 @@ export function LiveStage({ credentials, isHost, onConnectionChange, children }:
   );
 }
 
+function MediaUnavailableStage({
+  title,
+  message,
+  onRetry,
+}: {
+  title: string;
+  message: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <View style={styles.videoLayer}>
+      <SimulatedStage>
+        <View style={styles.mediaErrorCard}>
+          <WifiOffIcon size={28} color="rgba(255,247,240,0.7)" />
+          <Text style={styles.mediaErrorTitle}>{title}</Text>
+          <Text style={styles.mediaErrorCopy}>{message}</Text>
+          {onRetry ? (
+            <Pressable onPress={onRetry} style={styles.mediaRetryBtn} hitSlop={8}>
+              <Text style={styles.mediaRetryLabel}>Try again</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </SimulatedStage>
+    </View>
+  );
+}
+
+function ConnectingStage({ label }: { label: string }) {
+  return (
+    <View style={styles.placeholder}>
+      <VideoIcon size={34} color="rgba(255,247,240,0.28)" />
+      <Text style={styles.placeholderText}>{label}</Text>
+    </View>
+  );
+}
+
 const LiveVideoLayer = memo(function LiveVideoLayer({
   credentials,
   isHost,
+  mediaStatus,
+  mediaErrorMessage,
   onConnectionChange,
 }: {
   credentials: LiveMediaCredentials | null;
   isHost: boolean;
+  mediaStatus: 'loading' | 'ready' | 'error';
+  mediaErrorMessage?: string | null;
   onConnectionChange?: (state: LiveConnection) => void;
 }) {
-  const provider = credentials?.provider ?? 'livekit';
+  if (!credentials) {
+    if (mediaStatus === 'error') {
+      return (
+        <MediaUnavailableStage
+          title={isHost ? 'Camera unavailable' : 'Stream unavailable'}
+          message={mediaErrorMessage ?? 'Could not start live media. Check your connection and try again.'}
+        />
+      );
+    }
+    return <ConnectingStage label={isHost ? 'Starting camera…' : 'Connecting stream…'} />;
+  }
 
-  if (!credentials || provider === 'simulated') {
+  const provider = credentials.provider ?? 'livekit';
+
+  if (provider === 'simulated') {
     return (
-      <View style={styles.videoLayer}>
-        <SimulatedStage />
-      </View>
+      <MediaUnavailableStage
+        title="Preview mode"
+        message="Live media is running in simulated mode — camera and mic are not connected."
+      />
     );
   }
 
@@ -181,6 +250,7 @@ const LiveKitVideoLayer = memo(function LiveKitVideoLayer({
 }) {
   const [mods, setMods] = useState<LiveKitNative | null>(null);
   const [failed, setFailed] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -201,27 +271,35 @@ const LiveKitVideoLayer = memo(function LiveKitVideoLayer({
     return () => {
       cancelled = true;
     };
-  }, [credentials.token, credentials.url]);
+  }, [credentials.token, credentials.url, retryKey]);
 
   const onConnected = useCallback(() => onConnectionChange?.('live'), [onConnectionChange]);
   const onDisconnected = useCallback(() => onConnectionChange?.('lost'), [onConnectionChange]);
   const onError = useCallback(() => onConnectionChange?.('reconnecting'), [onConnectionChange]);
 
+  const retryNative = useCallback(() => {
+    resetLiveKitNativeLoad();
+    setMods(null);
+    setFailed(false);
+    setRetryKey((n) => n + 1);
+  }, []);
+
   if (failed) {
     return (
-      <View style={styles.videoLayer}>
-        <SimulatedStage />
-      </View>
+      <MediaUnavailableStage
+        title={isHost ? 'Camera failed to start' : 'Could not join stream'}
+        message={
+          isHost
+            ? 'LiveKit could not open your camera or microphone. Close other apps using the camera, check permissions, and try again.'
+            : 'The live video connection could not be established.'
+        }
+        onRetry={retryNative}
+      />
     );
   }
 
   if (!mods) {
-    return (
-      <View style={styles.placeholder}>
-        <VideoIcon size={34} color="rgba(255,247,240,0.28)" />
-        <Text style={styles.placeholderText}>Connecting stream…</Text>
-      </View>
-    );
+    return <ConnectingStage label={isHost ? 'Starting camera…' : 'Connecting stream…'} />;
   }
 
   const { LiveKitRoom } = mods.rn;
@@ -253,7 +331,15 @@ function CameraLayer({
   client: LivekitClient;
   isHost: boolean;
 }) {
-  const { VideoTrack, useTracks } = rn;
+  const { VideoTrack, useTracks, useLocalParticipant } = rn;
+  const { localParticipant } = useLocalParticipant();
+
+  useEffect(() => {
+    if (!isHost || !localParticipant) return;
+    void localParticipant.setCameraEnabled(true).catch(() => undefined);
+    void localParticipant.setMicrophoneEnabled(true).catch(() => undefined);
+  }, [isHost, localParticipant]);
+
   const tracks = useTracks([client.Track.Source.Camera], { onlySubscribed: !isHost });
   const track = tracks[0];
 
@@ -262,7 +348,7 @@ function CameraLayer({
       <View style={styles.placeholder}>
         <VideoIcon size={34} color="rgba(255,247,240,0.28)" />
         <Text style={styles.placeholderLabel}>{isHost ? 'YOUR CAMERA' : 'LIVE VIDEO'}</Text>
-        <Text style={styles.placeholderText}>{isHost ? 'Enable camera' : 'Waiting for host…'}</Text>
+        <Text style={styles.placeholderText}>{isHost ? 'Opening camera…' : 'Waiting for host…'}</Text>
       </View>
     );
   }
@@ -706,6 +792,41 @@ const styles = StyleSheet.create({
     color: LIVE_IVORY_60,
     fontFamily: Typography.body,
     fontSize: 14,
+  },
+  mediaErrorCard: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+    gap: 10,
+  },
+  mediaErrorTitle: {
+    fontSize: 16,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.ivory,
+    textAlign: 'center',
+  },
+  mediaErrorCopy: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: Typography.body,
+    color: LIVE_IVORY_60,
+    textAlign: 'center',
+  },
+  mediaRetryBtn: {
+    marginTop: 8,
+    minHeight: 40,
+    paddingHorizontal: 18,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,247,240,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mediaRetryLabel: {
+    fontSize: 13,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.ivory,
   },
   badgeRow: {
     flexDirection: 'row',

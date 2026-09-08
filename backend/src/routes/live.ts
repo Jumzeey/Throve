@@ -514,42 +514,76 @@ router.post('/sessions/:id/end', requireAuth, async (req, res) => {
       .eq('host_id', userId);
     if (error) return handleSupabaseError(res, error);
 
-    const service = createServiceClient();
-    const { data: openClaims } = await service
-      .from('live_claims')
-      .select('id, user_id, listing_id')
-      .eq('live_session_id', req.params.id)
-      .eq('status', 'active')
-      .limit(100);
-    for (const claim of openClaims ?? []) {
-      let listingTitle = 'your item';
-      if (claim.listing_id) {
-        const { data: listing } = await service
-          .from('listings')
-          .select('title')
-          .eq('id', claim.listing_id)
-          .maybeSingle();
-        if (listing?.title) listingTitle = String(listing.title);
+    // Claim notifications are best-effort and must not delay the host leaving the studio.
+    const sessionId = String(req.params.id);
+    void (async () => {
+      try {
+        const service = createServiceClient();
+        const { data: openClaims } = await service
+          .from('live_claims')
+          .select('id, user_id, listing_id')
+          .eq('live_session_id', sessionId)
+          .eq('status', 'active')
+          .limit(100);
+        if (!openClaims?.length) return;
+
+        const listingIds = [
+          ...new Set(
+            openClaims
+              .map((claim) => (claim.listing_id ? String(claim.listing_id) : ''))
+              .filter(Boolean),
+          ),
+        ];
+        const titleByListingId = new Map<string, string>();
+        if (listingIds.length) {
+          const { data: listings } = await service
+            .from('listings')
+            .select('id, title')
+            .in('id', listingIds);
+          for (const listing of listings ?? []) {
+            if (listing?.id && listing?.title) {
+              titleByListingId.set(String(listing.id), String(listing.title));
+            }
+          }
+        }
+
+        for (const claim of openClaims) {
+          const listingTitle = claim.listing_id
+            ? titleByListingId.get(String(claim.listing_id)) ?? 'your item'
+            : 'your item';
+          void notifyUser({
+            userId: String(claim.user_id),
+            category: 'live',
+            type: 'live_ended_with_claim',
+            title: 'Live ended — finish checkout',
+            body: listingTitle,
+            deepLink: `live/${sessionId}`,
+            data: { sessionId, claimId: String(claim.id) },
+            email: liveEndedWithClaimEmail({
+              sessionId,
+              listingTitle,
+            }),
+          });
+        }
+      } catch (err) {
+        console.warn('[live/end] claim notify failed', err);
       }
-      void notifyUser({
-        userId: String(claim.user_id),
-        category: 'live',
-        type: 'live_ended_with_claim',
-        title: 'Live ended — finish checkout',
-        body: listingTitle,
-        deepLink: `live/${req.params.id}`,
-        data: { sessionId: String(req.params.id), claimId: String(claim.id) },
-        email: liveEndedWithClaimEmail({
-          sessionId: String(req.params.id),
-          listingTitle,
-        }),
-      });
-    }
+    })();
   }
 
-  const products = await loadProducts(supabase, String(req.params.id));
-  const productsSold = products.filter((p) => p.soldCount > 0).length;
-  const productsShown = Math.max(Number(session.products_shown ?? 0), products.length);
+  // Lightweight summary — avoid full product joins on the critical path.
+  const { count: productsShownCount } = await supabase
+    .from('live_stream_products')
+    .select('id', { count: 'exact', head: true })
+    .eq('live_session_id', req.params.id);
+  const { count: productsSoldCount } = await supabase
+    .from('live_stream_products')
+    .select('id', { count: 'exact', head: true })
+    .eq('live_session_id', req.params.id)
+    .gt('sold_count', 0);
+
+  const productsShown = Math.max(Number(session.products_shown ?? 0), productsShownCount ?? 0);
+  const productsSold = productsSoldCount ?? 0;
   const startedMs = session.started_at ? new Date(String(session.started_at)).getTime() : Date.now();
   const endedMs = new Date(endedAt).getTime();
   const durationMinutes = Math.max(1, Math.round((endedMs - startedMs) / 60000));

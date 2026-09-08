@@ -33,6 +33,8 @@ export default function LiveViewerScreen() {
   const [draft, setDraft] = useState('');
   const [note, setNote] = useState<string | null>(null);
   const [credentials, setCredentials] = useState<LiveMediaCredentials | null>(null);
+  const [mediaStatus, setMediaStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [mediaErrorMessage, setMediaErrorMessage] = useState<string | null>(null);
   const [claimError, setClaimError] = useState<string | null>(null);
   const [claiming, setClaiming] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
@@ -53,12 +55,23 @@ export default function LiveViewerScreen() {
     if (!sessionId) return;
     if (viewSession?.status === 'ended') {
       setCredentials(null);
+      setMediaStatus('error');
+      setMediaErrorMessage('This live has ended.');
       return;
     }
+    setMediaStatus('loading');
+    setMediaErrorMessage(null);
     live
       .fetchLiveMedia(sessionId)
-      .then(setCredentials)
-      .catch(() => setCredentials(null));
+      .then((creds) => {
+        setCredentials(creds);
+        setMediaStatus('ready');
+      })
+      .catch((err) => {
+        setCredentials(null);
+        setMediaStatus('error');
+        setMediaErrorMessage(err instanceof Error ? err.message : 'Could not join stream.');
+      });
   }, [live, sessionId, viewSession?.status]);
 
   useEffect(() => {
@@ -257,7 +270,13 @@ export default function LiveViewerScreen() {
           <Text style={styles.toastText}>{note}</Text>
         </View>
       ) : null}
-      <LiveStage credentials={credentials} isHost={false} onConnectionChange={onConnectionChange}>
+      <LiveStage
+        credentials={credentials}
+        isHost={false}
+        mediaStatus={mediaStatus}
+        mediaErrorMessage={mediaErrorMessage}
+        onConnectionChange={onConnectionChange}
+      >
         <View style={[styles.topArea, { paddingTop: top + 8 }]}>
           <LiveViewerTopBar
             viewers={activeSession.viewers}
