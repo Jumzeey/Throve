@@ -324,6 +324,7 @@ export default function LiveBroadcastScreen() {
           <LiveHostTopBar
             viewers={liveSession.viewers ?? 0}
             duration={duration}
+            sessionId={liveSession.id}
             onLeave={leaveStudio}
             onEnd={() => setEndOpen(true)}
             onModeration={() => setModsOpen(true)}

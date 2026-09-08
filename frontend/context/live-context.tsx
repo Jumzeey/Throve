@@ -12,12 +12,91 @@ import type {
   LiveSession,
   LiveSessionSummary,
   LiveStreamProduct,
+  UserProfile,
 } from '@/data/types';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 export const CHECKOUT_RESERVE_MS = 10 * 60 * 1000;
 export const MAX_LIVE_MODERATORS = 2;
+
+export type LiveWatcherRole = 'host' | 'moderator' | 'viewer';
+
+export type LiveWatcher = {
+  key: string;
+  username: string;
+  photoUrl?: string;
+  role: LiveWatcherRole;
+  joinedAt: number;
+};
+
+function presenceTrackPayload(
+  sessionId: string,
+  auth: UserProfile | null | undefined,
+  sessions: LiveSession[],
+  moderatorsBySession: Record<string, string[]>,
+  activeBroadcastId: string | null,
+) {
+  const username = auth?.username?.trim() ?? '';
+  const liveSession = sessions.find((item) => item.id === sessionId);
+  const host = liveSession?.host ?? '';
+  const mods = liveSession?.moderators ?? moderatorsBySession[sessionId] ?? [];
+  const isHost =
+    (Boolean(username) && host.toLowerCase() === username.toLowerCase()) ||
+    activeBroadcastId === sessionId;
+  const isMod = mods.some((mod) => mod.toLowerCase() === username.toLowerCase());
+  const role: LiveWatcherRole = isHost ? 'host' : isMod ? 'moderator' : 'viewer';
+  return {
+    username,
+    photoUrl: auth?.photoUri ?? '',
+    role,
+    joined_at: Date.now(),
+  };
+}
+
+function watchersFromPresence(
+  state: Record<string, Record<string, unknown>[]>,
+  hostUsername?: string,
+  hostPhotoUrl?: string,
+  moderators: string[] = [],
+): LiveWatcher[] {
+  const byKey = new Map<string, LiveWatcher>();
+  const hostLower = hostUsername?.trim().toLowerCase() ?? '';
+  const modSet = new Set(moderators.map((mod) => mod.toLowerCase()));
+
+  for (const [presenceKey, presences] of Object.entries(state)) {
+    for (const raw of presences ?? []) {
+      const username = String(raw.username ?? '').trim();
+      const key = username.toLowerCase() || `anon:${presenceKey}`;
+      const joinedAt = Number(raw.joined_at ?? 0);
+      const existing = byKey.get(key);
+      if (existing && existing.joinedAt >= joinedAt) continue;
+
+      const payloadRole = String(raw.role ?? '');
+      let role: LiveWatcherRole = 'viewer';
+      if (payloadRole === 'host' || (username && username.toLowerCase() === hostLower)) role = 'host';
+      else if (payloadRole === 'moderator' || (username && modSet.has(username.toLowerCase()))) {
+        role = 'moderator';
+      }
+
+      const photoFromPayload = typeof raw.photoUrl === 'string' ? raw.photoUrl.trim() : '';
+      byKey.set(key, {
+        key,
+        username: username || 'Viewer',
+        photoUrl: photoFromPayload || (role === 'host' ? hostPhotoUrl : undefined),
+        role,
+        joinedAt,
+      });
+    }
+  }
+
+  const rank: Record<LiveWatcherRole, number> = { host: 0, moderator: 1, viewer: 2 };
+  return [...byKey.values()].sort((a, b) => {
+    const order = rank[a.role] - rank[b.role];
+    if (order !== 0) return order;
+    return a.username.localeCompare(b.username);
+  });
+}
 
 type StartLiveInput = {
   host: string;
@@ -80,6 +159,7 @@ type LiveContextValue = {
   addSessionModerators: (sessionId: string, usernames: string[]) => Promise<void>;
   removeSessionModerator: (sessionId: string, username: string) => Promise<void>;
   isModerator: (sessionId: string | undefined, username: string) => boolean;
+  getWatchers: (sessionId: string) => LiveWatcher[];
 };
 
 const LiveContext = createContext<LiveContextValue | null>(null);
@@ -114,7 +194,7 @@ function mapProductRow(row: Record<string, unknown>): LiveStreamProduct {
 }
 
 export function LiveProvider({ children }: { children: ReactNode }) {
-  const { isReady } = useAuth();
+  const { isReady, session: authSession } = useAuth();
   const [sessions, setSessions] = useState<LiveSession[]>([]);
   const [commentsBySession, setCommentsBySession] = useState<Record<string, LiveComment[]>>({});
   const [connections, setConnections] = useState<Record<string, LiveConnection>>({});
@@ -127,7 +207,16 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [roomNotice, setRoomNotice] = useState<string | null>(null);
   const [prepareModerators, setPrepareModerators] = useState<string[]>([]);
   const [moderatorsBySession, setModeratorsBySession] = useState<Record<string, string[]>>({});
+  const [watchersBySession, setWatchersBySession] = useState<Record<string, LiveWatcher[]>>({});
   const channelsRef = useRef<Record<string, RealtimeChannel>>({});
+  const authRef = useRef(authSession);
+  const sessionsRef = useRef(sessions);
+  const modsRef = useRef(moderatorsBySession);
+  const activeBroadcastIdRef = useRef(activeBroadcastId);
+  authRef.current = authSession;
+  sessionsRef.current = sessions;
+  modsRef.current = moderatorsBySession;
+  activeBroadcastIdRef.current = activeBroadcastId;
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -211,7 +300,21 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         return () => undefined;
       }
 
-      void hydrateSession(sessionId);
+      const trackPresence = (channel: RealtimeChannel) => {
+        const payload = presenceTrackPayload(
+          sessionId,
+          authRef.current,
+          sessionsRef.current,
+          modsRef.current,
+          activeBroadcastIdRef.current,
+        );
+        return channel.track(payload, payload.username ? { presenceKey: payload.username } : undefined);
+      };
+
+      void hydrateSession(sessionId).then(() => {
+        const existing = channelsRef.current[sessionId];
+        if (existing) void trackPresence(existing);
+      });
 
       const channel = supabase
         .channel(`live:${sessionId}`)
@@ -298,8 +401,16 @@ export function LiveProvider({ children }: { children: ReactNode }) {
           },
         )
         .on('presence', { event: 'sync' }, () => {
-          const state = channel.presenceState();
-          const viewers = Object.keys(state).length;
+          const state = channel.presenceState() as Record<string, Record<string, unknown>[]>;
+          const liveSession = sessionsRef.current.find((item) => item.id === sessionId);
+          const watchers = watchersFromPresence(
+            state,
+            liveSession?.host,
+            liveSession?.hostPhotoUrl,
+            liveSession?.moderators ?? modsRef.current[sessionId] ?? [],
+          );
+          const viewers = watchers.length || Object.keys(state).length;
+          setWatchersBySession((current) => ({ ...current, [sessionId]: watchers }));
           setSessions((current) =>
             current.map((session) => {
               if (session.id !== sessionId) return session;
@@ -315,9 +426,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
             body: JSON.stringify({ viewers }),
           }).catch(() => undefined);
         })
-        .subscribe(async (status) => {
+        .subscribe((status) => {
           if (status === 'SUBSCRIBED') {
-            await channel.track({ joined_at: Date.now() });
+            void trackPresence(channel);
           }
         });
 
@@ -329,12 +440,23 @@ export function LiveProvider({ children }: { children: ReactNode }) {
           void supabase.removeChannel(existing);
           delete channelsRef.current[sessionId];
         }
+        setWatchersBySession((current) => {
+          if (!(sessionId in current)) return current;
+          const next = { ...current };
+          delete next[sessionId];
+          return next;
+        });
       };
     },
     [hydrateSession],
   );
 
   const getComments = useCallback((sessionId: string) => commentsBySession[sessionId] ?? [], [commentsBySession]);
+
+  const getWatchers = useCallback(
+    (sessionId: string) => watchersBySession[sessionId] ?? [],
+    [watchersBySession],
+  );
 
   const getConnection = useCallback(
     (sessionId: string) => {
@@ -699,6 +821,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       addSessionModerators,
       removeSessionModerator,
       isModerator,
+      getWatchers,
     }),
     [
       activeBroadcastId,
@@ -745,6 +868,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       addSessionModerators,
       removeSessionModerator,
       isModerator,
+      getWatchers,
     ],
   );
 

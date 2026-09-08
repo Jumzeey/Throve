@@ -288,6 +288,7 @@ export default function LiveViewerScreen() {
         <View style={[styles.topArea, { paddingTop: top + 8 }]}>
           <LiveViewerTopBar
             viewers={activeSession.viewers}
+            sessionId={activeSession.id}
             onClose={leave}
             onMore={() => setReportOpen(true)}
           />

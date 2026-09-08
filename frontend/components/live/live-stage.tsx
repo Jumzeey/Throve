@@ -15,6 +15,7 @@ import {
   WifiOffIcon,
 } from '@/components/ui/icons';
 import { SimulatedStage } from '@/components/ui/simulated-stage';
+import { LiveWatchersSheet } from '@/components/live/watchers-sheet';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import type { LiveConnection, LiveComment, LiveMediaCredentials } from '@/data/types';
 import { loadLiveKitNative, resetLiveKitNativeLoad, getLiveKitLoadFailure, getLiveKitLoadFailureDetail, type LiveKitNative } from '@/lib/livekit-native';
@@ -515,17 +516,32 @@ function CameraLayer({
   return <VideoTrack trackRef={track} style={styles.video} objectFit="cover" mirror={isHost && facing === 'user'} />;
 }
 
-export function LiveBadgeRow({ viewers, duration }: { viewers?: number; duration?: string }) {
+export function LiveBadgeRow({
+  viewers,
+  duration,
+  onPressViewers,
+}: {
+  viewers?: number;
+  duration?: string;
+  onPressViewers?: () => void;
+}) {
   return (
     <View style={styles.badgeRow}>
       <View style={styles.liveBadge}>
         <Text style={styles.liveBadgeText}>LIVE</Text>
       </View>
       {viewers != null ? (
-        <View style={styles.viewerBadge}>
+        <Pressable
+          onPress={onPressViewers}
+          disabled={!onPressViewers}
+          style={styles.viewerBadge}
+          hitSlop={8}
+          accessibilityRole={onPressViewers ? 'button' : undefined}
+          accessibilityLabel={`${viewers} watching`}
+        >
           <EyeIcon size={12} />
           <Text style={styles.viewerText}>{viewers}</Text>
-        </View>
+        </Pressable>
       ) : null}
       {duration ? (
         <View style={styles.viewerBadge}>
@@ -815,60 +831,83 @@ export function LiveHostCameraSwitch() {
 export function LiveHostTopBar({
   viewers,
   duration,
+  sessionId,
   onEnd,
   onLeave,
   onModeration,
 }: {
   viewers?: number;
   duration?: string;
+  sessionId?: string;
   onEnd: () => void;
   /** Leave the studio UI without ending the live session. */
   onLeave?: () => void;
   onModeration?: () => void;
 }) {
+  const [watchersOpen, setWatchersOpen] = useState(false);
   return (
-    <View style={styles.hostTopBar}>
-      {onLeave ? (
-        <LiveIconButton onPress={onLeave}>
-          <ChevronBackIcon size={18} color={Palette.ivory} />
-        </LiveIconButton>
+    <>
+      <View style={styles.hostTopBar}>
+        {onLeave ? (
+          <LiveIconButton onPress={onLeave}>
+            <ChevronBackIcon size={18} color={Palette.ivory} />
+          </LiveIconButton>
+        ) : null}
+        <LiveBadgeRow
+          viewers={viewers}
+          duration={duration}
+          onPressViewers={sessionId ? () => setWatchersOpen(true) : undefined}
+        />
+        <View style={styles.hostTopSpacer} />
+        {onModeration ? (
+          <LiveIconButton onPress={onModeration}>
+            <ShieldIcon size={16} />
+          </LiveIconButton>
+        ) : null}
+        <Pressable onPress={onEnd} style={styles.endLiveBtn}>
+          <Text style={styles.endLiveLabel}>End live</Text>
+        </Pressable>
+      </View>
+      {sessionId ? (
+        <LiveWatchersSheet visible={watchersOpen} sessionId={sessionId} onClose={() => setWatchersOpen(false)} />
       ) : null}
-      <LiveBadgeRow viewers={viewers} duration={duration} />
-      <View style={styles.hostTopSpacer} />
-      {onModeration ? (
-        <LiveIconButton onPress={onModeration}>
-          <ShieldIcon size={16} />
-        </LiveIconButton>
-      ) : null}
-      <Pressable onPress={onEnd} style={styles.endLiveBtn}>
-        <Text style={styles.endLiveLabel}>End live</Text>
-      </Pressable>
-    </View>
+    </>
   );
 }
 
 export function LiveViewerTopBar({
   viewers,
+  sessionId,
   onClose,
   onMore,
 }: {
   viewers?: number;
+  sessionId?: string;
   onClose: () => void;
   onMore?: () => void;
 }) {
+  const [watchersOpen, setWatchersOpen] = useState(false);
   return (
-    <View style={styles.hostTopBar}>
-      <LiveBadgeRow viewers={viewers} />
-      <View style={styles.hostTopSpacer} />
-      {onMore ? (
-        <LiveIconButton onPress={onMore}>
-          <MoreHorizontalIcon />
+    <>
+      <View style={styles.hostTopBar}>
+        <LiveBadgeRow
+          viewers={viewers}
+          onPressViewers={sessionId ? () => setWatchersOpen(true) : undefined}
+        />
+        <View style={styles.hostTopSpacer} />
+        {onMore ? (
+          <LiveIconButton onPress={onMore}>
+            <MoreHorizontalIcon />
+          </LiveIconButton>
+        ) : null}
+        <LiveIconButton onPress={onClose}>
+          <CloseIcon color={Palette.ivory} size={16} />
         </LiveIconButton>
+      </View>
+      {sessionId ? (
+        <LiveWatchersSheet visible={watchersOpen} sessionId={sessionId} onClose={() => setWatchersOpen(false)} />
       ) : null}
-      <LiveIconButton onPress={onClose}>
-        <CloseIcon color={Palette.ivory} size={16} />
-      </LiveIconButton>
-    </View>
+    </>
   );
 }
 
