@@ -150,9 +150,17 @@ router.patch('/me/settings', requireAuth, async (req, res) => {
     patch.preferred_login_method = parsed.data.preferredLoginMethod;
   }
 
-  const { data, error } = await supabase.from('profiles').update(patch).eq('id', userId).select('*').single();
+  if (!Object.keys(patch).length) {
+    const profile = await getProfileById(supabase, userId);
+    if (!profile) return sendError(res, 404, 'Profile not found', 'NOT_FOUND');
+    return res.json(mapProfile(profile));
+  }
+
+  const { error } = await supabase.from('profiles').update(patch).eq('id', userId);
   if (error) return handleSupabaseError(res, error);
-  return res.json(mapProfile(data));
+  const profile = await getProfileById(supabase, userId);
+  if (!profile) return sendError(res, 404, 'Profile not found', 'NOT_FOUND');
+  return res.json(mapProfile(profile));
 });
 
 router.post('/me/heartbeat', requireAuth, async (req, res) => {

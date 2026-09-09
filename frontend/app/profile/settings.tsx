@@ -303,7 +303,7 @@ export default function SettingsScreen() {
           <AlertBanner
             variant="error"
             title="Couldn't update notifications"
-            message="Your email preferences are unchanged. Please try again."
+            message="Your notification preferences are unchanged. Please try again."
           />
         ) : null}
 
