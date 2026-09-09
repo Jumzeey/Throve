@@ -29,6 +29,20 @@ export function startClaimExpiryWorker() {
         return;
       }
 
+      const sessionIds = [
+        ...new Set((expiring ?? []).map((claim) => String(claim.live_session_id)).filter(Boolean)),
+      ];
+      const hostBySession = new Map<string, string>();
+      if (sessionIds.length) {
+        const { data: sessions } = await supabase
+          .from('live_sessions')
+          .select('id, host_id')
+          .in('id', sessionIds);
+        for (const session of sessions ?? []) {
+          hostBySession.set(String(session.id), String(session.host_id));
+        }
+      }
+
       for (const claim of expiring ?? []) {
         let listingTitle = 'your item';
         if (claim.listing_id) {
@@ -39,22 +53,39 @@ export function startClaimExpiryWorker() {
             .maybeSingle();
           if (listing?.title) listingTitle = String(listing.title);
         }
+        const sessionId = String(claim.live_session_id);
         void notifyUser({
           userId: String(claim.user_id),
           category: 'live',
           type: 'live_claim_expired',
           title: 'Your claim expired',
           body: listingTitle,
-          deepLink: `live/${claim.live_session_id}`,
+          deepLink: `live/${sessionId}`,
           data: {
-            sessionId: String(claim.live_session_id),
+            sessionId,
             claimId: String(claim.id),
           },
           email: liveClaimExpiredEmail({
-            sessionId: String(claim.live_session_id),
+            sessionId,
             listingTitle,
           }),
         });
+
+        const hostId = hostBySession.get(sessionId);
+        if (hostId && hostId !== String(claim.user_id)) {
+          void notifyUser({
+            userId: hostId,
+            category: 'live',
+            type: 'live_claim_expired_host',
+            title: 'Claim expired — stock freed',
+            body: listingTitle,
+            deepLink: `live/${sessionId}`,
+            data: {
+              sessionId,
+              claimId: String(claim.id),
+            },
+          });
+        }
       }
 
       if (typeof data === 'number' && data > 0) {

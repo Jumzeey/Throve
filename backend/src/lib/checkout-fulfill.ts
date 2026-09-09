@@ -6,6 +6,7 @@ import { createServiceClient } from './supabase.js';
 import type { DbRow } from './db-types.js';
 import { orderPlacedBuyerEmail, orderPlacedSellerEmail } from './email/templates/orders.js';
 import { notifyUser } from './notify.js';
+import { notifySavedListingWatchers } from './saved-listing-alerts.js';
 
 export type CheckoutPayload = {
   listingId: string;
@@ -185,6 +186,13 @@ export async function fulfillPaidCheckout(
     deepLink: `checkout/order?id=${encodeURIComponent(data.id)}`,
     data: { orderId: data.id },
     email: orderPlacedSellerEmail(orderVars),
+  });
+  void notifySavedListingWatchers({
+    listingId: String(listing.id),
+    listingTitle: String(listing.title ?? data.listing_title),
+    type: 'saved_listing_sold',
+    title: 'Saved item sold',
+    excludeUserIds: [userId, String(listing.seller_id)],
   });
 
   return {

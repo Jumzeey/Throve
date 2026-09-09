@@ -69,6 +69,20 @@ export async function ensureLiveNotificationChannel() {
     vibrationPattern: [0, 250, 250, 250],
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
   });
+  await Notifications.setNotificationChannelAsync('orders', {
+    name: 'Orders & payouts',
+    importance: Notifications.AndroidImportance.HIGH,
+    sound: 'default',
+    vibrationPattern: [0, 250, 250, 250],
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+  });
+  await Notifications.setNotificationChannelAsync('offers', {
+    name: 'Offers',
+    importance: Notifications.AndroidImportance.HIGH,
+    sound: 'default',
+    vibrationPattern: [0, 250, 250, 250],
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+  });
   for (const tone of MESSAGE_TONES) {
     const sound = messagePushSound(tone.id);
     await Notifications.setNotificationChannelAsync(messageChannelId(tone.id), {

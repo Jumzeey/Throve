@@ -564,7 +564,6 @@ router.post('/orders/:id/confirm-received', requireAuth, async (req, res) => {
       total: data.total,
       payoutStatus: 'eligible',
     }),
-    skipPush: true,
   });
 
   return res.json({ ok: true });
@@ -691,7 +690,6 @@ router.post('/orders/:id/dispute', requireAuth, async (req, res) => {
       total: order.total,
       payoutStatus: 'on_hold',
     }),
-    skipPush: true,
   });
 
   return res.json({ ok: true, disputeId: dispute.id });

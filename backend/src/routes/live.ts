@@ -8,6 +8,7 @@ import {
   liveUpcomingEmail,
 } from '../lib/email/templates/live.js';
 import { notifyFollowersOfLive } from '../lib/follows.js';
+import { notifySaversOfLiveStarted } from '../lib/saved-live-alerts.js';
 import {
   attachPendingModerators,
   appointModerators,
@@ -431,6 +432,12 @@ router.post('/sessions', requireAuth, async (req, res) => {
       title: data.title,
       kind: 'started',
     });
+    void notifySaversOfLiveStarted({
+      hostId: userId,
+      hostUsername,
+      sessionId: data.id,
+      title: data.title,
+    });
   }
 
   await attachPendingModerators(userId, data.id);
@@ -539,6 +546,12 @@ router.post('/sessions/:id/start', requireAuth, async (req, res) => {
     sessionId: data.id,
     title: data.title,
     kind: 'started',
+  });
+  void notifySaversOfLiveStarted({
+    hostId: userId,
+    hostUsername,
+    sessionId: data.id,
+    title: data.title,
   });
 
   return res.json(mapLiveSession(data, hostUsername, products));
@@ -971,8 +984,34 @@ router.post('/sessions/:id/products/:productId/release', requireAuth, async (req
       const mapped = rpcErrorMessage(error);
       return sendError(res, mapped.status, mapped.message, mapped.code);
     }
+    const claim = data as DbRow;
+    const claimerId = claim.user_id ? String(claim.user_id) : '';
+    if (claimerId && claimerId !== userId) {
+      let listingTitle = 'Your claimed item';
+      if (claim.listing_id) {
+        const { data: listing } = await service
+          .from('listings')
+          .select('title')
+          .eq('id', claim.listing_id)
+          .maybeSingle();
+        if (listing?.title) listingTitle = String(listing.title);
+      }
+      const sessionId = String(claim.live_session_id ?? req.params.id);
+      void notifyUser({
+        userId: claimerId,
+        category: 'live',
+        type: 'live_claim_released',
+        title: 'Claim released',
+        body: listingTitle,
+        deepLink: `live/${sessionId}`,
+        data: {
+          sessionId,
+          claimId: String(claim.id ?? parsed.data.claimId),
+        },
+      });
+    }
     const profile = await getProfileById(supabase, userId);
-    return res.json(mapLiveClaim(data as DbRow, profile?.username ?? 'unknown'));
+    return res.json(mapLiveClaim(claim, profile?.username ?? 'unknown'));
   } catch (err) {
     return sendError(res, 500, err instanceof Error ? err.message : 'Release failed');
   }

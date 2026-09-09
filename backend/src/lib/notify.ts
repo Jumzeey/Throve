@@ -78,12 +78,21 @@ export async function notifyUser(input: NotifyUserInput): Promise<void> {
 
     if (!input.skipPush && profile.notif_push_enabled !== false) {
       const tone = messageTone(profile.notif_message_tone);
+      const channelId =
+        input.category === 'live'
+          ? 'live'
+          : input.category === 'message'
+            ? `messages-${tone}`
+            : input.category === 'order'
+              ? 'orders'
+              : input.category === 'offer'
+                ? 'offers'
+                : 'default';
       await sendExpoPush({
         userId: input.userId,
         title: input.title,
         body: input.body,
-        channelId:
-          input.category === 'live' ? 'live' : input.category === 'message' ? `messages-${tone}` : 'default',
+        channelId,
         sound:
           input.category === 'message' ? (tone === 'none' ? null : tone === 'default' ? 'default' : tone) : 'default',
         data: {

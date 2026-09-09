@@ -4,6 +4,7 @@ import { handleSupabaseError, sendError } from '../lib/errors.js';
 import type { DbRow } from '../lib/db-types.js';
 import { listingPublishedEmail, listingReservedEmail } from '../lib/email/templates/listings.js';
 import { notifyFollowersOfListing } from '../lib/follows.js';
+import { notifySavedListingWatchers } from '../lib/saved-listing-alerts.js';
 import { getProfileById, getSellerCards, getSellerMap, mapListing, escapeIlike } from '../lib/mappers.js';
 import { LISTING_CATALOG, categoriesForDepartment, shippingSummary, sizeIsRequiredForProductType } from '../lib/listing-catalog.js';
 import { notifyUser } from '../lib/notify.js';
@@ -449,7 +450,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
 
   const { data: existing } = await supabase
     .from('listings')
-    .select('status')
+    .select('status, title, seller_id')
     .eq('id', req.params.id)
     .eq('seller_id', userId)
     .maybeSingle();
@@ -466,6 +467,15 @@ router.delete('/:id', requireAuth, async (req, res) => {
     .eq('id', req.params.id)
     .eq('seller_id', userId);
   if (error) return handleSupabaseError(res, error);
+
+  void notifySavedListingWatchers({
+    listingId: String(req.params.id),
+    listingTitle: String(existing.title ?? 'A saved item'),
+    type: 'saved_listing_removed',
+    title: 'Saved item removed',
+    excludeUserIds: [userId],
+  });
+
   return res.json({ ok: true, status: 'removed' });
 });
 
@@ -548,10 +558,26 @@ router.post('/:id/release', requireAuth, async (req, res) => {
 });
 
 router.post('/:id/sold', requireAuth, async (req, res) => {
-  const { supabase } = req as AuthedRequest;
+  const { supabase, userId } = req as AuthedRequest;
+  const { data: listing } = await supabase
+    .from('listings')
+    .select('id, title, seller_id, status')
+    .eq('id', req.params.id)
+    .maybeSingle();
   const { error } = await supabase.from('listings').update({ status: 'sold' }).eq('id', req.params.id);
   if (error) return handleSupabaseError(res, error);
   await supabase.from('live_claims').delete().eq('listing_id', req.params.id);
+
+  if (listing) {
+    void notifySavedListingWatchers({
+      listingId: String(listing.id),
+      listingTitle: String(listing.title ?? 'A saved item'),
+      type: 'saved_listing_sold',
+      title: 'Saved item sold',
+      excludeUserIds: [userId, String(listing.seller_id)],
+    });
+  }
+
   return res.json({ ok: true });
 });
 

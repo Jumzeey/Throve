@@ -1,5 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { orderCompletedEmail, orderPayoutStatusEmail } from './email/templates/orders.js';
 import { getProfileById } from './mappers.js';
+import { notifyUser } from './notify.js';
 import {
   autoCompleteAtFrom,
   mapDispute,
@@ -83,7 +85,7 @@ export async function runAutoCompleteDueOrders(supabase: SupabaseClient) {
   const now = new Date().toISOString();
   const { data: due } = await supabase
     .from('orders')
-    .select('id')
+    .select('id, seller_id, buyer_id, listing_title, total')
     .eq('status', 'delivered')
     .lte('auto_complete_at', now)
     .limit(50);
@@ -96,7 +98,7 @@ export async function runAutoCompleteDueOrders(supabase: SupabaseClient) {
       .maybeSingle();
     if (dispute && ['open', 'under_review'].includes(String(dispute.status))) continue;
 
-    await supabase
+    const { data: updated } = await supabase
       .from('orders')
       .update({
         status: 'completed',
@@ -105,7 +107,42 @@ export async function runAutoCompleteDueOrders(supabase: SupabaseClient) {
         payout_status: 'eligible',
       })
       .eq('id', row.id)
-      .eq('status', 'delivered');
+      .eq('status', 'delivered')
+      .select('id, seller_id, listing_title, total')
+      .maybeSingle();
+    if (!updated) continue;
+
+    const buyer = await getProfileById(supabase, String(row.buyer_id));
+    void notifyUser({
+      userId: String(updated.seller_id),
+      category: 'order',
+      type: 'order_completed',
+      title: 'Order completed',
+      body: String(updated.listing_title),
+      deepLink: `checkout/order?id=${encodeURIComponent(String(updated.id))}`,
+      data: { orderId: String(updated.id) },
+      email: orderCompletedEmail({
+        orderId: String(updated.id),
+        listingTitle: String(updated.listing_title),
+        total: Number(updated.total),
+        buyerName: buyer?.username ?? 'buyer',
+      }),
+    });
+    void notifyUser({
+      userId: String(updated.seller_id),
+      category: 'order',
+      type: 'payout_eligible',
+      title: 'Payout eligible',
+      body: String(updated.listing_title),
+      deepLink: 'profile/orders',
+      data: { orderId: String(updated.id) },
+      email: orderPayoutStatusEmail({
+        orderId: String(updated.id),
+        listingTitle: String(updated.listing_title),
+        total: Number(updated.total),
+        payoutStatus: 'eligible',
+      }),
+    });
   }
 }
 

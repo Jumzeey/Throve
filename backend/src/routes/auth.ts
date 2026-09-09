@@ -4,6 +4,7 @@ import { buildAuthEmail, buildPasswordOtpEmail } from '../lib/auth-email.js';
 import { deepLinks } from '../lib/email/deep-links.js';
 import { sendError } from '../lib/errors.js';
 import { sendMailjetEmail } from '../lib/mailjet.js';
+import { notifyUser } from '../lib/notify.js';
 import { validatePassword } from '../lib/password.js';
 import { createServiceClient, createSupabaseClient } from '../lib/supabase.js';
 import { type AuthedRequest, optionalAuth } from '../middleware/auth.js';
@@ -329,6 +330,17 @@ router.post('/password/set', optionalAuth, async (req, res) => {
       signIn.error?.message ?? 'Password saved, but sign-in failed. Try logging in.',
       'AUTH_ERROR',
     );
+  }
+
+  if (purpose === 'change') {
+    void notifyUser({
+      userId,
+      category: 'account',
+      type: 'password_changed',
+      title: 'Password updated',
+      body: 'Your Throve password was changed. If this wasn’t you, reset it now.',
+      deepLink: 'profile/login-security',
+    });
   }
 
   return res.json({
