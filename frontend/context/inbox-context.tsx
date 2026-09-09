@@ -4,6 +4,7 @@ import { useAuth } from '@/context/auth-context';
 import type { ChatMessage, Conversation, Offer, OfferStatus } from '@/data/types';
 import { parseMessageTone } from '@/lib/message-tones';
 import { playMessageTone } from '@/lib/play-message-tone';
+import { supabase } from '@/lib/supabase';
 import {
   createContext,
   useCallback,

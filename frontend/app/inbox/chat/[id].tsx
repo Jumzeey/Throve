@@ -26,9 +26,11 @@ import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { ApiError } from '@/lib/api';
 import { pickChatImage, uploadChatImage } from '@/lib/chat-media';
+import { chatDayLabel, formatChatClock, formatNaira } from '@/lib/format';
 import { formatLastSeen, isOnline } from '@/lib/presence';
 import { effectiveOfferStatus, formatOfferCountdown, offerChipVariant } from '@/lib/offer-display';
 import { supabase } from '@/lib/supabase';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image,
@@ -94,7 +96,18 @@ export default function ChatScreen() {
   );
   const canSend = Boolean(session && isConnected && !blocked && !sellerLocked && conv);
   const avatarUri = other ? publicProfiles[other]?.photoUri : undefined;
-  const otherLastSeen = other ? publicProfiles[other]?.lastSeenAt : undefined;
+  const otherLastSeen = useMemo(() => {
+    const fromProfile = other ? publicProfiles[other]?.lastSeenAt : null;
+    if (fromProfile) return fromProfile;
+    if (!other) return undefined;
+    let latest = 0;
+    for (const message of thread) {
+      if (message.from.toLowerCase() === other.toLowerCase() && message.createdAt > latest) {
+        latest = message.createdAt;
+      }
+    }
+    return latest || undefined;
+  }, [other, publicProfiles, thread]);
   const otherOnline = isOnline(otherLastSeen, now);
   const lastSeenLabel = formatLastSeen(otherLastSeen, now);
 

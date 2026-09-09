@@ -233,6 +233,7 @@ router.post('/conversations/:id/receipts', requireAuth, async (req, res) => {
   if (parsed.data.level === 'read') {
     await supabase.from('conversation_unread').delete().eq('conversation_id', req.params.id).eq('user_id', userId);
   }
+  void supabase.from('profiles').update({ last_seen_at: new Date().toISOString() }).eq('id', userId);
 
   const { data, error } = await supabase
     .from('messages')
@@ -301,6 +302,8 @@ router.post('/conversations/:id/messages', requireAuth, async (req, res) => {
     .single();
 
   if (error) return handleSupabaseError(res, error);
+
+  void supabase.from('profiles').update({ last_seen_at: new Date().toISOString() }).eq('id', userId);
 
   const preview = text || 'Sent a photo';
   await supabase
