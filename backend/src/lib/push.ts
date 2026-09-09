@@ -110,6 +110,8 @@ async function sendFcm(input: {
           notification: {
             channelId: input.channelId ?? 'default',
             sound: androidSound,
+            // Matches expo-notifications plugin drawable (@drawable/notification_icon)
+            icon: 'notification_icon',
           },
         },
         apns: {

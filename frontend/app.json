@@ -134,6 +134,7 @@
       [
         "expo-notifications",
         {
+          "icon": "./assets/images/notification-icon.png",
           "color": "#5A1F45",
           "defaultChannel": "default",
           "sounds": [
