@@ -129,6 +129,7 @@ router.patch('/me/settings', requireAuth, async (req, res) => {
       notifListings: z.boolean().optional(),
       notifOrders: z.boolean().optional(),
       notifPushEnabled: z.boolean().optional(),
+      notifMessageTone: z.enum(['default', 'note', 'chime', 'soft', 'none']).optional(),
       preferredLoginMethod: z.enum(['password', 'magic_link']).optional(),
     })
     .safeParse(req.body);
@@ -144,6 +145,7 @@ router.patch('/me/settings', requireAuth, async (req, res) => {
   if (parsed.data.notifListings !== undefined) patch.notif_listings = parsed.data.notifListings;
   if (parsed.data.notifOrders !== undefined) patch.notif_orders = parsed.data.notifOrders;
   if (parsed.data.notifPushEnabled !== undefined) patch.notif_push_enabled = parsed.data.notifPushEnabled;
+  if (parsed.data.notifMessageTone !== undefined) patch.notif_message_tone = parsed.data.notifMessageTone;
   if (parsed.data.preferredLoginMethod !== undefined) {
     patch.preferred_login_method = parsed.data.preferredLoginMethod;
   }
@@ -151,6 +153,18 @@ router.patch('/me/settings', requireAuth, async (req, res) => {
   const { data, error } = await supabase.from('profiles').update(patch).eq('id', userId).select('*').single();
   if (error) return handleSupabaseError(res, error);
   return res.json(mapProfile(data));
+});
+
+router.post('/me/heartbeat', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const now = new Date().toISOString();
+  const { data: current } = await supabase.from('profiles').select('last_seen_at').eq('id', userId).maybeSingle();
+  const last = current?.last_seen_at ? new Date(String(current.last_seen_at)).getTime() : 0;
+  if (!last || Date.now() - last > 20_000) {
+    const { error } = await supabase.from('profiles').update({ last_seen_at: now }).eq('id', userId);
+    if (error) return handleSupabaseError(res, error);
+  }
+  return res.json({ ok: true, lastSeenAt: Date.now() });
 });
 
 router.post('/me/deactivate', requireAuth, async (req, res) => {
@@ -212,12 +226,14 @@ router.get('/:username/public', optionalAuth, async (req, res) => {
   const stats = await getFollowStats(profile.id, userId);
   return res.json({
     username: profile.username,
+    userId: profile.id,
     bio: profile.bio,
     location: profile.location,
     photoUri: publicPhotoUrl(profile.photo_url),
     followerCount: stats.followerCount,
     followingCount: stats.followingCount,
     isFollowing: stats.isFollowing,
+    lastSeenAt: profile.last_seen_at ? new Date(profile.last_seen_at).getTime() : null,
   });
 });
 

@@ -16,7 +16,7 @@ import { useLive } from '@/context/live-context';
 import { getListingImage } from '@/data/images';
 import { CANCEL_REASONS } from '@/data/seed';
 import type { Order, OrderStatus, PayoutStatus } from '@/data/types';
-import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
+import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { apiFetch } from '@/lib/api';
@@ -152,7 +152,7 @@ function withinDisputeWindow(deliveredAt?: string | null) {
 export default function CheckoutOrderScreen() {
   const router = useRouter();
   const { bottom } = useScreenInsets();
-  const keyboard = useKeyboardInset();
+  const keyboardScroll = useKeyboardAwareScroll();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { session } = useAuth();
   const checkout = useCheckout();
@@ -298,17 +298,19 @@ export default function CheckoutOrderScreen() {
       <ScreenHeader title={isSeller && !isBuyer ? 'Sale details' : 'Order details'} onBack={() => router.back()} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
+          ref={keyboardScroll.scrollRef}
+          onScroll={keyboardScroll.onScroll}
+          scrollEventThrottle={16}
           contentContainerStyle={[
             styles.body,
             {
-              paddingBottom:
-                Spacing.xxxl + bottom + (Platform.OS === 'android' && keyboard.height > 0 ? keyboard.height : 0),
+              paddingBottom: Spacing.xxxl + Math.max(keyboardScroll.contentPaddingBottom, bottom),
             },
           ]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           showsVerticalScrollIndicator={false}
-          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
         >
           {!isConnected ? (
             <OfflineBanner title="No connection" message="Reconnect to update this order." />
@@ -474,7 +476,15 @@ export default function CheckoutOrderScreen() {
                       </Text>
                     </Pressable>
                   ))}
-                  <TextField label="Details (optional)" value={disputeNote} onChangeText={setDisputeNote} multiline />
+                  <View ref={keyboardScroll.setAnchor('dispute')} collapsable={false}>
+                    <TextField
+                      label="Details (optional)"
+                      value={disputeNote}
+                      onChangeText={setDisputeNote}
+                      multiline
+                      onFocus={() => keyboardScroll.onFieldFocus('dispute')}
+                    />
+                  </View>
                   <Button
                     label="Submit dispute"
                     loading={actionBusy}
@@ -498,6 +508,8 @@ export default function CheckoutOrderScreen() {
                   setComment={setComment}
                   busy={actionBusy}
                   disabled={!isConnected}
+                  onFocusComment={() => keyboardScroll.onFieldFocus('review')}
+                  commentAnchorRef={keyboardScroll.setAnchor('review')}
                   onSubmit={() => void runAction(() => checkout.submitReview(order.id, me, stars, comment))}
                 />
               ) : order.reviewed ? (
@@ -572,13 +584,16 @@ export default function CheckoutOrderScreen() {
                     <Text style={styles.cardHint}>Your reply: {order.dispute.sellerResponse}</Text>
                   ) : (
                     <>
-                      <TextField
-                        label="Respond"
-                        value={sellerReply}
-                        onChangeText={setSellerReply}
-                        multiline
-                        placeholder="Explain what happened"
-                      />
+                      <View ref={keyboardScroll.setAnchor('reply')} collapsable={false}>
+                        <TextField
+                          label="Respond"
+                          value={sellerReply}
+                          onChangeText={setSellerReply}
+                          multiline
+                          placeholder="Explain what happened"
+                          onFocus={() => keyboardScroll.onFieldFocus('reply')}
+                        />
+                      </View>
                       <Button
                         label="Respond"
                         loading={actionBusy}
@@ -624,12 +639,15 @@ export default function CheckoutOrderScreen() {
 
               {trackingEdit || !order.trackingNumber ? (
                 <View style={styles.card}>
-                  <TextField
-                    label="Tracking number"
-                    value={trackingInput}
-                    onChangeText={setTrackingInput}
-                    autoCapitalize="characters"
-                  />
+                  <View ref={keyboardScroll.setAnchor('tracking')} collapsable={false}>
+                    <TextField
+                      label="Tracking number"
+                      value={trackingInput}
+                      onChangeText={setTrackingInput}
+                      autoCapitalize="characters"
+                      onFocus={() => keyboardScroll.onFieldFocus('tracking')}
+                    />
+                  </View>
                   <Button
                     label={order.trackingNumber ? 'Save tracking' : 'Add tracking'}
                     loading={actionBusy}
@@ -790,6 +808,8 @@ function ReviewBox({
   busy,
   disabled,
   onSubmit,
+  onFocusComment,
+  commentAnchorRef,
 }: {
   stars: number;
   setStars: (n: number) => void;
@@ -798,6 +818,8 @@ function ReviewBox({
   busy: boolean;
   disabled: boolean;
   onSubmit: () => void;
+  onFocusComment?: () => void;
+  commentAnchorRef?: (node: View | null) => void;
 }) {
   return (
     <View style={styles.review}>
@@ -809,14 +831,17 @@ function ReviewBox({
           </Pressable>
         ))}
       </View>
-      <TextField
-        label="Comment"
-        placeholder="Optional — share your experience"
-        value={comment}
-        onChangeText={setComment}
-        multiline
-        style={styles.comment}
-      />
+      <View ref={commentAnchorRef} collapsable={false}>
+        <TextField
+          label="Comment"
+          placeholder="Optional — share your experience"
+          value={comment}
+          onChangeText={setComment}
+          multiline
+          style={styles.comment}
+          onFocus={onFocusComment}
+        />
+      </View>
       <Button label="Submit review" disabled={stars < 1 || disabled} loading={busy} onPress={onSubmit} />
     </View>
   );

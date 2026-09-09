@@ -7,6 +7,7 @@ import { TextField } from '@/components/ui/text-field';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import type { PreferredLoginMethod } from '@/data/types';
+import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { getDeviceLoginPreference } from '@/lib/login-preference';
@@ -14,13 +15,14 @@ import { remainingCooldownSec } from '@/lib/session-persistence';
 import { isValidEmail } from '@/lib/validation';
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 const RESEND_COOLDOWN_SEC = 30;
 
 export default function LoginScreen() {
   const router = useRouter();
   const { bottom } = useScreenInsets();
+  const keyboardScroll = useKeyboardAwareScroll();
   const { session, requestMagicLink, completeMagicLink, signInWithPassword, getLoginOptions, authResume, persistAuthResume, clearAuthResumeFlow } =
     useAuth();
   const { isConnected } = useNetworkStatus();
@@ -175,7 +177,18 @@ export default function LoginScreen() {
       <ScreenHeader title="" onBack={onBack} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         {stage === 'form' ? (
-          <View style={[styles.form, { paddingBottom: bottom + 16 }]}>
+          <ScrollView
+            ref={keyboardScroll.scrollRef}
+            onScroll={keyboardScroll.onScroll}
+            scrollEventThrottle={16}
+            contentContainerStyle={[
+              styles.form,
+              { paddingBottom: Math.max(keyboardScroll.contentPaddingBottom, bottom + 16) },
+            ]}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
+          >
             <Text style={styles.heading}>Welcome back</Text>
             <Text style={styles.lead}>
               {!ready
@@ -186,22 +199,28 @@ export default function LoginScreen() {
             </Text>
             {!isConnected ? <OfflineBanner message="Reconnect to sign in." /> : null}
 
-            <TextField
-              label="Email address"
-              autoCapitalize="none"
-              keyboardType="email-address"
-              value={email}
-              onChangeText={setEmail}
-              error={emailError}
-            />
-            {ready && !isMagic ? (
-              <PasswordField
-                label="Password"
-                value={password}
-                onChangeText={setPassword}
-                error={passwordError}
-                containerStyle={styles.passwordField}
+            <View ref={keyboardScroll.setAnchor('email')} collapsable={false}>
+              <TextField
+                label="Email address"
+                autoCapitalize="none"
+                keyboardType="email-address"
+                value={email}
+                onChangeText={setEmail}
+                error={emailError}
+                onFocus={() => keyboardScroll.onFieldFocus('email')}
               />
+            </View>
+            {ready && !isMagic ? (
+              <View ref={keyboardScroll.setAnchor('password')} collapsable={false}>
+                <PasswordField
+                  label="Password"
+                  value={password}
+                  onChangeText={setPassword}
+                  error={passwordError}
+                  containerStyle={styles.passwordField}
+                  onFocus={() => keyboardScroll.onFieldFocus('password')}
+                />
+              </View>
             ) : null}
 
             {error ? (
@@ -231,7 +250,7 @@ export default function LoginScreen() {
                 Create an account
               </Text>
             </Text>
-          </View>
+          </ScrollView>
         ) : (
           <View style={styles.sent}>
             <View style={styles.sentCard}>
@@ -259,7 +278,7 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Palette.ivory },
   flex: { flex: 1 },
-  form: { paddingHorizontal: 24, flex: 1 },
+  form: { paddingHorizontal: 24, flexGrow: 1 },
   heading: {
     fontFamily: Typography.display,
     fontSize: 32,

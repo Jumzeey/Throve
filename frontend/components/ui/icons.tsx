@@ -94,6 +94,28 @@ export function HeartIcon({
   );
 }
 
+export function BookmarkIcon({
+  size = 15,
+  color = Palette.espresso,
+  strokeWidth = 1.7,
+  filled = false,
+}: IconProps & { filled?: boolean }) {
+  return (
+    <Svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill={filled ? color : 'none'}
+      stroke={color}
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <Path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+    </Svg>
+  );
+}
+
 export function MailIcon({ size = 26, color = Palette.plum, strokeWidth = 1.6 }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round">

@@ -17,6 +17,7 @@ import type { PreferredLoginMethod, PublicProfile, UserProfile } from '@/data/ty
 import { isValidDob, isValidEmail } from '@/lib/validation';
 import * as Linking from 'expo-linking';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AppState } from 'react-native';
 
 const DEACTIVATED_ERROR = 'This account has been deactivated.';
 
@@ -36,6 +37,7 @@ type SettingsPatch = {
   notifListings?: boolean;
   notifOrders?: boolean;
   notifPushEnabled?: boolean;
+  notifMessageTone?: 'default' | 'note' | 'chime' | 'soft' | 'none';
   preferredLoginMethod?: PreferredLoginMethod;
 };
 
@@ -61,7 +63,7 @@ type AuthContextValue = {
   session: UserProfile | null;
   /** Public seller cards keyed by username, seeded from the signed-in profile. */
   publicProfiles: Record<string, PublicProfile>;
-  ensurePublicProfile: (username: string) => Promise<PublicProfile>;
+  ensurePublicProfile: (username: string, opts?: { force?: boolean }) => Promise<PublicProfile>;
   upsertPublicProfile: (profile: PublicProfile) => void;
   /** In-progress email OTP / magic-link flow restored after the OS kills the app. */
   authResume: AuthResume | null;
@@ -101,12 +103,16 @@ type AuthContextValue = {
   refreshSession: () => Promise<UserProfile | null>;
 };
 
-function toPublicProfile(profile: Pick<UserProfile, 'username' | 'bio' | 'location' | 'photoUri'>): PublicProfile {
+function toPublicProfile(
+  profile: Pick<UserProfile, 'userId' | 'username' | 'bio' | 'location' | 'photoUri' | 'lastSeenAt'>,
+): PublicProfile {
   return {
     username: profile.username,
+    userId: profile.userId,
     bio: profile.bio,
     location: profile.location,
     photoUri: profile.photoUri,
+    lastSeenAt: profile.lastSeenAt,
   };
 }
 
@@ -200,7 +206,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       existing.photoUri === profile.photoUri &&
       existing.followerCount === profile.followerCount &&
       existing.followingCount === profile.followingCount &&
-      existing.isFollowing === profile.isFollowing
+      existing.isFollowing === profile.isFollowing &&
+      existing.userId === profile.userId &&
+      existing.lastSeenAt === profile.lastSeenAt
     ) {
       return;
     }
@@ -300,16 +308,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [applySession, clearAuthResumeFlow, rememberPublicProfile]);
 
   const ensurePublicProfile = useCallback(
-    async (username: string) => {
+    async (username: string, opts?: { force?: boolean }) => {
       const me = sessionRef.current;
-      if (me?.username === username) {
+      if (me?.username === username && !opts?.force) {
         const card = toPublicProfile(me);
         rememberPublicProfile(card);
         return card;
       }
       const cached = publicProfilesRef.current[username];
       // Refresh when we only have a stub without a photo — discovery cards need real avatars.
-      if (cached && cached.followerCount !== undefined && cached.photoUri) return cached;
+      if (!opts?.force && cached && cached.followerCount !== undefined && cached.photoUri) return cached;
       const inflight = publicProfileInflight.current[username];
       if (inflight) return inflight;
 
@@ -317,12 +325,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const profile = await apiFetch<PublicProfile>(`/profiles/${encodeURIComponent(username)}/public`);
         const card: PublicProfile = {
           username,
+          userId: profile.userId,
           bio: profile.bio ?? '',
           location: profile.location ?? '',
           photoUri: profile.photoUri,
           followerCount: profile.followerCount ?? 0,
           followingCount: profile.followingCount ?? 0,
           isFollowing: Boolean(profile.isFollowing),
+          lastSeenAt: profile.lastSeenAt ?? null,
         };
         rememberPublicProfile(card);
         return card;
@@ -728,6 +738,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshSession = useCallback(async () => {
     return hydrateProfile({ force: true });
   }, [hydrateProfile]);
+
+  useEffect(() => {
+    if (!isReady || !session?.userId) return;
+    const beat = () => {
+      void apiFetch<{ lastSeenAt?: number }>('/profiles/me/heartbeat', { method: 'POST' })
+        .then((payload) => {
+          const me = sessionRef.current;
+          if (!me) return;
+          rememberPublicProfile({
+            ...toPublicProfile(me),
+            lastSeenAt: payload.lastSeenAt ?? Date.now(),
+          });
+        })
+        .catch(() => undefined);
+    };
+    beat();
+    const timer = setInterval(beat, 25_000);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') beat();
+    });
+    return () => {
+      clearInterval(timer);
+      sub.remove();
+    };
+  }, [isReady, rememberPublicProfile, session?.userId]);
 
   const value = useMemo(
     () => ({

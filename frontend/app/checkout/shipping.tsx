@@ -13,6 +13,7 @@ import { useLive } from '@/context/live-context';
 import { useListings } from '@/context/listings-context';
 import { matchNigeriaState, NIGERIA_STATES } from '@/data/nigeria-states';
 import { DEFAULT_COUNTRY_ISO } from '@/data/country-codes';
+import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { formatPhoneE164, isValidPhone, parseStoredPhone } from '@/lib/phone';
 import { Redirect, useRouter } from 'expo-router';
@@ -129,6 +130,7 @@ export default function ShippingDetailsScreen() {
   const { getListing } = useListings();
   const checkout = useCheckout();
   const { isConnected } = useNetworkStatus();
+  const keyboardScroll = useKeyboardAwareScroll();
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [saveError, setSaveError] = useState(false);
   const [continuing, setContinuing] = useState(false);
@@ -261,8 +263,14 @@ export default function ShippingDetailsScreen() {
 
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
-          contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl }]}
-          keyboardShouldPersistTaps="handled">
+          ref={keyboardScroll.scrollRef}
+          onScroll={keyboardScroll.onScroll}
+          scrollEventThrottle={16}
+          contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl + keyboardScroll.contentPaddingBottom }]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
+        >
           {!isConnected ? (
             <OfflineBanner title="No connection" message="Reconnect to continue checkout." />
           ) : null}
@@ -287,59 +295,67 @@ export default function ShippingDetailsScreen() {
           </Text>
 
           <View style={styles.fields}>
-            <TextField
-              label="Full name"
-              placeholder="Chioma Eze"
-              value={activeDraft.name}
-              autoComplete="name"
-              textContentType="name"
-              error={shownErrors.name}
-              onChangeText={(name) => {
-                checkout.updateDraft({ name });
-                setFieldErrors((current) => ({ ...current, name: undefined }));
-              }}
-              onBlur={() => {
-                const nameError = validateName(activeDraft.name);
-                if (nameError) setFieldErrors((current) => ({ ...current, name: nameError }));
-              }}
-            />
+            <View ref={keyboardScroll.setAnchor('name')} collapsable={false}>
+              <TextField
+                label="Full name"
+                placeholder="Chioma Eze"
+                value={activeDraft.name}
+                autoComplete="name"
+                textContentType="name"
+                error={shownErrors.name}
+                onFocus={() => keyboardScroll.onFieldFocus('name')}
+                onChangeText={(name) => {
+                  checkout.updateDraft({ name });
+                  setFieldErrors((current) => ({ ...current, name: undefined }));
+                }}
+                onBlur={() => {
+                  const nameError = validateName(activeDraft.name);
+                  if (nameError) setFieldErrors((current) => ({ ...current, name: nameError }));
+                }}
+              />
+            </View>
 
-            <PhoneField
-              label="Phone number"
-              countryIso={countryIso}
-              nationalNumber={nationalNumber}
-              error={shownErrors.phone}
-              onCountryChange={(iso) => {
-                setCountryIso(iso);
-                setFieldErrors((current) => ({ ...current, phone: undefined }));
-              }}
-              onNumberChange={(value) => {
-                setNationalNumber(value);
-                setFieldErrors((current) => ({ ...current, phone: undefined }));
-              }}
-              onBlur={() => {
-                if (!isValidPhone(countryIso, nationalNumber)) {
-                  setFieldErrors((current) => ({
-                    ...current,
-                    phone: 'Enter a valid phone number so the rider can reach you.',
-                  }));
-                }
-              }}
-            />
+            <View ref={keyboardScroll.setAnchor('phone')} collapsable={false}>
+              <PhoneField
+                label="Phone number"
+                countryIso={countryIso}
+                nationalNumber={nationalNumber}
+                error={shownErrors.phone}
+                onFocus={() => keyboardScroll.onFieldFocus('phone')}
+                onCountryChange={(iso) => {
+                  setCountryIso(iso);
+                  setFieldErrors((current) => ({ ...current, phone: undefined }));
+                }}
+                onNumberChange={(value) => {
+                  setNationalNumber(value);
+                  setFieldErrors((current) => ({ ...current, phone: undefined }));
+                }}
+                onBlur={() => {
+                  if (!isValidPhone(countryIso, nationalNumber)) {
+                    setFieldErrors((current) => ({
+                      ...current,
+                      phone: 'Enter a valid phone number so the rider can reach you.',
+                    }));
+                  }
+                }}
+              />
+            </View>
             <Text style={styles.hint}>Used to help coordinate delivery.</Text>
 
-            <LocationField
-              label="Delivery address"
-              mode="address"
-              placeholder="Search for a place"
-              value={
-                activeDraft.address
-                  ? [activeDraft.address, activeDraft.city, activeDraft.state].filter(Boolean).join(', ')
-                  : ''
-              }
-              error={shownErrors.address}
-              hint="Search a Nigerian delivery address. City and state fill in when available."
-              onSelect={(place) => {
+            <View ref={keyboardScroll.setAnchor('address')} collapsable={false}>
+              <LocationField
+                label="Delivery address"
+                mode="address"
+                placeholder="Search for a place"
+                value={
+                  activeDraft.address
+                    ? [activeDraft.address, activeDraft.city, activeDraft.state].filter(Boolean).join(', ')
+                    : ''
+                }
+                error={shownErrors.address}
+                hint="Search a Nigerian delivery address. City and state fill in when available."
+                onFocus={() => keyboardScroll.onFieldFocus('address')}
+                onSelect={(place) => {
                 checkout.updateDraft({
                   address: place.addressLine || place.formattedAddress,
                   city: place.city || place.label.split(',')[0]?.trim() || '',
@@ -353,14 +369,16 @@ export default function ShippingDetailsScreen() {
                 }));
               }}
             />
+            </View>
 
-            <View style={styles.row}>
+            <View ref={keyboardScroll.setAnchor('city')} collapsable={false} style={styles.row}>
               <View style={styles.half}>
                 <TextField
                   label="City / area"
                   placeholder="e.g. Ikeja"
                   value={activeDraft.city}
                   error={shownErrors.city}
+                  onFocus={() => keyboardScroll.onFieldFocus('city')}
                   onChangeText={(city) => {
                     checkout.updateDraft({ city });
                     setFieldErrors((current) => ({ ...current, city: undefined }));
@@ -382,14 +400,17 @@ export default function ShippingDetailsScreen() {
               </View>
             </View>
 
-            <TextField
-              label="Delivery note (optional)"
-              placeholder="Landmark or gate instructions."
-              value={activeDraft.deliveryNote}
-              multiline
-              style={styles.noteInput}
-              onChangeText={(deliveryNote) => checkout.updateDraft({ deliveryNote })}
-            />
+            <View ref={keyboardScroll.setAnchor('note')} collapsable={false}>
+              <TextField
+                label="Delivery note (optional)"
+                placeholder="Landmark or gate instructions."
+                value={activeDraft.deliveryNote}
+                multiline
+                style={styles.noteInput}
+                onFocus={() => keyboardScroll.onFieldFocus('note')}
+                onChangeText={(deliveryNote) => checkout.updateDraft({ deliveryNote })}
+              />
+            </View>
           </View>
 
           <Button

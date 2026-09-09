@@ -16,6 +16,12 @@ export type NotifyUserInput = {
   skipPush?: boolean;
 };
 
+function messageTone(value: unknown) {
+  const raw = String(value ?? 'default');
+  if (raw === 'note' || raw === 'chime' || raw === 'soft' || raw === 'none') return raw;
+  return 'default' as const;
+}
+
 /** In-app row + optional email + Expo push. Never throws. */
 export async function notifyUser(input: NotifyUserInput): Promise<void> {
   try {
@@ -23,7 +29,7 @@ export async function notifyUser(input: NotifyUserInput): Promise<void> {
     const { data: profile, error: profileError } = await admin
       .from('profiles')
       .select(
-        'id, notif_offers, notif_messages, notif_live, notif_listings, notif_orders, notif_push_enabled, deactivated',
+        'id, notif_offers, notif_messages, notif_live, notif_listings, notif_orders, notif_push_enabled, notif_message_tone, deactivated',
       )
       .eq('id', input.userId)
       .maybeSingle();
@@ -71,10 +77,15 @@ export async function notifyUser(input: NotifyUserInput): Promise<void> {
     }
 
     if (!input.skipPush && profile.notif_push_enabled !== false) {
+      const tone = messageTone(profile.notif_message_tone);
       await sendExpoPush({
         userId: input.userId,
         title: input.title,
         body: input.body,
+        channelId:
+          input.category === 'live' ? 'live' : input.category === 'message' ? `messages-${tone}` : 'default',
+        sound:
+          input.category === 'message' ? (tone === 'none' ? null : tone === 'default' ? 'default' : tone) : 'default',
         data: {
           type: input.type,
           deepLink: input.deepLink ?? '',

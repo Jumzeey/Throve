@@ -62,6 +62,46 @@ async function loadProducts(supabase: ReturnType<typeof createSupabaseClient>, s
   return (data ?? []).map((row: DbRow) => mapLiveStreamProduct(row, listingsById.get(String(row.listing_id))));
 }
 
+async function mapSessionRows(
+  supabase: ReturnType<typeof createSupabaseClient>,
+  rows: DbRow[],
+) {
+  const hostIds = rows.map((row) => row.host_id as string);
+  const { data: hosts, error: hostError } = await supabase
+    .from('profiles')
+    .select('id, username, photo_url')
+    .in('id', hostIds.length ? hostIds : ['00000000-0000-0000-0000-000000000000']);
+  if (hostError) throw hostError;
+
+  const hostMap = new Map(
+    (hosts ?? []).map((row) => [
+      row.id as string,
+      {
+        username: row.username as string,
+        photoUrl: row.photo_url && String(row.photo_url).startsWith('http') ? String(row.photo_url) : null,
+      },
+    ]),
+  );
+
+  return Promise.all(
+    rows.map(async (row) => {
+      const host = hostMap.get(row.host_id as string);
+      const products = await loadProducts(supabase, String(row.id));
+      return mapLiveSession(
+        row,
+        host?.username ?? 'unknown',
+        products,
+        await listModeratorUsernames(String(row.id)),
+        host?.photoUrl,
+      );
+    }),
+  );
+}
+
+function mapRowsError(err: unknown) {
+  return { message: err instanceof Error ? err.message : 'Request failed' };
+}
+
 function rpcErrorMessage(error: { message?: string; details?: string; hint?: string } | null) {
   const raw = `${error?.message ?? ''} ${error?.details ?? ''} ${error?.hint ?? ''}`;
   if (raw.includes('OUT_OF_STOCK')) return { status: 409, message: 'Out of stock', code: 'OUT_OF_STOCK' };
@@ -121,6 +161,61 @@ router.post('/host-access/grant', requireAuth, async (req, res) => {
   return res.json({ ok: true, username: target.username });
 });
 
+router.get('/saved/me', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const { data: saves, error: saveError } = await supabase
+    .from('saved_lives')
+    .select('session_id, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+  if (saveError) return handleSupabaseError(res, saveError);
+
+  const ids = (saves ?? []).map((row) => String(row.session_id));
+  if (!ids.length) return res.json([]);
+
+  const { data, error } = await supabase.from('live_sessions').select('*').in('id', ids);
+  if (error) return handleSupabaseError(res, error);
+
+  let sessions;
+  try {
+    sessions = await mapSessionRows(supabase, (data ?? []) as DbRow[]);
+  } catch (err) {
+    return handleSupabaseError(res, mapRowsError(err));
+  }
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  return res.json(ids.map((id) => byId.get(id)).filter(Boolean));
+});
+
+router.post('/sessions/:id/save', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const { data: session, error } = await supabase
+    .from('live_sessions')
+    .select('id, status')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  if (error) return handleSupabaseError(res, error);
+  if (!session) return sendError(res, 404, 'Live not found');
+  if (session.status === 'ended') return sendError(res, 400, 'This live has ended');
+
+  const { error: saveError } = await supabase.from('saved_lives').upsert(
+    { user_id: userId, session_id: req.params.id },
+    { onConflict: 'user_id,session_id' },
+  );
+  if (saveError) return handleSupabaseError(res, saveError);
+  return res.json({ ok: true, saved: true });
+});
+
+router.delete('/sessions/:id/save', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const { error } = await supabase
+    .from('saved_lives')
+    .delete()
+    .eq('user_id', userId)
+    .eq('session_id', req.params.id);
+  if (error) return handleSupabaseError(res, error);
+  return res.json({ ok: true, saved: false });
+});
+
 router.get('/sessions', optionalAuth, async (req, res) => {
   const supabase = publicClient(req as AuthedRequest);
   const recentEndedCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -132,36 +227,12 @@ router.get('/sessions', optionalAuth, async (req, res) => {
     .order('created_at', { ascending: false });
   if (error) return handleSupabaseError(res, error);
 
-  const hostIds = (data ?? []).map((row: DbRow) => row.host_id as string);
-  const { data: hosts, error: hostError } = await supabase
-    .from('profiles')
-    .select('id, username, photo_url')
-    .in('id', hostIds.length ? hostIds : ['00000000-0000-0000-0000-000000000000']);
-  if (hostError) return handleSupabaseError(res, hostError);
-
-  const hostMap = new Map(
-    (hosts ?? []).map((row) => [
-      row.id as string,
-      {
-        username: row.username as string,
-        photoUrl: row.photo_url && String(row.photo_url).startsWith('http') ? String(row.photo_url) : null,
-      },
-    ]),
-  );
-
-  const sessions = await Promise.all(
-    (data ?? []).map(async (row: DbRow) => {
-      const host = hostMap.get(row.host_id as string);
-      const products = await loadProducts(supabase, String(row.id));
-      return mapLiveSession(
-        row,
-        host?.username ?? 'unknown',
-        products,
-        await listModeratorUsernames(String(row.id)),
-        host?.photoUrl,
-      );
-    }),
-  );
+  let sessions;
+  try {
+    sessions = await mapSessionRows(supabase, (data ?? []) as DbRow[]);
+  } catch (err) {
+    return handleSupabaseError(res, mapRowsError(err));
+  }
 
   const liveNow = sessions
     .filter((s) => s.status === 'live')

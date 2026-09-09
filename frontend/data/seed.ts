@@ -407,6 +407,7 @@ export const DEMO_USER: UserProfile = {
   notifListings: true,
   notifOrders: true,
   notifPushEnabled: true,
+  notifMessageTone: 'default',
   preferredLoginMethod: 'password',
   hasPassword: true,
 };

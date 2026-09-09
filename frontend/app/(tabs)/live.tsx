@@ -1,7 +1,7 @@
 import { AppImage } from '@/components/ui/app-image';
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
-import { CalendarIcon, EyeIcon, ImagePlaceholderIcon, VideoIcon } from '@/components/ui/icons';
+import { BookmarkIcon, CalendarIcon, EyeIcon, ImagePlaceholderIcon, VideoIcon } from '@/components/ui/icons';
 import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
 import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { Palette, Radius, Typography } from '@/constants/theme';
@@ -37,7 +37,8 @@ export default function LiveDiscoveryScreen() {
   const { top, tabScrollBottom } = useScreenInsets();
   const router = useRouter();
   const { session, publicProfiles, ensurePublicProfile } = useAuth();
-  const { liveNow, upcoming, recentlyEnded, loading, loadError, refresh, goLiveNow } = useLive();
+  const { liveNow, upcoming, recentlyEnded, loading, loadError, refresh, goLiveNow, isLiveSaved, toggleSaveLive } =
+    useLive();
   const { isConnected } = useNetworkStatus();
   const [startingId, setStartingId] = useState<string | null>(null);
 
@@ -170,10 +171,18 @@ export default function LiveDiscoveryScreen() {
                     key={item.id}
                     session={item}
                     isHost={isHost}
+                    saved={isLiveSaved(item.id)}
                     starting={startingId === item.id}
                     onPress={() =>
                       router.push({ pathname: '/seller/[username]', params: { username: item.host } })
                     }
+                    onSave={() => {
+                      if (!session) {
+                        router.push('/(auth)/welcome');
+                        return;
+                      }
+                      void toggleSaveLive(item.id);
+                    }}
                     onGoLive={
                       isHost
                         ? () => {
@@ -320,12 +329,16 @@ function CompactLiveCard({ session, onPress }: { session: LiveSession; onPress: 
 function UpcomingRow({
   session,
   onPress,
+  onSave,
+  saved,
   isHost,
   onGoLive,
   starting,
 }: {
   session: LiveSession;
   onPress: () => void;
+  onSave: () => void;
+  saved: boolean;
   isHost?: boolean;
   onGoLive?: () => void;
   starting?: boolean;
@@ -364,6 +377,18 @@ function UpcomingRow({
           </Pressable>
         ) : null}
       </View>
+      <Pressable
+        onPress={(event) => {
+          event.stopPropagation();
+          onSave();
+        }}
+        style={styles.heartBtn}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={saved ? 'Remove bookmark' : 'Bookmark this live'}
+      >
+        <BookmarkIcon size={15} filled={saved} color={saved ? Palette.blush : Palette.ivory} />
+      </Pressable>
     </Pressable>
   );
 }
@@ -742,6 +767,14 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
     borderTopWidth: 1,
     borderTopColor: IVORY_12,
+  },
+  heartBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,247,240,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   upcomingThumb: {
     width: 52,

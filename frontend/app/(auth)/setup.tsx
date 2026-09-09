@@ -8,13 +8,13 @@ import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
 import { Palette, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import { useKeyboardBottomInset } from '@/hooks/use-keyboard-bottom-inset';
+import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { ensureMediaLibraryPermission } from '@/lib/listing-photos';
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -23,21 +23,14 @@ import {
   StyleSheet,
   Text,
   View,
-  type LayoutChangeEvent,
 } from 'react-native';
-
-type FieldKey = 'username' | 'bio' | 'location';
 
 export default function SetupScreen() {
   const router = useRouter();
   const { bottom } = useScreenInsets();
-  const keyboardBottom = useKeyboardBottomInset();
+  const keyboardScroll = useKeyboardAwareScroll();
   const { session, completeSetup, setProfilePhoto, logout } = useAuth();
   const { isConnected } = useNetworkStatus();
-  const scrollRef = useRef<ScrollView>(null);
-  const focusedField = useRef<FieldKey | null>(null);
-  const fieldsOriginY = useRef(0);
-  const fieldOffsets = useRef<Record<FieldKey, number>>({ username: 0, bio: 0, location: 0 });
   const [username, setUsername] = useState(session?.username ?? '');
   const [bio, setBio] = useState(session?.bio ?? '');
   const [location, setLocation] = useState(session?.location ?? '');
@@ -46,20 +39,6 @@ export default function SetupScreen() {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saved, setSaved] = useState(false);
-
-  const scrollFocusedIntoView = useCallback(() => {
-    const key = focusedField.current;
-    if (!key) return;
-    const y = fieldOffsets.current[key];
-    // Keep a little breathing room above the keyboard / focused field.
-    scrollRef.current?.scrollTo({ y: Math.max(0, y - 20), animated: true });
-  }, []);
-
-  useEffect(() => {
-    if (keyboardBottom <= 0) return;
-    const timer = setTimeout(scrollFocusedIntoView, 60);
-    return () => clearTimeout(timer);
-  }, [keyboardBottom, scrollFocusedIntoView]);
 
   if (!session) return <Redirect href="/(auth)/welcome" />;
   if (session.setupComplete && !saved) return <Redirect href="/(tabs)" />;
@@ -110,20 +89,7 @@ export default function SetupScreen() {
     router.replace('/(auth)/welcome');
   }
 
-  function onFieldLayout(key: FieldKey) {
-    return (event: LayoutChangeEvent) => {
-      fieldOffsets.current[key] = fieldsOriginY.current + event.nativeEvent.layout.y;
-    };
-  }
-
-  function onFieldFocus(key: FieldKey) {
-    focusedField.current = key;
-    // First attempt immediately; keyboard show effect will refine once height is known.
-    setTimeout(scrollFocusedIntoView, 50);
-    setTimeout(scrollFocusedIntoView, 280);
-  }
-
-  const bottomPad = Math.max(keyboardBottom, bottom) + (keyboardBottom > 0 ? 24 : 40);
+  const bottomPad = Math.max(keyboardScroll.contentPaddingBottom, bottom + 40);
 
   return (
     <View style={styles.screen}>
@@ -135,12 +101,14 @@ export default function SetupScreen() {
       >
         {!saved ? (
           <ScrollView
-            ref={scrollRef}
+            ref={keyboardScroll.scrollRef}
+            onScroll={keyboardScroll.onScroll}
+            scrollEventThrottle={16}
             contentContainerStyle={[styles.form, { paddingBottom: bottomPad }]}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
             showsVerticalScrollIndicator={false}
-            automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+            automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
           >
             <Text style={styles.heading}>Set up your{'\n'}profile</Text>
             <Text style={styles.lead}>Add a photo and a few details so buyers and sellers know who you are.</Text>
@@ -160,22 +128,17 @@ export default function SetupScreen() {
                 <ProgressBar progress={0.74} width={120} />
               </View>
             ) : null}
-            <View
-              style={styles.fields}
-              onLayout={(event) => {
-                fieldsOriginY.current = event.nativeEvent.layout.y;
-              }}
-            >
-              <View onLayout={onFieldLayout('username')}>
+            <View style={styles.fields}>
+              <View ref={keyboardScroll.setAnchor('username')} collapsable={false}>
                 <TextField
                   label="Username"
                   autoCapitalize="none"
                   value={username}
                   onChangeText={setUsername}
-                  onFocus={() => onFieldFocus('username')}
+                  onFocus={() => keyboardScroll.onFieldFocus('username')}
                 />
               </View>
-              <View onLayout={onFieldLayout('bio')}>
+              <View ref={keyboardScroll.setAnchor('bio')} collapsable={false}>
                 <TextField
                   label="Bio"
                   placeholder="A line about your style"
@@ -183,16 +146,16 @@ export default function SetupScreen() {
                   onChangeText={setBio}
                   multiline
                   style={styles.bio}
-                  onFocus={() => onFieldFocus('bio')}
+                  onFocus={() => keyboardScroll.onFieldFocus('bio')}
                 />
               </View>
-              <View onLayout={onFieldLayout('location')}>
+              <View ref={keyboardScroll.setAnchor('location')} collapsable={false}>
                 <LocationField
                   label="Location"
                   placeholder="Search for a place"
                   value={location}
                   hint="Search or type your city or area."
-                  onFocus={() => onFieldFocus('location')}
+                  onFocus={() => keyboardScroll.onFieldFocus('location')}
                   onSelect={(place) => setLocation(place.label || place.formattedAddress)}
                 />
               </View>

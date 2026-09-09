@@ -1,5 +1,6 @@
 import { apiFetch } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
+import { syncSavedLiveReminders } from '@/lib/saved-live-reminders';
 import { useAuth } from '@/context/auth-context';
 import type {
   Listing,
@@ -160,6 +161,10 @@ type LiveContextValue = {
   removeSessionModerator: (sessionId: string, username: string) => Promise<void>;
   isModerator: (sessionId: string | undefined, username: string) => boolean;
   getWatchers: (sessionId: string) => LiveWatcher[];
+  savedLives: LiveSession[];
+  isLiveSaved: (sessionId: string) => boolean;
+  toggleSaveLive: (sessionId: string) => Promise<void>;
+  refreshSavedLives: () => Promise<void>;
 };
 
 const LiveContext = createContext<LiveContextValue | null>(null);
@@ -208,6 +213,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [prepareModerators, setPrepareModerators] = useState<string[]>([]);
   const [moderatorsBySession, setModeratorsBySession] = useState<Record<string, string[]>>({});
   const [watchersBySession, setWatchersBySession] = useState<Record<string, LiveWatcher[]>>({});
+  const [savedLives, setSavedLives] = useState<LiveSession[]>([]);
   const channelsRef = useRef<Record<string, RealtimeChannel>>({});
   const authRef = useRef(authSession);
   const sessionsRef = useRef(sessions);
@@ -259,6 +265,32 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const liveNow = useMemo(() => sessions.filter((session) => session.status === 'live'), [sessions]);
   const upcoming = useMemo(() => sessions.filter((session) => session.status === 'upcoming'), [sessions]);
   const recentlyEnded = useMemo(() => sessions.filter((session) => session.status === 'ended'), [sessions]);
+
+  const refreshSavedLives = useCallback(async () => {
+    if (!authSession) {
+      setSavedLives([]);
+      return;
+    }
+    try {
+      const rows = await apiFetch<LiveSession[]>('/live/saved/me');
+      setSavedLives(rows);
+    } catch {
+      /* keep last known saved lives */
+    }
+  }, [authSession]);
+
+  useEffect(() => {
+    if (!isReady) return;
+    void refreshSavedLives();
+  }, [isReady, refreshSavedLives]);
+
+  useEffect(() => {
+    if (!authSession || authSession.notifLive === false || authSession.notifPushEnabled === false) {
+      void syncSavedLiveReminders([]);
+      return;
+    }
+    void syncSavedLiveReminders(savedLives);
+  }, [authSession, savedLives]);
 
   const getSession = useCallback((id: string) => sessions.find((session) => session.id === id), [sessions]);
 
@@ -775,6 +807,36 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     [moderatorsBySession, prepareModerators],
   );
 
+  const isLiveSaved = useCallback(
+    (sessionId: string) => savedLives.some((session) => session.id === sessionId),
+    [savedLives],
+  );
+
+  const toggleSaveLive = useCallback(
+    async (sessionId: string) => {
+      if (!authSession) throw new Error('Sign in to save lives.');
+      const currentlySaved = savedLives.some((session) => session.id === sessionId);
+      setSavedLives((current) => {
+        if (currentlySaved) return current.filter((session) => session.id !== sessionId);
+        const session =
+          sessions.find((item) => item.id === sessionId) ?? current.find((item) => item.id === sessionId);
+        if (!session || current.some((item) => item.id === sessionId)) return current;
+        return [session, ...current];
+      });
+      try {
+        if (currentlySaved) {
+          await apiFetch(`/live/sessions/${sessionId}/save`, { method: 'DELETE' });
+        } else {
+          await apiFetch(`/live/sessions/${sessionId}/save`, { method: 'POST' });
+        }
+      } catch {
+        await refreshSavedLives();
+        throw new Error('Could not update saved live.');
+      }
+    },
+    [authSession, refreshSavedLives, savedLives, sessions],
+  );
+
   const value = useMemo(
     () => ({
       sessions,
@@ -822,6 +884,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       removeSessionModerator,
       isModerator,
       getWatchers,
+      savedLives,
+      isLiveSaved,
+      toggleSaveLive,
+      refreshSavedLives,
     }),
     [
       activeBroadcastId,
@@ -869,6 +935,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       removeSessionModerator,
       isModerator,
       getWatchers,
+      savedLives,
+      isLiveSaved,
+      toggleSaveLive,
+      refreshSavedLives,
     ],
   );
 

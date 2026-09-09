@@ -22,10 +22,10 @@ import type { Department } from '@/data/types';
 import { apiUpload } from '@/lib/api';
 import { formatLiveSchedule, formatNaira } from '@/lib/format';
 import { listingPhotoFormPart, pickListingPhotos } from '@/lib/listing-photos';
-import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
+import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -69,10 +69,22 @@ function permissionStatus(
   return 'needed';
 }
 
+function applyDatePart(base: Date, datePart: Date) {
+  const next = new Date(base);
+  next.setFullYear(datePart.getFullYear(), datePart.getMonth(), datePart.getDate());
+  return next;
+}
+
+function applyTimePart(base: Date, timePart: Date) {
+  const next = new Date(base);
+  next.setHours(timePart.getHours(), timePart.getMinutes(), 0, 0);
+  return next;
+}
+
 export default function PrepareLiveScreen() {
   const router = useRouter();
   const { sheetBottom } = useScreenInsets();
-  const keyboard = useKeyboardInset();
+  const keyboardScroll = useKeyboardAwareScroll();
   const { isConnected } = useNetworkStatus();
   const { session } = useAuth();
   const { listingsForSeller } = useListings();
@@ -92,13 +104,12 @@ export default function PrepareLiveScreen() {
     next.setHours(next.getHours() + 2, 0, 0, 0);
     return next;
   });
-  const [showPicker, setShowPicker] = useState(false);
+  const [pickerStep, setPickerStep] = useState<'datetime' | 'date' | 'time' | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [modsOpen, setModsOpen] = useState(false);
   const productsRef = useRef<View>(null);
-  const scrollRef = useRef<ScrollView>(null);
 
   const products = useMemo(() => {
     if (!session) return [];
@@ -108,6 +119,42 @@ export default function PrepareLiveScreen() {
   const cameraStatus = permissionStatus(cameraPermission);
   const micStatus = permissionStatus(micPermission);
   const categoryChip = CATEGORY_CHIPS.find((chip) => chip.key === categoryKey) ?? CATEGORY_CHIPS[0];
+  const androidPickerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (androidPickerTimer.current) clearTimeout(androidPickerTimer.current);
+    };
+  }, []);
+
+  function openSchedulePicker() {
+    setScheduleMode(true);
+    setPickerStep(Platform.OS === 'ios' ? 'datetime' : 'date');
+  }
+
+  function onSchedulePickerChange(event: DateTimePickerEvent, date?: Date) {
+    if (Platform.OS === 'ios') {
+      if (date) setScheduledDate(date);
+      return;
+    }
+
+    if (event.type === 'dismissed') {
+      setPickerStep(null);
+      return;
+    }
+
+    const selected = date ?? scheduledDate;
+    if (pickerStep === 'date') {
+      setScheduledDate((current) => applyDatePart(current, selected));
+      setPickerStep(null);
+      if (androidPickerTimer.current) clearTimeout(androidPickerTimer.current);
+      androidPickerTimer.current = setTimeout(() => setPickerStep('time'), 250);
+      return;
+    }
+
+    setScheduledDate((current) => applyTimePart(current, selected));
+    setPickerStep(null);
+  }
 
   const missing: string[] = [];
   if (!title.trim()) missing.push('A live title');
@@ -244,17 +291,18 @@ export default function PrepareLiveScreen() {
       />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
-          ref={scrollRef}
+          ref={keyboardScroll.scrollRef}
+          onScroll={keyboardScroll.onScroll}
+          scrollEventThrottle={16}
           contentContainerStyle={[
             styles.body,
             {
-              paddingBottom:
-                sheetBottom + (Platform.OS === 'android' && keyboard.height > 0 ? keyboard.height : 0) + 24,
+              paddingBottom: Math.max(keyboardScroll.contentPaddingBottom, sheetBottom + 24),
             },
           ]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
-          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
         >
           {!isConnected ? (
             <OfflineBanner
@@ -279,17 +327,20 @@ export default function PrepareLiveScreen() {
             </View>
           </Pressable>
 
-          <Text style={styles.sectionLabel}>Live title</Text>
-          <TextInput
-            placeholder="The Fashion Edit"
-            placeholderTextColor={IVORY_50}
-            value={title}
-            onChangeText={(value) => {
-              setTitle(value);
-              setError(null);
-            }}
-            style={styles.input}
-          />
+          <View ref={keyboardScroll.setAnchor('title')} collapsable={false}>
+            <Text style={styles.sectionLabel}>Live title</Text>
+            <TextInput
+              placeholder="The Fashion Edit"
+              placeholderTextColor={IVORY_50}
+              value={title}
+              onChangeText={(value) => {
+                setTitle(value);
+                setError(null);
+              }}
+              onFocus={() => keyboardScroll.onFieldFocus('title')}
+              style={styles.input}
+            />
+          </View>
 
           <Text style={styles.sectionLabel}>Category</Text>
           <ScrollView
@@ -313,20 +364,24 @@ export default function PrepareLiveScreen() {
             })}
           </ScrollView>
 
-          <Text style={styles.sectionLabel}>Description · optional</Text>
-          <TextInput
-            placeholder="Bags and tailoring from this week's intake. Sizes S–L."
-            placeholderTextColor={IVORY_50}
-            value={description}
-            onChangeText={setDescription}
-            multiline
-            style={[styles.input, styles.textArea]}
-          />
+          <View ref={keyboardScroll.setAnchor('description')} collapsable={false}>
+            <Text style={styles.sectionLabel}>Description · optional</Text>
+            <TextInput
+              placeholder="Bags and tailoring from this week's intake. Sizes S–L."
+              placeholderTextColor={IVORY_50}
+              value={description}
+              onChangeText={setDescription}
+              multiline
+              textAlignVertical="top"
+              onFocus={() => keyboardScroll.onFieldFocus('description')}
+              style={[styles.input, styles.textArea]}
+            />
+          </View>
 
           <View ref={productsRef} style={styles.productsHeader}>
             <Text style={styles.sectionLabelInline}>Products in this live</Text>
             <Pressable
-              onPress={() => scrollRef.current?.scrollTo({ y: 420, animated: true })}
+              onPress={() => keyboardScroll.scrollRef.current?.scrollTo({ y: 420, animated: true })}
               hitSlop={8}
             >
               <Text style={styles.editLink}>Edit selection</Text>
@@ -365,16 +420,16 @@ export default function PrepareLiveScreen() {
           <Text style={[styles.sectionLabel, styles.whenLabel]}>When</Text>
           <View style={styles.whenRow}>
             <Pressable
-              onPress={() => setScheduleMode(false)}
+              onPress={() => {
+                setScheduleMode(false);
+                setPickerStep(null);
+              }}
               style={[styles.whenBtn, !scheduleMode && styles.whenBtnOn]}
             >
               <Text style={[styles.whenBtnLabel, !scheduleMode && styles.whenBtnLabelOn]}>Start when ready</Text>
             </Pressable>
             <Pressable
-              onPress={() => {
-                setScheduleMode(true);
-                setShowPicker(true);
-              }}
+              onPress={openSchedulePicker}
               style={[styles.whenBtn, scheduleMode && styles.whenBtnOn]}
             >
               <Text style={[styles.whenBtnLabel, scheduleMode && styles.whenBtnLabelOn]}>Schedule</Text>
@@ -382,7 +437,7 @@ export default function PrepareLiveScreen() {
           </View>
 
           {scheduleMode ? (
-            <Pressable onPress={() => setShowPicker(true)} style={styles.scheduledCard}>
+            <Pressable onPress={openSchedulePicker} style={styles.scheduledCard}>
               <CalendarIcon size={16} color={Palette.espresso} />
               <View style={styles.scheduledMeta}>
                 <Text style={styles.scheduledWhen}>{formatLiveSchedule(scheduledDate.toISOString())}</Text>
@@ -394,17 +449,14 @@ export default function PrepareLiveScreen() {
             </Pressable>
           ) : null}
 
-          {showPicker && scheduleMode ? (
+          {pickerStep ? (
             <DateTimePicker
               value={scheduledDate}
-              mode="datetime"
-              minimumDate={new Date()}
-              onChange={(_, date) => {
-                if (Platform.OS === 'android') setShowPicker(false);
-                if (date) setScheduledDate(date);
-              }}
+              mode={pickerStep === 'datetime' ? 'datetime' : pickerStep}
+              minimumDate={pickerStep === 'time' ? undefined : new Date()}
+              onChange={onSchedulePickerChange}
               display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              themeVariant="dark"
+              {...(Platform.OS === 'ios' ? { themeVariant: 'dark' as const } : {})}
             />
           ) : null}
 

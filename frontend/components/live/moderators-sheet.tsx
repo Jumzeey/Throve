@@ -3,6 +3,7 @@ import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { MAX_LIVE_MODERATORS } from '@/context/live-context';
+import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { searchProfiles, type ProfileSearchHit } from '@/lib/profile-search';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -78,6 +79,7 @@ export function ModeratorsSheet({
   onRemove,
 }: Props) {
   const { sheetBottom } = useScreenInsets();
+  const keyboard = useKeyboardInset();
   const { session } = useAuth();
   const [draft, setDraft] = useState('');
   const [formError, setFormError] = useState('');
@@ -242,7 +244,13 @@ export function ModeratorsSheet({
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <Pressable style={styles.overlay} onPress={onClose}>
-          <Pressable style={[styles.card, { paddingBottom: sheetBottom }]} onPress={() => undefined}>
+          <Pressable
+            style={[
+              styles.card,
+              { paddingBottom: keyboard.height > 0 ? keyboard.height + 12 : sheetBottom },
+            ]}
+            onPress={() => undefined}
+          >
             <View style={styles.grabber} />
             <View style={styles.header}>
               <Text style={styles.title}>{title}</Text>

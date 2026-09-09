@@ -69,6 +69,41 @@ export function followerLiveUpcomingEmail(input: {
   });
 }
 
+export function savedLiveDayOfEmail(input: {
+  sessionId: string;
+  hostUsername: string;
+  title: string;
+  startTimeLabel: string;
+}): EmailContent {
+  const link = deepLinks.live(input.sessionId);
+  return buildEmail({
+    subject: truncateSubject(`Today: ${input.title}`),
+    title: 'A saved live is today',
+    bodyHtml: `<strong style="color:#2B211F;">${escapeHtml(input.title)}</strong> with <strong style="color:#2B211F;">@${escapeHtml(input.hostUsername)}</strong> is today at ${escapeHtml(input.startTimeLabel)}.`,
+    bodyText: `${input.title} with @${input.hostUsername} is today at ${input.startTimeLabel}.`,
+    ctaLabel: 'Open live',
+    actionLink: link,
+    footnote: 'You’re getting this because you saved this live. Manage alerts in Settings.',
+  });
+}
+
+export function savedLiveTenMinEmail(input: {
+  sessionId: string;
+  hostUsername: string;
+  title: string;
+}): EmailContent {
+  const link = deepLinks.live(input.sessionId);
+  return buildEmail({
+    subject: truncateSubject(`${input.title} starts in 10 minutes`),
+    title: 'Starting in 10 minutes',
+    bodyHtml: `<strong style="color:#2B211F;">${escapeHtml(input.title)}</strong> with <strong style="color:#2B211F;">@${escapeHtml(input.hostUsername)}</strong> starts in 10 minutes.`,
+    bodyText: `${input.title} with @${input.hostUsername} starts in 10 minutes.`,
+    ctaLabel: 'Open live room',
+    actionLink: link,
+    footnote: 'You’re getting this because you saved this live. Manage alerts in Settings.',
+  });
+}
+
 export function liveModeratorAppointedEmail(input: {
   hostUsername: string;
   sessionId?: string;

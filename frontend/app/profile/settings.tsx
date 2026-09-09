@@ -9,6 +9,8 @@ import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
 import type { PreferredLoginMethod } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { MESSAGE_TONES, parseMessageTone, type MessageToneId } from '@/lib/message-tones';
+import { playMessageTone } from '@/lib/play-message-tone';
 import { getDeviceLoginPreference } from '@/lib/login-preference';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, useRouter } from 'expo-router';
@@ -39,6 +41,7 @@ export default function SettingsScreen() {
   const [notifListings, setNotifListings] = useState(true);
   const [notifOrders, setNotifOrders] = useState(true);
   const [notifPushEnabled, setNotifPushEnabled] = useState(true);
+  const [notifMessageTone, setNotifMessageTone] = useState<MessageToneId>('default');
 
   useEffect(() => {
     let cancelled = false;
@@ -63,6 +66,7 @@ export default function SettingsScreen() {
     setNotifListings(session.notifListings !== false);
     setNotifOrders(session.notifOrders !== false);
     setNotifPushEnabled(session.notifPushEnabled !== false);
+    setNotifMessageTone(parseMessageTone(session.notifMessageTone));
   }, [session]);
 
   useEffect(() => {
@@ -219,6 +223,24 @@ export default function SettingsScreen() {
     }
   }
 
+  async function selectTone(next: MessageToneId) {
+    if (!isConnected || busy || next === notifMessageTone) {
+      void playMessageTone(next);
+      return;
+    }
+    const prev = notifMessageTone;
+    setNotifMessageTone(next);
+    void playMessageTone(next);
+    setNotifPhase('working');
+    try {
+      await updateSettings({ notifMessageTone: next });
+      setNotifPhase('done');
+    } catch {
+      setNotifMessageTone(prev);
+      setNotifPhase('error');
+    }
+  }
+
   const switchTarget = pendingMethod ?? (isMagic ? 'password' : 'magic_link');
   const switchConfirmCopy =
     switchTarget === 'password'
@@ -294,6 +316,11 @@ export default function SettingsScreen() {
             <Text style={styles.linkLabel}>Edit profile</Text>
             <Ionicons name="chevron-forward" size={15} color={Palette.muted2} />
           </Pressable>
+          <View style={styles.toggleDivider} />
+          <Pressable style={styles.linkRow} onPress={() => router.push('/profile/saved-lives')}>
+            <Text style={styles.linkLabel}>Saved lives</Text>
+            <Ionicons name="chevron-forward" size={15} color={Palette.muted2} />
+          </Pressable>
         </Section>
 
         <Section label="Notifications">
@@ -307,15 +334,39 @@ export default function SettingsScreen() {
           <View style={styles.toggleDivider} />
           <NotifToggle
             title="Messages"
-            body="When you get a new chat message."
+            body="When you get a new chat message, including a sound while the app is open."
             value={notifMessages}
             disabled={!isConnected || busy}
             onValueChange={(next) => void toggleNotif('notifMessages', next)}
           />
+          {notifMessages ? (
+            <>
+              <View style={styles.toggleDivider} />
+              <View style={styles.toneBlock}>
+                <Text style={styles.toggleTitle}>Message tone</Text>
+                <Text style={styles.toggleBody}>Played for new chats, like WhatsApp or Slack.</Text>
+                <View style={styles.toneList}>
+                  {MESSAGE_TONES.map((tone) => {
+                    const selected = notifMessageTone === tone.id;
+                    return (
+                      <Pressable
+                        key={tone.id}
+                        disabled={!isConnected || busy}
+                        onPress={() => void selectTone(tone.id)}
+                        style={[styles.toneChip, selected && styles.toneChipOn]}
+                      >
+                        <Text style={[styles.toneChipLabel, selected && styles.toneChipLabelOn]}>{tone.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            </>
+          ) : null}
           <View style={styles.toggleDivider} />
           <NotifToggle
             title="Live"
-            body="When sellers you follow go live, claim holds, and moderator invites."
+            body="When sellers you follow go live, lives you saved are about to start, claim holds, and moderator invites."
             value={notifLive}
             disabled={!isConnected || busy}
             onValueChange={(next) => void toggleNotif('notifLive', next)}
@@ -634,6 +685,37 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontFamily: Typography.body,
     color: Palette.muted,
+  },
+  toneBlock: {
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  toneList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+  },
+  toneChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Palette.border,
+    backgroundColor: Palette.ivory,
+  },
+  toneChipOn: {
+    borderColor: Palette.plum,
+    backgroundColor: Palette.plum,
+  },
+  toneChipLabel: {
+    fontSize: 12.5,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.espresso,
+  },
+  toneChipLabelOn: {
+    color: Palette.ivory,
   },
   toggleDivider: {
     height: 1,

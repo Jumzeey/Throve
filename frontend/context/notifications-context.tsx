@@ -1,8 +1,10 @@
 import { apiFetch } from '@/lib/api';
+import { ensureLiveNotificationChannel } from '@/lib/saved-live-reminders';
 import { useAuth } from '@/context/auth-context';
 import type { AppNotification } from '@/data/types';
 import Constants from 'expo-constants';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useRouter } from 'expo-router';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Platform } from 'react-native';
 
 type NotificationsContextValue = {
@@ -15,32 +17,29 @@ type NotificationsContextValue = {
 
 const NotificationsContext = createContext<NotificationsContextValue | null>(null);
 
+function pushProjectId() {
+  const extra = Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined;
+  return Constants.easConfig?.projectId ?? extra?.eas?.projectId;
+}
+
+function pathFromPushData(data: Record<string, unknown> | undefined) {
+  const deepLink = String(data?.deepLink ?? '').replace(/^\//, '');
+  if (deepLink) return `/${deepLink}`;
+  const sessionId = String(data?.sessionId ?? '');
+  if (sessionId) return `/live/${sessionId}`;
+  return null;
+}
+
 async function registerPushToken() {
   if (Platform.OS === 'web') return;
   try {
     const Notifications = await import('expo-notifications');
-    Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-        shouldShowBanner: true,
-        shouldShowList: true,
-      }),
-    });
-    if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'Throve',
-        importance: Notifications.AndroidImportance.DEFAULT,
-      });
-    }
+    await ensureLiveNotificationChannel();
     const existing = await Notifications.getPermissionsAsync();
     const granted = existing.granted || (await Notifications.requestPermissionsAsync()).granted;
     if (!granted) return;
 
-    const projectId =
-      Constants.easConfig?.projectId ??
-      (Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined)?.eas?.projectId;
+    const projectId = pushProjectId();
     const tokenResponse = projectId
       ? await Notifications.getExpoPushTokenAsync({ projectId })
       : await Notifications.getExpoPushTokenAsync();
@@ -58,8 +57,10 @@ async function registerPushToken() {
 
 export function NotificationsProvider({ children }: { children: ReactNode }) {
   const { session, isReady } = useAuth();
+  const router = useRouter();
   const [items, setItems] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(false);
+  const handledResponse = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!session) {
@@ -88,11 +89,71 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const openFromPush = useCallback(
+    (data: Record<string, unknown> | undefined) => {
+      const path = pathFromPushData(data);
+      if (!path) return;
+      router.push(path as never);
+    },
+    [router],
+  );
+
+  useEffect(() => {
+    void ensureLiveNotificationChannel();
+  }, []);
+
   useEffect(() => {
     if (!isReady || !session) return;
     void refresh();
     void registerPushToken();
   }, [isReady, refresh, session]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    let received: { remove: () => void } | undefined;
+    let response: { remove: () => void } | undefined;
+    let cancelled = false;
+
+    void (async () => {
+      const Notifications = await import('expo-notifications');
+      if (cancelled) return;
+
+      received = Notifications.addNotificationReceivedListener(() => {
+        void refresh();
+      });
+      response = Notifications.addNotificationResponseReceivedListener((event) => {
+        const key = event.notification.request.identifier;
+        if (handledResponse.current === key) return;
+        handledResponse.current = key;
+        openFromPush(event.notification.request.content.data as Record<string, unknown>);
+        void Notifications.clearLastNotificationResponseAsync?.();
+        void refresh();
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      received?.remove();
+      response?.remove();
+    };
+  }, [openFromPush, refresh]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web' || !isReady || !session) return;
+    let cancelled = false;
+    void (async () => {
+      const Notifications = await import('expo-notifications');
+      const last = await Notifications.getLastNotificationResponseAsync();
+      const key = last?.notification.request.identifier;
+      if (cancelled || !last || !key || handledResponse.current === key) return;
+      handledResponse.current = key;
+      openFromPush(last.notification.request.content.data as Record<string, unknown>);
+      await Notifications.clearLastNotificationResponseAsync?.();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isReady, openFromPush, session]);
 
   const unreadCount = useMemo(() => items.filter((item) => !item.readAt).length, [items]);
 

@@ -10,7 +10,7 @@ import { TextField } from '@/components/ui/text-field';
 import { Palette, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { DEFAULT_COUNTRY_ISO } from '@/data/country-codes';
-import { useKeyboardBottomInset } from '@/hooks/use-keyboard-bottom-inset';
+import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { ApiError } from '@/lib/api';
@@ -18,7 +18,7 @@ import { ensureMediaLibraryPermission } from '@/lib/listing-photos';
 import { formatPhoneE164, isValidPhone, parseStoredPhone } from '@/lib/phone';
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   BackHandler,
   KeyboardAvoidingView,
@@ -35,8 +35,7 @@ type LeavePrompt = 'idle' | 'confirm';
 export default function EditProfileScreen() {
   const router = useRouter();
   const { bottom } = useScreenInsets();
-  const keyboardBottom = useKeyboardBottomInset();
-  const scrollRef = useRef<ScrollView>(null);
+  const keyboardScroll = useKeyboardAwareScroll();
   const { session, updateProfile, setProfilePhoto, isReady } = useAuth();
   const { isConnected } = useNetworkStatus();
 
@@ -86,14 +85,6 @@ export default function EditProfileScreen() {
   }, [baseline, hydrated]);
 
   useEffect(() => {
-    if (keyboardBottom <= 0) return;
-    const timer = setTimeout(() => {
-      scrollRef.current?.scrollToEnd({ animated: true });
-    }, 60);
-    return () => clearTimeout(timer);
-  }, [keyboardBottom]);
-
-  useEffect(() => {
     if (!uploading) {
       setUploadProgress(0.35);
       return;
@@ -134,15 +125,6 @@ export default function EditProfileScreen() {
     });
     return () => sub.remove();
   }, [dirty, saved, saving, uploading]);
-
-  function scrollFieldIntoView() {
-    setTimeout(() => {
-      scrollRef.current?.scrollToEnd({ animated: true });
-    }, 50);
-    setTimeout(() => {
-      scrollRef.current?.scrollToEnd({ animated: true });
-    }, 280);
-  }
 
   function requestLeave() {
     if (saving || uploading) return;
@@ -265,15 +247,17 @@ export default function EditProfileScreen() {
       <ScreenHeader title="Edit profile" onBack={requestLeave} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
-          ref={scrollRef}
+          ref={keyboardScroll.scrollRef}
+          onScroll={keyboardScroll.onScroll}
+          scrollEventThrottle={16}
           contentContainerStyle={[
             styles.body,
-            { paddingBottom: Spacing.xxxl + bottom + (keyboardBottom > 0 ? keyboardBottom : 0) },
+            { paddingBottom: Spacing.xxxl + Math.max(keyboardScroll.contentPaddingBottom, bottom) },
           ]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           showsVerticalScrollIndicator={false}
-          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}>
+          automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}>
           {!isConnected ? (
             <OfflineBanner title="No connection" message="Reconnect to save your changes." />
           ) : null}
@@ -343,64 +327,75 @@ export default function EditProfileScreen() {
           ) : null}
 
           <View style={styles.fields}>
-            <TextField
-              label="Display name"
-              value={name}
-              onChangeText={(value) => {
-                setName(value);
-                setSaved(false);
-              }}
-              onFocus={scrollFieldIntoView}
-            />
-            <TextField
-              label="Username"
-              autoCapitalize="none"
-              value={username}
-              error={usernameError}
-              onChangeText={(value) => {
-                setUsername(value);
-                setUsernameError(null);
-                setSaved(false);
-              }}
-              onFocus={scrollFieldIntoView}
-            />
-            <PhoneField
-              countryIso={countryIso}
-              nationalNumber={nationalNumber}
-              onCountryChange={(value) => {
-                setCountryIso(value);
-                setSaved(false);
-              }}
-              onNumberChange={(value) => {
-                setNationalNumber(value);
-                setPhoneError('');
-                setSaved(false);
-              }}
-              error={phoneError}
-            />
-            <TextField
-              label="Bio"
-              placeholder="A line about your style"
-              value={bio}
-              onChangeText={(value) => {
-                setBio(value);
-                setSaved(false);
-              }}
-              multiline
-              style={styles.bio}
-              onFocus={scrollFieldIntoView}
-            />
-            <LocationField
-              label="Location"
-              placeholder="Search for a place"
-              value={location}
-              hint="Search or type your city or area."
-              onFocus={scrollFieldIntoView}
-              onSelect={(place) => {
-                setLocation(place.label || place.formattedAddress);
-                setSaved(false);
-              }}
-            />
+            <View ref={keyboardScroll.setAnchor('name')} collapsable={false}>
+              <TextField
+                label="Display name"
+                value={name}
+                onChangeText={(value) => {
+                  setName(value);
+                  setSaved(false);
+                }}
+                onFocus={() => keyboardScroll.onFieldFocus('name')}
+              />
+            </View>
+            <View ref={keyboardScroll.setAnchor('username')} collapsable={false}>
+              <TextField
+                label="Username"
+                autoCapitalize="none"
+                value={username}
+                error={usernameError}
+                onChangeText={(value) => {
+                  setUsername(value);
+                  setUsernameError(null);
+                  setSaved(false);
+                }}
+                onFocus={() => keyboardScroll.onFieldFocus('username')}
+              />
+            </View>
+            <View ref={keyboardScroll.setAnchor('phone')} collapsable={false}>
+              <PhoneField
+                countryIso={countryIso}
+                nationalNumber={nationalNumber}
+                onCountryChange={(value) => {
+                  setCountryIso(value);
+                  setSaved(false);
+                }}
+                onNumberChange={(value) => {
+                  setNationalNumber(value);
+                  setPhoneError('');
+                  setSaved(false);
+                }}
+                error={phoneError}
+                onFocus={() => keyboardScroll.onFieldFocus('phone')}
+              />
+            </View>
+            <View ref={keyboardScroll.setAnchor('bio')} collapsable={false}>
+              <TextField
+                label="Bio"
+                placeholder="A line about your style"
+                value={bio}
+                onChangeText={(value) => {
+                  setBio(value);
+                  setSaved(false);
+                }}
+                multiline
+                style={styles.bio}
+                onFocus={() => keyboardScroll.onFieldFocus('bio')}
+              />
+            </View>
+            <View ref={keyboardScroll.setAnchor('location')} collapsable={false}>
+              <LocationField
+                label="Location"
+                placeholder="Search for a place"
+                value={location}
+                hint="Search or type your city or area."
+                onFocus={() => keyboardScroll.onFieldFocus('location')}
+                onSelect={(place) => {
+                  setLocation(place.label || place.formattedAddress);
+                  setSaved(false);
+                }}
+              />
+            </View>
           </View>
 
           <Button

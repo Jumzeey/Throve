@@ -3,18 +3,20 @@ import { Button } from '@/components/ui/button';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
 import { Palette, Typography } from '@/constants/theme';
+import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { isValidEmail } from '@/lib/validation';
 import { Redirect, useRouter } from 'expo-router';
 import { useAuth } from '@/context/auth-context';
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 /** Account recovery now routes into the OTP password setup / reset flow. */
 export default function RecoveryScreen() {
   const router = useRouter();
   const { bottom } = useScreenInsets();
+  const keyboardScroll = useKeyboardAwareScroll();
   const { session } = useAuth();
   const { isConnected } = useNetworkStatus();
   const [email, setEmail] = useState('');
@@ -46,22 +48,36 @@ export default function RecoveryScreen() {
     <View style={styles.screen}>
       <ScreenHeader title="" onBack={() => router.back()} />
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={[styles.form, { paddingBottom: bottom + 16 }]}>
+        <ScrollView
+          ref={keyboardScroll.scrollRef}
+          onScroll={keyboardScroll.onScroll}
+          scrollEventThrottle={16}
+          contentContainerStyle={[
+            styles.form,
+            { paddingBottom: Math.max(keyboardScroll.contentPaddingBottom, bottom + 16) },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
+        >
           <Text style={styles.heading}>Forgot{'\n'}password</Text>
           <Text style={styles.lead}>
             Enter your email and we’ll help you set a new password with a one-time verification code.
           </Text>
           {!isConnected ? <OfflineBanner message="Reconnect to continue." /> : null}
-          <TextField
-            label="Email address"
-            autoCapitalize="none"
-            keyboardType="email-address"
-            value={email}
-            onChangeText={setEmail}
-          />
+          <View ref={keyboardScroll.setAnchor('email')} collapsable={false}>
+            <TextField
+              label="Email address"
+              autoCapitalize="none"
+              keyboardType="email-address"
+              value={email}
+              onChangeText={setEmail}
+              onFocus={() => keyboardScroll.onFieldFocus('email')}
+            />
+          </View>
           {error ? <AlertBanner variant="error" title="Couldn’t continue" message={error} style={styles.banner} /> : null}
           <Button label="Continue" loading={loading} onPress={onContinue} disabled={!isConnected} style={styles.submit} />
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </View>
   );

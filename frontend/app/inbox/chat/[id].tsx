@@ -26,9 +26,9 @@ import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { ApiError } from '@/lib/api';
 import { pickChatImage, uploadChatImage } from '@/lib/chat-media';
-import { chatDayLabel, formatChatClock, formatNaira } from '@/lib/format';
+import { formatLastSeen, isOnline } from '@/lib/presence';
 import { effectiveOfferStatus, formatOfferCountdown, offerChipVariant } from '@/lib/offer-display';
-import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
+import { supabase } from '@/lib/supabase';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image,
@@ -62,7 +62,7 @@ export default function ChatScreen() {
   const keyboard = useKeyboardInset();
   const keyboardBottom = keyboard.height;
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { session, publicProfiles, ensurePublicProfile } = useAuth();
+  const { session, publicProfiles, ensurePublicProfile, upsertPublicProfile } = useAuth();
   const inbox = useInbox();
   const { markRead, offersOnListing, subscribeConversation } = inbox;
   const { getListing } = useListings();
@@ -94,6 +94,9 @@ export default function ChatScreen() {
   );
   const canSend = Boolean(session && isConnected && !blocked && !sellerLocked && conv);
   const avatarUri = other ? publicProfiles[other]?.photoUri : undefined;
+  const otherLastSeen = other ? publicProfiles[other]?.lastSeenAt : undefined;
+  const otherOnline = isOnline(otherLastSeen, now);
+  const lastSeenLabel = formatLastSeen(otherLastSeen, now);
 
   const activeOffer = useMemo(() => {
     if (!conv || !me || !other) return undefined;
@@ -149,10 +152,45 @@ export default function ChatScreen() {
     return () => clearTimeout(timer);
   }, [id, keyboardBottom, thread.length, pendingImage, failed.length]);
 
+  const otherCardRef = useRef(other ? publicProfiles[other] : undefined);
+  otherCardRef.current = other ? publicProfiles[other] : undefined;
+
   useEffect(() => {
     if (!other) return;
-    void ensurePublicProfile(other).catch(() => undefined);
-  }, [ensurePublicProfile, other]);
+    const refresh = () => {
+      void ensurePublicProfile(other, { force: true }).catch(() => undefined);
+    };
+    refresh();
+    const timer = setInterval(refresh, 20_000);
+    const otherId = otherCardRef.current?.userId;
+    const filter = otherId ? `id=eq.${otherId}` : `username=eq.${other}`;
+    const channel = supabase
+      .channel(`presence-profile:${other}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles', filter },
+        (payload) => {
+          const last = (payload.new as { last_seen_at?: string | null }).last_seen_at;
+          const prev = otherCardRef.current;
+          upsertPublicProfile({
+            username: other,
+            userId: prev?.userId ?? otherId,
+            bio: prev?.bio ?? '',
+            location: prev?.location ?? '',
+            photoUri: prev?.photoUri,
+            followerCount: prev?.followerCount,
+            followingCount: prev?.followingCount,
+            isFollowing: prev?.isFollowing,
+            lastSeenAt: last ? new Date(last).getTime() : null,
+          });
+        },
+      )
+      .subscribe();
+    return () => {
+      clearInterval(timer);
+      void supabase.removeChannel(channel);
+    };
+  }, [ensurePublicProfile, other, publicProfiles[other]?.userId, upsertPublicProfile]);
 
   const sendPayload = useCallback(
     async (text: string, localImage: string | null, failedId?: string) => {
@@ -289,12 +327,17 @@ export default function ChatScreen() {
         <Pressable onPress={() => router.back()} hitSlop={12} style={styles.back}>
           <ChevronBackIcon />
         </Pressable>
-        <ProfileAvatar uri={avatarUri} username={other} style={styles.avatar} />
+        <View style={styles.avatarWrap}>
+          <ProfileAvatar uri={avatarUri} username={other} style={styles.avatar} />
+          {otherOnline ? <View style={styles.onlineDot} /> : null}
+        </View>
         <Pressable
           style={styles.headerMeta}
           onPress={() => router.push({ pathname: '/seller/[username]', params: { username: other } })}>
           <Text style={styles.name}>{other}</Text>
-          <Text style={styles.viewProfile}>View profile</Text>
+          <Text style={[styles.viewProfile, otherOnline && styles.onlineLabel]}>
+            {lastSeenLabel || 'View profile'}
+          </Text>
         </Pressable>
         <Pressable onPress={() => setMenuOpen(true)} hitSlop={12}>
           <MoreHorizontalIcon size={18} color={Palette.espresso} />
@@ -628,6 +671,31 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: 18,
   },
+  avatarWrap: {
+    width: 36,
+    height: 36,
+  },
+  onlineDot: {
+    position: 'absolute',
+    right: -1,
+    bottom: -1,
+    width: 11,
+    height: 11,
+    borderRadius: 6,
+    backgroundColor: '#2F9E44',
+    borderWidth: 2,
+    borderColor: Palette.ivory,
+  },
+  viewProfile: {
+    marginTop: 2,
+    fontSize: 11,
+    fontFamily: Typography.body,
+    color: Palette.muted,
+  },
+  onlineLabel: {
+    color: '#2F9E44',
+    fontFamily: Typography.bodySemiBold,
+  },
   headerMeta: {
     flex: 1,
     minWidth: 0,
@@ -636,12 +704,6 @@ const styles = StyleSheet.create({
     fontSize: 14.5,
     fontFamily: Typography.bodySemiBold,
     color: Palette.espresso,
-  },
-  viewProfile: {
-    marginTop: 2,
-    fontSize: 11,
-    fontFamily: Typography.body,
-    color: Palette.muted,
   },
   context: {
     paddingHorizontal: Spacing.xl,

@@ -306,18 +306,22 @@ export type UserProfile = {
   notifListings?: boolean;
   notifOrders?: boolean;
   notifPushEnabled?: boolean;
+  notifMessageTone?: 'default' | 'note' | 'chime' | 'soft' | 'none';
+  lastSeenAt?: number;
   preferredLoginMethod?: PreferredLoginMethod;
   hasPassword?: boolean;
 };
 
 export type PublicProfile = {
   username: string;
+  userId?: string;
   bio: string;
   location: string;
   photoUri?: string;
   followerCount?: number;
   followingCount?: number;
   isFollowing?: boolean;
+  lastSeenAt?: number | null;
 };
 
 export type AppNotification = {

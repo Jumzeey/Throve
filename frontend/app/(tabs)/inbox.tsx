@@ -13,8 +13,9 @@ import type { Conversation } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatInboxTime } from '@/lib/format';
+import { isOnline } from '@/lib/presence';
 import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 export default function InboxScreen() {
@@ -27,11 +28,19 @@ export default function InboxScreen() {
   const { getListing } = useListings();
   const { isConnected } = useNetworkStatus();
   const [loadError, setLoadError] = useState(false);
+  const [now, setNow] = useState(Date.now());
 
   const me = session?.username ?? '';
   const conversations = conversationsFor(me);
+  const conversationsRef = useRef(conversations);
+  conversationsRef.current = conversations;
   const { received } = offersFor(me);
   const pendingCount = received.filter((offer) => offer.status === 'pending').length;
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     for (const conv of conversations) {
@@ -54,7 +63,16 @@ export default function InboxScreen() {
     useCallback(() => {
       if (!session) return;
       void refresh({ silent: true }).catch(() => setLoadError(true));
-    }, [session, refresh]),
+      const tickPresence = () => {
+        for (const conv of conversationsRef.current) {
+          const other = otherParticipant(conv, me);
+          if (other) void ensurePublicProfile(other, { force: true }).catch(() => undefined);
+        }
+      };
+      tickPresence();
+      const timer = setInterval(tickPresence, 30_000);
+      return () => clearInterval(timer);
+    }, [ensurePublicProfile, me, otherParticipant, refresh, session]),
   );
 
   if (params.tab === 'offers') {
@@ -112,13 +130,14 @@ export default function InboxScreen() {
           conversation={conv}
           other={other}
           avatarUri={publicProfiles[other]?.photoUri}
+          online={isOnline(publicProfiles[other]?.lastSeenAt, now)}
           listing={listing}
           unread={unread}
           onPress={() => router.push(`/inbox/chat/${conv.id}`)}
         />
       );
     },
-    [getListing, me, otherParticipant, publicProfiles, router],
+    [getListing, me, now, otherParticipant, publicProfiles, router],
   );
 
   const keyExtractor = useCallback((item: Conversation) => item.id, []);
@@ -173,6 +192,7 @@ function ConversationRow({
   conversation,
   other,
   avatarUri,
+  online,
   listing,
   unread,
   onPress,
@@ -180,13 +200,17 @@ function ConversationRow({
   conversation: Conversation;
   other: string;
   avatarUri?: string | null;
+  online?: boolean;
   listing: ReturnType<ReturnType<typeof useListings>['getListing']>;
   unread: boolean;
   onPress: () => void;
 }) {
   return (
     <Pressable onPress={onPress} style={styles.row}>
-      <ProfileAvatar uri={avatarUri} username={other} style={styles.avatar} />
+      <View style={styles.avatarWrap}>
+        <ProfileAvatar uri={avatarUri} username={other} style={styles.avatar} />
+        {online ? <View style={styles.onlineDot} /> : null}
+      </View>
       <View style={styles.meta}>
         <View style={styles.top}>
           <Text style={styles.name} numberOfLines={1}>
@@ -299,10 +323,25 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Palette.divider,
   },
+  avatarWrap: {
+    width: 44,
+    height: 44,
+  },
   avatar: {
     width: 44,
     height: 44,
     borderRadius: 22,
+  },
+  onlineDot: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#2F9E44',
+    borderWidth: 2,
+    borderColor: Palette.ivory,
   },
   meta: {
     flex: 1,

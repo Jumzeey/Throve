@@ -11,6 +11,8 @@ export async function sendExpoPush(input: {
   title: string;
   body: string;
   data?: Record<string, string>;
+  channelId?: string;
+  sound?: string | null;
 }): Promise<void> {
   const admin = createServiceClient();
   const { data: rows, error } = await admin
@@ -39,7 +41,9 @@ export async function sendExpoPush(input: {
           to,
           title: input.title,
           body: input.body,
-          sound: 'default',
+          sound: input.sound === null ? null : input.sound ?? 'default',
+          priority: 'high',
+          channelId: input.channelId ?? 'default',
           data: input.data ?? {},
         })),
       ),

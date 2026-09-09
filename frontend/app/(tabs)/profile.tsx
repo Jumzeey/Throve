@@ -5,6 +5,7 @@ import {
   AlertCircleIcon,
   BagIcon,
   ChevronForwardIcon,
+  BookmarkIcon,
   HeartIcon,
   ListingsIcon,
   MapPinIcon,
@@ -58,6 +59,7 @@ export default function ProfileScreen() {
   const soldListings = useMemo(() => mine.filter((item) => item.status === 'sold'), [mine]);
   const shown = tab === 'sold' ? soldListings : activeListings;
   const savedCount = username ? savedListingsFor(username).length : 0;
+  const savedLivesCount = live.savedLives.length;
   const myLiveSessions = useMemo(
     () => live.sessions.filter((item) => item.host === username),
     [live.sessions, username],
@@ -174,6 +176,12 @@ export default function ProfileScreen() {
             hint={String(savedCount)}
             onPress={() => router.push('/profile/saved')}
           />
+          <MenuRow
+            icon={<BookmarkIcon size={18} color={Palette.plum} />}
+            label="Saved lives"
+            hint={String(savedLivesCount)}
+            onPress={() => router.push('/profile/saved-lives')}
+          />
           <MenuRow icon={<BagIcon />} label="Orders" onPress={() => router.push('/profile/orders')} />
             <MenuRow
               icon={<VideoIcon size={18} color={Palette.plum} />}
@@ -236,6 +244,7 @@ export default function ProfileScreen() {
       reload,
       router,
       savedCount,
+      savedLivesCount,
       shown.length,
       soldListings.length,
       stats.avg,

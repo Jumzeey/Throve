@@ -1,7 +1,7 @@
 import { OfflineBanner } from '@/components/ui/alert-banner';
 import { AppImage } from '@/components/ui/app-image';
 import { EmptyState } from '@/components/ui/empty-state';
-import { BellIcon, ImagePlaceholderIcon, SearchIcon } from '@/components/ui/icons';
+import { BellIcon, BookmarkIcon, ImagePlaceholderIcon, SearchIcon } from '@/components/ui/icons';
 import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
 import { ListingCard } from '@/components/ui/listing-card';
 import { ListingGrid } from '@/components/ui/listing-grid';
@@ -15,6 +15,7 @@ import { filterListings } from '@/data/filter-listings';
 import { getLiveImage } from '@/data/images';
 import type { LiveSession } from '@/data/types';
 import { DEPARTMENTS } from '@/data/seed';
+import { formatLiveSchedule } from '@/lib/format';
 import { FOLLOWING_PREVIEW_PER_SELLER, latestPerSeller } from '@/lib/following-feed';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useRouter } from 'expo-router';
@@ -99,21 +100,48 @@ function LiveNowCard({
   );
 }
 
-function UpcomingLiveRow({ session, onPress }: { session: LiveSession; onPress: () => void }) {
+const HOME_UPCOMING_PREVIEW = 5;
+
+function UpcomingLiveCard({
+  session,
+  saved,
+  onPress,
+  onSave,
+}: {
+  session: LiveSession;
+  saved: boolean;
+  onPress: () => void;
+  onSave: () => void;
+}) {
+  const when = formatLiveSchedule(session.scheduledAt);
   return (
-    <Pressable onPress={onPress} style={styles.upcomingRow}>
-      <View style={styles.upcomingThumb}>
-        <AppImage source={getLiveImage(session.id)} style={styles.upcomingThumbImage} />
+    <Pressable onPress={onPress} style={styles.upcomingCard}>
+      <View style={styles.upcomingImageWrap}>
+        <AppImage source={sessionCover(session)} style={styles.upcomingImage} />
+        <Pressable
+          onPress={(event) => {
+            event.stopPropagation();
+            onSave();
+          }}
+          style={styles.heartBtn}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={saved ? 'Remove bookmark' : 'Bookmark this live'}
+        >
+          <BookmarkIcon size={15} filled={saved} color={saved ? Palette.plum : Palette.espresso} />
+        </Pressable>
       </View>
-      <View style={styles.upcomingMeta}>
-        <Text style={styles.upcomingTitle} numberOfLines={2}>
-          {session.title ?? 'Upcoming live'}
+      <Text style={styles.upcomingCardTitle} numberOfLines={2}>
+        {session.title ?? 'Upcoming live'}
+      </Text>
+      <Text style={styles.upcomingCardSub} numberOfLines={1}>
+        {session.host}
+      </Text>
+      {when ? (
+        <Text style={styles.upcomingWhen} numberOfLines={1}>
+          {when}
         </Text>
-        <Text style={styles.upcomingSub} numberOfLines={1}>
-          {session.host}
-          {session.scheduledAt ? ` · ${session.scheduledAt}` : ''}
-        </Text>
-      </View>
+      ) : null}
     </Pressable>
   );
 }
@@ -157,7 +185,7 @@ export default function HomeScreen() {
     () => latestPerSeller(followingListings, FOLLOWING_PREVIEW_PER_SELLER),
     [followingListings],
   );
-  const { liveNow, upcoming, refresh: refreshLive } = useLive();
+  const { liveNow, upcoming, refresh: refreshLive, isLiveSaved, toggleSaveLive } = useLive();
 
   const sellers = useMemo(() => Array.from(new Set(catalog.map((l) => l.seller))).slice(0, 3), [catalog]);
 
@@ -267,15 +295,31 @@ export default function HomeScreen() {
         {upcoming.length > 0 ? (
           <View style={styles.section}>
             <SectionHeading title="Upcoming live" onSeeAll={() => router.push('/(tabs)/live')} />
-            <View style={styles.upcomingBox}>
-              {upcoming.map((liveSession) => (
-                <UpcomingLiveRow
+            <ScrollView
+              horizontal
+              nestedScrollEnabled
+              directionalLockEnabled
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.upcomingScroll}
+            >
+              {upcoming.slice(0, HOME_UPCOMING_PREVIEW).map((liveSession) => (
+                <UpcomingLiveCard
                   key={liveSession.id}
                   session={liveSession}
-                  onPress={() => router.push('/(tabs)/live')}
+                  saved={isLiveSaved(liveSession.id)}
+                  onPress={() =>
+                    router.push({ pathname: '/seller/[username]', params: { username: liveSession.host } })
+                  }
+                  onSave={() => {
+                    if (!session) {
+                      router.push('/(auth)/welcome');
+                      return;
+                    }
+                    void toggleSaveLive(liveSession.id);
+                  }}
                 />
               ))}
-            </View>
+            </ScrollView>
           </View>
         ) : null}
 
@@ -636,42 +680,47 @@ const styles = StyleSheet.create({
     fontFamily: Typography.body,
     color: 'rgba(255,247,240,0.9)',
   },
-  upcomingBox: {
-    marginHorizontal: 20,
-    borderWidth: 1,
-    borderColor: Palette.accent200,
+  upcomingScroll: { paddingHorizontal: 20, gap: 10, paddingRight: 20 },
+  upcomingCard: { width: 168 },
+  upcomingImageWrap: {
+    position: 'relative',
+    width: 168,
+    height: 200,
     borderRadius: Radius.sm,
-    overflow: 'hidden',
-    backgroundColor: Palette.accent200,
-    gap: 1,
-  },
-  upcomingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: Palette.ivory,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  upcomingThumb: {
-    width: 52,
-    height: 52,
-    borderRadius: 6,
     overflow: 'hidden',
     backgroundColor: Palette.liveDarkAlt,
   },
-  upcomingThumbImage: { width: '100%', height: '100%' },
-  upcomingMeta: { flex: 1, minWidth: 0 },
-  upcomingTitle: {
+  upcomingImage: { width: '100%', height: '100%' },
+  heartBtn: {
+    position: 'absolute',
+    zIndex: 2,
+    elevation: 3,
+    top: 9,
+    right: 9,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(255,247,240,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  upcomingCardTitle: {
+    marginTop: 9,
     fontSize: 13.5,
     fontFamily: Typography.bodySemiBold,
     color: Palette.espresso,
   },
-  upcomingSub: {
+  upcomingCardSub: {
     marginTop: 3,
     fontSize: 11.5,
     fontFamily: Typography.body,
     color: Palette.muted,
+  },
+  upcomingWhen: {
+    marginTop: 3,
+    fontSize: 11.5,
+    fontFamily: Typography.body,
+    color: Palette.plum,
   },
   sellerRow: { paddingHorizontal: 20, gap: 12 },
   sellerCard: {

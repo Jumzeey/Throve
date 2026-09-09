@@ -2,7 +2,8 @@ import { apiFetch } from '@/lib/api';
 import { Palette } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import type { ChatMessage, Conversation, Offer, OfferStatus } from '@/data/types';
-import { supabase } from '@/lib/supabase';
+import { parseMessageTone } from '@/lib/message-tones';
+import { playMessageTone } from '@/lib/play-message-tone';
 import {
   createContext,
   useCallback,
@@ -106,12 +107,14 @@ export function InboxProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const activeChatRef = useRef<string | null>(null);
   const usernameRef = useRef(session?.username ?? '');
+  const sessionRef = useRef(session);
   const channelsRef = useRef<Record<string, RealtimeChannel>>({});
   const inboxChannelRef = useRef<RealtimeChannel | null>(null);
 
   useEffect(() => {
     usernameRef.current = session?.username ?? '';
-  }, [session?.username]);
+    sessionRef.current = session;
+  }, [session]);
 
   const refresh = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) setLoading(true);
@@ -228,6 +231,10 @@ export function InboxProvider({ children }: { children: ReactNode }) {
           if (!fromMe) {
             const level = activeChatRef.current === row.conversation_id ? 'read' : 'delivered';
             void ackReceipt(row.conversation_id, level);
+            const prefs = sessionRef.current;
+            if (activeChatRef.current !== row.conversation_id && prefs?.notifMessages !== false) {
+              void playMessageTone(parseMessageTone(prefs.notifMessageTone));
+            }
           }
         } catch {
           /* ignore */
