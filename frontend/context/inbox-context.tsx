@@ -410,28 +410,32 @@ export function InboxProvider({ children }: { children: ReactNode }) {
     async (input: { listingId: string; buyer: string; seller: string; amount: number; initiator: Offer['initiator'] }) => {
       const offer = await apiFetch<Offer>('/inbox/offers', { method: 'POST', body: JSON.stringify(input) });
       setOffers((current) => [offer, ...current]);
+      void refresh({ silent: true }).catch(() => undefined);
       return offer;
     },
-    [],
+    [refresh],
   );
 
   const acceptOffer = useCallback(async (id: string, _username: string) => {
     const offer = await apiFetch<Offer>(`/inbox/offers/${id}`, { method: 'PATCH', body: JSON.stringify({ action: 'accept' }) });
     setOffers((current) => current.map((item) => (item.id === id ? offer : item)));
+    void refresh({ silent: true }).catch(() => undefined);
     return true;
-  }, []);
+  }, [refresh]);
 
   const rejectOffer = useCallback(async (id: string, _username: string) => {
     const offer = await apiFetch<Offer>(`/inbox/offers/${id}`, { method: 'PATCH', body: JSON.stringify({ action: 'reject' }) });
     setOffers((current) => current.map((item) => (item.id === id ? offer : item)));
+    void refresh({ silent: true }).catch(() => undefined);
     return true;
-  }, []);
+  }, [refresh]);
 
   const withdrawOffer = useCallback(async (id: string, _username: string) => {
     const offer = await apiFetch<Offer>(`/inbox/offers/${id}`, { method: 'PATCH', body: JSON.stringify({ action: 'withdraw' }) });
     setOffers((current) => current.map((item) => (item.id === id ? offer : item)));
+    void refresh({ silent: true }).catch(() => undefined);
     return true;
-  }, []);
+  }, [refresh]);
 
   const counterOffer = useCallback(async (id: string, amount: number, _username: string) => {
     const offer = await apiFetch<Offer>(`/inbox/offers/${id}`, {
@@ -439,8 +443,9 @@ export function InboxProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ action: 'counter', amount }),
     });
     setOffers((current) => current.map((item) => (item.id === id ? offer : item)));
+    void refresh({ silent: true }).catch(() => undefined);
     return true;
-  }, []);
+  }, [refresh]);
 
   const reportChat = useCallback(
     async (input: {

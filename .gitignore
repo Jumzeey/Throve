@@ -22,6 +22,9 @@ expo-env.d.ts
 # Google Play / Cloud service account keys
 support-files/*.json
 throve-*-*.json
+backend/firebase-service-account.json
+**/firebase-service-account.json
+
 
 # Metro
 .metro-health-check*

@@ -5,7 +5,7 @@ import type { AppNotification } from '@/data/types';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 type NotificationsContextValue = {
   items: AppNotification[];
@@ -30,6 +30,16 @@ function pathFromPushData(data: Record<string, unknown> | undefined) {
   return null;
 }
 
+async function uploadPushToken(token: string) {
+  if (!token) return;
+  const platform = Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'web';
+  await apiFetch('/notifications/push-token', {
+    method: 'POST',
+    body: JSON.stringify({ token, platform }),
+  });
+}
+
+/** Register native FCM/APNs token (works without Expo projectId) and Expo token when available. */
 async function registerPushToken() {
   if (Platform.OS === 'web') return;
   try {
@@ -37,19 +47,29 @@ async function registerPushToken() {
     await ensureLiveNotificationChannel();
     const existing = await Notifications.getPermissionsAsync();
     const granted = existing.granted || (await Notifications.requestPermissionsAsync()).granted;
-    if (!granted) return;
+    if (!granted) {
+      console.warn('[push] permission not granted');
+      return;
+    }
+
+    // Native device token — required for Android FCM when Expo credentials aren't set yet.
+    try {
+      const device = await Notifications.getDevicePushTokenAsync();
+      const raw = typeof device.data === 'string' ? device.data : String(device.data ?? '');
+      if (raw) await uploadPushToken(raw);
+    } catch (err) {
+      console.warn('[push] device token failed', err instanceof Error ? err.message : err);
+    }
 
     const projectId = pushProjectId();
-    const tokenResponse = projectId
-      ? await Notifications.getExpoPushTokenAsync({ projectId })
-      : await Notifications.getExpoPushTokenAsync();
-    const token = tokenResponse.data;
-    if (!token) return;
-    const platform = Platform.OS === 'ios' ? 'ios' : 'android';
-    await apiFetch('/notifications/push-token', {
-      method: 'POST',
-      body: JSON.stringify({ token, platform }),
-    });
+    if (projectId) {
+      try {
+        const tokenResponse = await Notifications.getExpoPushTokenAsync({ projectId });
+        if (tokenResponse.data) await uploadPushToken(tokenResponse.data);
+      } catch (err) {
+        console.warn('[push] expo token failed', err instanceof Error ? err.message : err);
+      }
+    }
   } catch (err) {
     console.warn('[push] register skipped', err instanceof Error ? err.message : err);
   }
@@ -106,6 +126,10 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     if (!isReady || !session) return;
     void refresh();
     void registerPushToken();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void registerPushToken();
+    });
+    return () => sub.remove();
   }, [isReady, refresh, session]);
 
   useEffect(() => {

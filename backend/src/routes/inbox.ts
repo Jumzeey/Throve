@@ -11,6 +11,7 @@ import {
 } from '../lib/email/templates/offers.js';
 import { getProfileById, getProfileByUsername } from '../lib/mappers.js';
 import { notifyUser } from '../lib/notify.js';
+import { formatNaira } from '../lib/email/layout.js';
 import { createServiceClient } from '../lib/supabase.js';
 import { type AuthedRequest, requireAuth } from '../middleware/auth.js';
 
@@ -28,6 +29,84 @@ async function listingTitle(
 ) {
   const { data } = await supabase.from('listings').select('title').eq('id', listingId).maybeSingle();
   return (data?.title as string) || 'your listing';
+}
+
+/** Ensure the listing chat exists and post a message both parties will see in the thread. */
+async function postOfferToChat(input: {
+  listingId: string;
+  buyerId: string;
+  sellerId: string;
+  senderId: string;
+  text: string;
+  /** Skip message notify — offer already has its own push/email. */
+  skipMessageNotify?: boolean;
+}) {
+  try {
+    const admin = createServiceClient();
+    const [a, b] =
+      input.buyerId < input.sellerId ? [input.buyerId, input.sellerId] : [input.sellerId, input.buyerId];
+
+    let conversationId: string | null = null;
+    const existing = await admin
+      .from('conversations')
+      .select('id')
+      .eq('listing_id', input.listingId)
+      .eq('participant_a', a)
+      .eq('participant_b', b)
+      .maybeSingle();
+
+    if (existing.data?.id) {
+      conversationId = String(existing.data.id);
+    } else {
+      const { data: created, error } = await admin
+        .from('conversations')
+        .insert({
+          listing_id: input.listingId,
+          participant_a: a,
+          participant_b: b,
+        })
+        .select('id')
+        .single();
+      if (error || !created?.id) {
+        console.warn('[offer-chat]', error?.message ?? 'create conversation failed');
+        return;
+      }
+      conversationId = String(created.id);
+    }
+
+    const { error: messageError } = await admin.from('messages').insert({
+      conversation_id: conversationId,
+      sender_id: input.senderId,
+      text: input.text,
+    });
+    if (messageError) {
+      console.warn('[offer-chat]', messageError.message);
+      return;
+    }
+
+    await admin
+      .from('conversations')
+      .update({ last_message: input.text, updated_at: new Date().toISOString() })
+      .eq('id', conversationId);
+
+    const recipientId = input.senderId === input.buyerId ? input.sellerId : input.buyerId;
+    await admin.from('conversation_unread').upsert({ conversation_id: conversationId, user_id: recipientId });
+
+    if (!input.skipMessageNotify) {
+      const sender = await getProfileById(admin, input.senderId);
+      void notifyUser({
+        userId: recipientId,
+        category: 'message',
+        type: 'message_new',
+        title: `Message from @${sender?.username ?? 'someone'}`,
+        body: input.text,
+        deepLink: `inbox/chat/${conversationId}`,
+        data: { conversationId },
+      });
+    }
+  } catch (err) {
+    console.warn('[offer-chat]', err instanceof Error ? err.message : err);
+  }
 }
 
 async function mapMessageRow(
@@ -446,12 +525,27 @@ router.post('/offers', requireAuth, async (req, res) => {
   const title = await listingTitle(supabase, parsed.data.listingId);
   const recipientId = parsed.data.initiator === 'buyer' ? sellerId : buyerId;
   const fromUsername = parsed.data.initiator === 'buyer' ? parsed.data.buyer : parsed.data.seller;
+  const amountLabel = formatNaira(Number(data.amount) || 0);
+  const chatText =
+    parsed.data.initiator === 'seller'
+      ? `Discounted offer: ${amountLabel}`
+      : `Offer: ${amountLabel}`;
+
+  void postOfferToChat({
+    listingId: parsed.data.listingId,
+    buyerId,
+    sellerId,
+    senderId: userId,
+    text: chatText,
+    skipMessageNotify: true,
+  });
+
   void notifyUser({
     userId: recipientId,
     category: 'offer',
     type: 'offer_received',
     title: `New offer from @${fromUsername}`,
-    body: title,
+    body: `${title} · ${amountLabel}`,
     deepLink: `inbox/offer/${data.id}`,
     data: { offerId: data.id },
     email: offerReceivedEmail({
@@ -531,6 +625,29 @@ router.patch('/offers/:id', requireAuth, async (req, res) => {
   const buyer = await getProfileById(supabase, data.buyer_id);
   const seller = await getProfileById(supabase, data.seller_id);
   const title = await listingTitle(supabase, data.listing_id);
+  const amountLabel = formatNaira(Number(data.amount) || 0);
+
+  let chatText: string | null = null;
+  if (parsed.data.action === 'counter') {
+    chatText = `Counter offer: ${amountLabel}`;
+  } else if (status === 'accepted') {
+    chatText = `Accepted the offer of ${amountLabel}`;
+  } else if (status === 'rejected') {
+    chatText = `Declined the offer of ${amountLabel}`;
+  } else if (status === 'withdrawn') {
+    chatText = `Withdrew the offer of ${amountLabel}`;
+  }
+
+  if (chatText) {
+    void postOfferToChat({
+      listingId: String(data.listing_id),
+      buyerId: String(data.buyer_id),
+      sellerId: String(data.seller_id),
+      senderId: userId,
+      text: chatText,
+      skipMessageNotify: true,
+    });
+  }
 
   if (parsed.data.action === 'counter') {
     void notifyUser({
@@ -538,7 +655,7 @@ router.patch('/offers/:id', requireAuth, async (req, res) => {
       category: 'offer',
       type: 'offer_counter',
       title: `Counter offer from @${seller?.username ?? 'seller'}`,
-      body: title,
+      body: `${title} · ${amountLabel}`,
       deepLink: `inbox/offer/${data.id}`,
       data: { offerId: data.id },
       email: offerReceivedEmail({
