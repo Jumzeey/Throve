@@ -22,6 +22,7 @@ import { getListingImageSource } from '@/data/images';
 import { apiFetch, ApiError } from '@/lib/api';
 import { formatNaira } from '@/lib/format';
 import { stopLiveKitAudioSession } from '@/lib/livekit-native';
+import { KeyboardSafeDock } from '@/components/ui/keyboard-safe';
 import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
@@ -37,10 +38,14 @@ function formatLiveDuration(ms: number) {
   return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
+/** Space reserved above the absolutely docked composer (input row + top padding). */
+const COMPOSER_CLEARANCE = 70;
+
 export default function LiveBroadcastScreen() {
   const router = useRouter();
-  const { top, sheetBottom } = useScreenInsets();
+  const { top } = useScreenInsets();
   const keyboard = useKeyboardInset();
+  const keyboardOpen = keyboard.height > 0;
   const now = useLiveClock();
   const { session } = useAuth();
   const { getListing } = useListings();
@@ -357,7 +362,13 @@ export default function LiveBroadcastScreen() {
           </View>
         </View>
 
-        <View style={styles.commentsArea}>
+        <View
+          style={[
+            styles.commentsArea,
+            keyboardOpen ? styles.commentsAreaKeyboard : null,
+            !pinnedProduct || keyboardOpen ? { marginBottom: COMPOSER_CLEARANCE } : null,
+          ]}
+        >
           {comments.length === 0 ? (
             <View style={styles.statusBanner}>
               <Text style={styles.statusBannerText}>
@@ -384,8 +395,8 @@ export default function LiveBroadcastScreen() {
 
         <LiveConnectionOverlay connection={connection} />
 
-        {pinnedProduct ? (
-          <View style={styles.productWrap} pointerEvents="box-none">
+        {pinnedProduct && !keyboardOpen ? (
+          <View style={[styles.productWrap, { marginBottom: COMPOSER_CLEARANCE }]} pointerEvents="box-none">
             <PinnedProductCard
               role="host"
               title={pinnedProduct.title ?? pinnedListing?.title ?? 'Product'}
@@ -402,14 +413,14 @@ export default function LiveBroadcastScreen() {
 
         {notice ? <Text style={styles.notice}>{notice}</Text> : null}
 
-        <View style={[styles.composerWrap, { paddingBottom: keyboard.height > 0 ? keyboard.height : sheetBottom }]}>
+        <KeyboardSafeDock absolute style={styles.composerWrap}>
           <LiveComposer
             value={commentDraft}
             onChangeText={setCommentDraft}
             onSend={sendHostComment}
             placeholder="Reply to your viewers..."
           />
-        </View>
+        </KeyboardSafeDock>
       </LiveStage>
 
       <EndLiveDialog
@@ -574,6 +585,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 8,
   },
+  commentsAreaKeyboard: {
+    maxHeight: 140,
+  },
   commentList: { flexGrow: 0 },
   commentListBody: { gap: 10, paddingBottom: 8 },
   productWrap: {
@@ -590,6 +604,7 @@ const styles = StyleSheet.create({
   composerWrap: {
     paddingHorizontal: 16,
     paddingTop: 14,
+    backgroundColor: 'rgba(27,17,19,0.55)',
   },
   sheetOverlay: {
     flex: 1,

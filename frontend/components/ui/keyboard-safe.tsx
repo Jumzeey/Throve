@@ -8,6 +8,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  useWindowDimensions,
   View,
   type StyleProp,
   type ViewStyle,
@@ -46,6 +47,40 @@ export function KeyboardSafeSheet({ children, onDismiss, style, gap = 12 }: Shee
       )}
       <View style={[styles.sheet, { paddingBottom: padBottom }, style]}>{children}</View>
     </View>
+  );
+}
+
+type DockProps = {
+  children: ReactNode;
+  style?: StyleProp<ViewStyle>;
+  /** Extra gap above the keyboard when open. */
+  gap?: number;
+  /**
+   * Pin to the bottom of the parent. Use on live overlays and other
+   * absolute layouts where siblings would otherwise clip the composer.
+   */
+  absolute?: boolean;
+};
+
+/**
+ * Bottom-docked composer / action bar that stays above the software keyboard.
+ * Prefer this over hand-rolled `paddingBottom: keyboard.height` in screens.
+ */
+export function KeyboardSafeDock({ children, style, gap = 0, absolute = false }: DockProps) {
+  const { sheetBottom } = useScreenInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const { height: keyboardHeight, screenY } = useKeyboardInset();
+  const open = keyboardHeight > 0;
+  // Expo/Android may already resize the window — don't double-lift.
+  const windowAlreadyResized = open && screenY > 0 && Math.abs(windowHeight - screenY) < 48;
+  const padBottom = !open
+    ? sheetBottom
+    : windowAlreadyResized
+      ? Math.max(sheetBottom, 8)
+      : keyboardHeight + gap;
+
+  return (
+    <View style={[absolute ? styles.dockAbsolute : null, { paddingBottom: padBottom }, style]}>{children}</View>
   );
 }
 
@@ -108,5 +143,12 @@ const styles = StyleSheet.create({
   },
   sheet: {
     width: '100%',
+  },
+  dockAbsolute: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 5,
   },
 });

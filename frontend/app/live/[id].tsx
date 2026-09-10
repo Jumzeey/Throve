@@ -15,6 +15,7 @@ import { useCheckout } from '@/context/checkout-context';
 import { useLive, useLiveClock } from '@/context/live-context';
 import { apiFetch } from '@/lib/api';
 import { formatCountdown, formatNaira } from '@/lib/format';
+import { KeyboardSafeDock } from '@/components/ui/keyboard-safe';
 import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
@@ -22,10 +23,14 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
+/** Space reserved above the absolutely docked composer (input row + top padding). */
+const COMPOSER_CLEARANCE = 70;
+
 export default function LiveViewerScreen() {
   const router = useRouter();
   const { top, sheetBottom } = useScreenInsets();
   const keyboard = useKeyboardInset();
+  const keyboardOpen = keyboard.height > 0;
   const { id } = useLocalSearchParams<{ id: string }>();
   const { session } = useAuth();
   const live = useLive();
@@ -302,7 +307,13 @@ export default function LiveViewerScreen() {
 
         <View style={styles.flex} />
 
-        <View style={styles.commentsArea}>
+        <View
+          style={[
+            styles.commentsArea,
+            keyboardOpen ? styles.commentsAreaKeyboard : null,
+            !pinnedProduct || keyboardOpen ? { marginBottom: COMPOSER_CLEARANCE } : null,
+          ]}
+        >
           <ScrollView style={styles.commentList} contentContainerStyle={styles.commentListBody}>
             {comments.map((comment) => (
               <LiveCommentRow
@@ -329,8 +340,8 @@ export default function LiveViewerScreen() {
           host={activeSession.host}
         />
 
-        {pinnedProduct ? (
-          <View style={styles.productWrap} pointerEvents="box-none">
+        {pinnedProduct && !keyboardOpen ? (
+          <View style={[styles.productWrap, { marginBottom: COMPOSER_CLEARANCE }]} pointerEvents="box-none">
             <LiveClaimCard
               title={pinnedProduct.title ?? pinnedListing?.title ?? 'Product'}
               subtitle={subtitle || undefined}
@@ -349,9 +360,9 @@ export default function LiveViewerScreen() {
           </View>
         ) : null}
 
-        <View style={[styles.composerWrap, { paddingBottom: keyboard.height > 0 ? keyboard.height : sheetBottom }]}>
+        <KeyboardSafeDock absolute style={styles.composerWrap}>
           <LiveComposer value={draft} onChangeText={setDraft} onSend={send} placeholder="Add a comment..." />
-        </View>
+        </KeyboardSafeDock>
       </LiveStage>
 
       <LiveReportSheet
@@ -412,6 +423,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 8,
   },
+  commentsAreaKeyboard: {
+    maxHeight: 140,
+  },
   commentList: { flexGrow: 0 },
   commentListBody: { gap: 10, paddingBottom: 8 },
   productWrap: {
@@ -421,6 +435,7 @@ const styles = StyleSheet.create({
   composerWrap: {
     paddingHorizontal: 16,
     paddingTop: 14,
+    backgroundColor: 'rgba(27,17,19,0.55)',
   },
   endedScreen: {
     paddingHorizontal: 20,
