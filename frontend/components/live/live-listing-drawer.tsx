@@ -1,14 +1,22 @@
 import { AppImage } from '@/components/ui/app-image';
-import { CloseIcon } from '@/components/ui/icons';
 import { Button } from '@/components/ui/button';
+import { CloseIcon, ShieldCheckIcon } from '@/components/ui/icons';
+import { PhotoPager } from '@/components/ui/photo-pager';
 import { Palette, Typography } from '@/constants/theme';
 import { getProductImageSource } from '@/data/images';
 import type { Listing, LiveStreamProduct } from '@/data/types';
 import type { PinnedProductVariant } from '@/components/live/pinned-product-card';
 import { formatCountdown, formatNaira } from '@/lib/format';
+import {
+  buyerProtectionFee,
+  displayListingSize,
+  formatUploaded,
+  shippingRows,
+} from '@/lib/listing-display';
 import { useLiveClock } from '@/context/live-context';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
-import { useMemo } from 'react';
+import { useRouter } from 'expo-router';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Dimensions,
   Modal,
@@ -18,6 +26,8 @@ import {
   Text,
   View,
 } from 'react-native';
+
+const HERO_RATIO = 390 / 420;
 
 type Props = {
   visible: boolean;
@@ -58,9 +68,18 @@ export function LiveListingDrawer({
   onSignIn,
   signedIn = true,
 }: Props) {
+  const router = useRouter();
   const { sheetBottom } = useScreenInsets();
   const now = useLiveClock();
-  const maxHeight = Dimensions.get('window').height * 0.76;
+  const [photoIndex, setPhotoIndex] = useState(0);
+  const [descOpen, setDescOpen] = useState(false);
+  const maxHeight = Dimensions.get('window').height * 0.92;
+
+  useEffect(() => {
+    if (!visible) return;
+    setPhotoIndex(0);
+    setDescOpen(false);
+  }, [visible, product?.id]);
 
   const photos = useMemo(() => {
     const urls = product?.photoUrls?.length
@@ -68,35 +87,42 @@ export function LiveListingDrawer({
       : listing?.photoUrls?.length
         ? listing.photoUrls
         : [];
-    return urls.slice(0, 6);
+    return urls;
   }, [listing?.photoUrls, product?.photoUrls]);
 
   const title = product?.title ?? listing?.title ?? 'Product';
-  const price = product ? formatNaira(product.livePrice) : listing ? formatNaira(listing.price) : '';
-  const brand = listing?.brand;
-  const size =
-    product?.size && product.size !== '—'
-      ? product.size
-      : listing?.size && listing.size !== '—'
-        ? listing.size
-        : null;
-  const condition = product?.condition ?? listing?.condition;
-  const location = listing?.shipping;
-  const description = listing?.description?.trim();
+  const listPrice = product?.livePrice ?? listing?.price ?? 0;
+  const price = listPrice ? formatNaira(listPrice) : '';
+  const protection = buyerProtectionFee(listPrice);
+  const protectedTotal = listPrice + protection;
+  const sizeLabel = displayListingSize(product?.size ?? listing?.size ?? '');
+  const condition = product?.condition ?? listing?.condition ?? '—';
+  const brand = listing?.brand ?? '—';
+  const description = listing?.description?.trim() || 'No description provided.';
+  const descLong = description.length > 160;
+  const shownDescription = descOpen || !descLong ? description : `${description.slice(0, 158).trim()}…`;
   const countdown =
     variant === 'your_claim' && claimExpiresAt ? formatCountdown(claimExpiresAt - now) : undefined;
 
-  const tags = [brand, size, condition, location].filter(Boolean) as string[];
-  const hero = photos[0];
-  const sideA = photos[1];
-  const sideB = photos[2];
-  const extra = Math.max(0, photos.length - 3);
+  const details = [
+    { label: 'Department', value: listing?.department ?? product?.department ?? '—' },
+    { label: 'Category', value: listing?.category ?? product?.category ?? '—' },
+    { label: 'Brand', value: brand },
+    { label: 'Colour', value: listing?.colour || '—' },
+    { label: 'Size', value: sizeLabel },
+    { label: 'Condition', value: condition },
+    ...(listing?.createdAt
+      ? [{ label: 'Uploaded', value: formatUploaded(listing.createdAt) }]
+      : []),
+  ];
+
+  const photoCount = Math.max(photos.length, listing?.photoCount ?? 0, 1);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close listing" />
-        <View style={[styles.sheet, { maxHeight }]}>
+        <View style={[styles.sheet, { maxHeight, height: maxHeight }]}>
           <View style={styles.handleRow}>
             <View style={styles.handleSpacer} />
             <View style={styles.handle} />
@@ -124,65 +150,131 @@ export function LiveListingDrawer({
                 style={styles.scroll}
                 contentContainerStyle={styles.scrollBody}
                 showsVerticalScrollIndicator={false}
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
               >
-                <View style={styles.gallery}>
-                  <AppImage
-                    source={getProductImageSource(hero, product.listingId)}
-                    style={styles.hero}
+                <View style={styles.pagerBleed}>
+                  <PhotoPager
+                    count={photoCount}
+                    listingId={product.listingId}
+                    uris={photos}
+                    index={photoIndex}
+                    onIndexChange={setPhotoIndex}
+                    aspectRatio={HERO_RATIO}
+                    showCounter
                   />
-                  <View style={styles.sideCol}>
-                    <AppImage
-                      source={getProductImageSource(sideA ?? hero, product.listingId)}
-                      style={styles.side}
-                    />
-                    <View style={styles.sideWrap}>
-                      <AppImage
-                        source={getProductImageSource(sideB ?? hero, product.listingId)}
-                        style={styles.side}
-                      />
-                      {extra > 0 ? (
-                        <View style={styles.extraOverlay}>
-                          <Text style={styles.extraText}>+{extra}</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                  </View>
                 </View>
 
-                <View style={styles.statusRow}>
-                  <StatusBadge variant={variant} />
-                  {featuredInLive ? <Text style={styles.featuredHint}>Featured in this Live</Text> : null}
-                </View>
+                {photos.length > 1 ? (
+                  <ScrollView
+                    horizontal
+                    nestedScrollEnabled
+                    directionalLockEnabled
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.thumbs}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    {photos.slice(0, 6).map((uri, index) => {
+                      const active = photoIndex === index;
+                      return (
+                        <Pressable
+                          key={`${uri}-${index}`}
+                          onPress={() => setPhotoIndex(index)}
+                          style={[styles.thumb, active && styles.thumbActive]}
+                        >
+                          <AppImage
+                            source={getProductImageSource(uri, product.listingId)}
+                            style={styles.thumbImage}
+                          />
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                ) : null}
 
-                <Text style={styles.title}>{title}</Text>
-                <Text style={[styles.price, (variant === 'sold' || variant === 'reserved') && styles.priceMuted, variant === 'sold' && styles.priceStrike]}>
-                  {price}
-                </Text>
-
-                {tags.length > 0 ? (
-                  <View style={styles.tags}>
-                    {tags.map((tag) => (
-                      <View key={tag} style={styles.tag}>
-                        <Text style={styles.tagText}>{tag}</Text>
-                      </View>
-                    ))}
+                <View style={styles.body}>
+                  <View style={styles.statusRow}>
+                    <StatusBadge variant={variant} />
+                    {featuredInLive ? <Text style={styles.featuredHint}>Featured in this Live</Text> : null}
                   </View>
-                ) : null}
 
-                {description ? <Text style={styles.description}>{description}</Text> : null}
-
-                {countdown ? (
-                  <Text style={styles.countdown}>Your claim · {countdown} left</Text>
-                ) : null}
-
-                {claimError ? <Text style={styles.error}>{claimError}</Text> : null}
-
-                <View style={styles.protection}>
-                  <Text style={styles.protectionTitle}>Buyer Protection included</Text>
-                  <Text style={styles.protectionBody}>
-                    Your payment is held until the order completes — automatically 48 hours after delivery, or
-                    as soon as you confirm receipt.
+                  <Text style={styles.title}>{title}</Text>
+                  <Text style={styles.metaLine}>
+                    {sizeLabel} · {condition} · {brand}
                   </Text>
+                  <Text
+                    style={[
+                      styles.price,
+                      (variant === 'sold' || variant === 'reserved') && styles.priceMuted,
+                      variant === 'sold' && styles.priceStrike,
+                    ]}
+                  >
+                    {price}
+                  </Text>
+
+                  {variant !== 'sold' ? (
+                    <>
+                      <View style={styles.protectRow}>
+                        <ShieldCheckIcon size={16} color={Palette.plum} />
+                        <Text style={styles.protectTotal}>{formatNaira(protectedTotal)}</Text>
+                        <Text style={styles.protectLabel}>incl. Buyer Protection</Text>
+                      </View>
+                      <Text style={styles.protectCopy}>
+                        Covers your payment until the order completes — automatically 48 hours after delivery, or as
+                        soon as you confirm receipt.{' '}
+                        <Text
+                          style={styles.learnMore}
+                          onPress={() => {
+                            onClose();
+                            router.push('/buyer-protection');
+                          }}
+                        >
+                          Learn more
+                        </Text>
+                      </Text>
+                    </>
+                  ) : null}
+
+                  {countdown ? <Text style={styles.countdown}>Your claim · {countdown} left</Text> : null}
+                  {claimError ? <Text style={styles.error}>{claimError}</Text> : null}
+
+                  <Text style={styles.sectionHead}>Description</Text>
+                  <Text style={styles.description}>{shownDescription}</Text>
+                  {descLong ? (
+                    <Pressable onPress={() => setDescOpen((open) => !open)} hitSlop={8}>
+                      <Text style={styles.readMore}>{descOpen ? 'Read less' : 'Read more'}</Text>
+                    </Pressable>
+                  ) : null}
+
+                  <Text style={styles.sectionHead}>Product details</Text>
+                  {details.map((row, index) => (
+                    <View
+                      key={row.label}
+                      style={[styles.detailRow, index === details.length - 1 && styles.detailRowLast]}
+                    >
+                      <Text style={styles.detailLabel}>{row.label}</Text>
+                      <Text style={styles.detailValue}>{row.value}</Text>
+                    </View>
+                  ))}
+
+                  <Text style={styles.sectionHead}>Shipping</Text>
+                  {shippingRows().map((row, index) => (
+                    <View key={row.label} style={[styles.detailRow, index === 1 && styles.detailRowLast]}>
+                      <Text style={styles.detailLabel}>{row.label}</Text>
+                      <Text style={styles.detailValue}>{formatNaira(row.fee)}</Text>
+                    </View>
+                  ))}
+                  <Text style={styles.shippingNote}>
+                    Delivery is chosen at checkout. Buyer Protection applies to every order paid through Throve.
+                  </Text>
+
+                  {listing?.seller ? (
+                    <>
+                      <Text style={styles.sectionHead}>Seller</Text>
+                      <Text style={styles.sellerName}>{listing.seller}</Text>
+                      <Text style={styles.sellerHint}>You’re watching this seller’s Live right now.</Text>
+                    </>
+                  ) : null}
                 </View>
               </ScrollView>
 
@@ -290,7 +382,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingTop: 10,
-    paddingBottom: 8,
+    paddingBottom: 6,
+    zIndex: 2,
   },
   handleSpacer: { width: 34 },
   handle: {
@@ -308,53 +401,44 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scroll: {
-    flexShrink: 1,
+    flex: 1,
   },
   scrollBody: {
+    paddingBottom: 20,
+  },
+  pagerBleed: {
+    marginHorizontal: -0,
+  },
+  thumbs: {
     paddingHorizontal: 16,
-    paddingBottom: 16,
-  },
-  gallery: {
-    flexDirection: 'row',
+    paddingTop: 10,
     gap: 8,
   },
-  hero: {
-    flex: 1.5,
-    height: 168,
-    borderRadius: 10,
+  thumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    borderColor: 'transparent',
     backgroundColor: Palette.skeleton,
   },
-  sideCol: {
-    flex: 1,
-    gap: 8,
+  thumbActive: {
+    borderColor: Palette.plum,
   },
-  side: {
-    flex: 1,
-    minHeight: 80,
-    borderRadius: 10,
-    backgroundColor: Palette.skeleton,
+  thumbImage: {
+    width: '100%',
+    height: '100%',
   },
-  sideWrap: {
-    flex: 1,
-    position: 'relative',
-  },
-  extraOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 10,
-    backgroundColor: 'rgba(27,17,19,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  extraText: {
-    fontSize: 12,
-    fontFamily: Typography.bodySemiBold,
-    color: Palette.muted,
+  body: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
   },
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginTop: 14,
+    marginBottom: 8,
   },
   featuredHint: {
     fontSize: 11,
@@ -398,14 +482,19 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   title: {
-    marginTop: 9,
     fontFamily: Typography.display,
-    fontSize: 23,
-    lineHeight: 28,
+    fontSize: 24,
+    lineHeight: 30,
     color: Palette.espresso,
   },
-  price: {
+  metaLine: {
     marginTop: 6,
+    fontSize: 13,
+    fontFamily: Typography.body,
+    color: Palette.muted,
+  },
+  price: {
+    marginTop: 10,
     fontSize: 22,
     fontFamily: Typography.bodySemiBold,
     color: Palette.plum,
@@ -416,31 +505,32 @@ const styles = StyleSheet.create({
   priceStrike: {
     textDecorationLine: 'line-through',
   },
-  tags: {
+  protectRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 7,
-    marginTop: 12,
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
   },
-  tag: {
-    backgroundColor: Palette.sand,
-    borderWidth: 1,
-    borderColor: '#E7DCD2',
-    borderRadius: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+  protectTotal: {
+    fontSize: 13,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.espresso,
   },
-  tagText: {
-    fontSize: 11,
+  protectLabel: {
+    fontSize: 12,
+    fontFamily: Typography.body,
+    color: Palette.muted,
+  },
+  protectCopy: {
+    marginTop: 6,
+    fontSize: 12,
+    lineHeight: 18,
     fontFamily: Typography.body,
     color: Palette.body,
   },
-  description: {
-    marginTop: 13,
-    fontSize: 12.5,
-    lineHeight: 20,
-    fontFamily: Typography.body,
-    color: Palette.body,
+  learnMore: {
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.plum,
   },
   countdown: {
     marginTop: 12,
@@ -454,21 +544,64 @@ const styles = StyleSheet.create({
     fontFamily: Typography.body,
     color: Palette.errorText,
   },
-  protection: {
-    marginTop: 14,
-    borderTopWidth: 1,
-    borderTopColor: Palette.divider,
-    paddingTop: 13,
-  },
-  protectionTitle: {
-    fontSize: 12.5,
+  sectionHead: {
+    marginTop: 22,
+    marginBottom: 8,
+    fontSize: 15,
     fontFamily: Typography.bodySemiBold,
     color: Palette.espresso,
   },
-  protectionBody: {
-    marginTop: 3,
-    fontSize: 11.5,
+  description: {
+    fontSize: 13.5,
+    lineHeight: 21,
+    fontFamily: Typography.body,
+    color: Palette.body,
+  },
+  readMore: {
+    marginTop: 6,
+    fontSize: 13,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.plum,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: Palette.divider,
+  },
+  detailRowLast: {
+    borderBottomWidth: 0,
+  },
+  detailLabel: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: Typography.body,
+    color: Palette.muted,
+  },
+  detailValue: {
+    flex: 1,
+    textAlign: 'right',
+    fontSize: 13,
+    fontFamily: Typography.bodyMedium,
+    color: Palette.espresso,
+  },
+  shippingNote: {
+    marginTop: 8,
+    fontSize: 12,
     lineHeight: 18,
+    fontFamily: Typography.body,
+    color: Palette.muted,
+  },
+  sellerName: {
+    fontSize: 14,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.espresso,
+  },
+  sellerHint: {
+    marginTop: 4,
+    fontSize: 12,
     fontFamily: Typography.body,
     color: Palette.muted,
   },

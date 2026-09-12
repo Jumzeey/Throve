@@ -66,7 +66,7 @@ type DockProps = {
  * Bottom-docked composer / action bar that stays above the software keyboard.
  * Prefer this over hand-rolled `paddingBottom: keyboard.height` in screens.
  */
-export function KeyboardSafeDock({ children, style, gap = 0, absolute = false }: DockProps) {
+export function KeyboardSafeDock({ children, style, gap = 12, absolute = false }: DockProps) {
   const { sheetBottom } = useScreenInsets();
   const { height: windowHeight } = useWindowDimensions();
   const { height: keyboardHeight, screenY } = useKeyboardInset();
@@ -76,11 +76,11 @@ export function KeyboardSafeDock({ children, style, gap = 0, absolute = false }:
   const padBottom = !open
     ? sheetBottom
     : windowAlreadyResized
-      ? Math.max(sheetBottom, 8)
+      ? Math.max(gap, 12)
       : keyboardHeight + gap;
 
   return (
-    <View style={[absolute ? styles.dockAbsolute : null, { paddingBottom: padBottom }, style]}>{children}</View>
+    <View style={[absolute ? styles.dockAbsolute : null, style, { paddingBottom: padBottom }]}>{children}</View>
   );
 }
 

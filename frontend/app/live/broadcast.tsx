@@ -5,7 +5,6 @@ import {
   LiveCommentRow,
   LiveComposer,
   LiveConnectionOverlay,
-  LiveHostCameraSwitch,
   LiveHostTopBar,
   LiveStage,
 } from '@/components/live/live-stage';
@@ -337,11 +336,7 @@ export default function LiveBroadcastScreen() {
           ) : null}
         </View>
 
-        <View style={styles.flex} pointerEvents="box-none">
-          <View style={styles.leftRail} pointerEvents="box-none">
-            <LiveHostCameraSwitch />
-          </View>
-        </View>
+        <View style={styles.flex} pointerEvents="box-none" />
 
         <View
           style={[
@@ -394,7 +389,7 @@ export default function LiveBroadcastScreen() {
 
         {notice ? <Text style={styles.notice}>{notice}</Text> : null}
 
-        <KeyboardSafeDock absolute style={styles.composerWrap}>
+        <KeyboardSafeDock absolute gap={16} style={styles.composerWrap}>
           <LiveComposer
             value={commentDraft}
             onChangeText={setCommentDraft}
@@ -521,11 +516,6 @@ function ProductPickerSheet({
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Palette.liveDark },
   flex: { flex: 1 },
-  leftRail: {
-    alignSelf: 'flex-start',
-    paddingLeft: 16,
-    paddingTop: 12,
-  },
   topArea: {
     gap: 10,
     paddingHorizontal: 16,

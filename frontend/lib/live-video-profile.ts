@@ -1,16 +1,32 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import type { RoomOptions } from 'livekit-client';
-import { VideoPresets } from 'livekit-client';
 
 export type LiveVideoProfileId = 'legacy' | 'test';
 
 export type LiveVideoTier = 'legacy' | 'test' | 'test_low_end';
 
+/** Subset of livekit-client RoomOptions — keep local so we never load livekit-client here. */
+type LiveKitRoomOptionsLite = {
+  adaptiveStream?: boolean | { pixelDensity?: 'screen' | number };
+  dynacast?: boolean;
+  videoCaptureDefaults?: {
+    resolution?: { width: number; height: number; frameRate?: number };
+  };
+  publishDefaults?: {
+    videoCodec?: 'vp8' | 'h264' | 'vp9' | 'av1';
+    videoEncoding?: { maxBitrate?: number; maxFramerate?: number };
+    simulcast?: boolean;
+  };
+};
+
 const LOW_END_RAM_BYTES = 3 * 1024 * 1024 * 1024;
 const PROFILE_OVERRIDE_KEY = 'throve.live_video_profile_override';
 
 const ADAPTIVE_STREAM = { pixelDensity: 'screen' as const };
+
+/** Match livekit-client VideoPresets without importing the package (DOMException on RN). */
+const CAPTURE_H720 = { width: 1280, height: 720, frameRate: 30 } as const;
+const CAPTURE_H540 = { width: 960, height: 540, frameRate: 24 } as const;
 
 const canUseAsyncStorage = Platform.OS !== 'web' || typeof window !== 'undefined';
 const memoryStore = new Map<string, string>();
@@ -24,7 +40,7 @@ export type LiveVideoProfileResolution = {
   profile: LiveVideoProfileId;
   tier: LiveVideoTier;
   lowEnd: boolean;
-  roomOptions: RoomOptions;
+  roomOptions: LiveKitRoomOptionsLite;
   summary: {
     codec: string;
     capture: string;
@@ -95,32 +111,32 @@ export function isLowEndAndroidDevice(totalMemoryBytes: number | null | undefine
   return totalMemoryBytes <= LOW_END_RAM_BYTES;
 }
 
-function testRoomOptions(lowEnd: boolean): RoomOptions {
-  const capture = lowEnd ? VideoPresets.h540 : VideoPresets.h720;
+function testRoomOptions(lowEnd: boolean): LiveKitRoomOptionsLite {
+  const capture = lowEnd ? CAPTURE_H540 : CAPTURE_H720;
   const maxBitrate = lowEnd ? 1_500_000 : 2_500_000;
-  const maxFramerate = lowEnd ? 24 : 30;
 
   return {
     adaptiveStream: ADAPTIVE_STREAM,
     dynacast: true,
     videoCaptureDefaults: {
       resolution: {
-        ...capture.resolution,
-        frameRate: maxFramerate,
+        width: capture.width,
+        height: capture.height,
+        frameRate: capture.frameRate,
       },
     },
     publishDefaults: {
       videoCodec: 'h264',
       videoEncoding: {
         maxBitrate,
-        maxFramerate,
+        maxFramerate: capture.frameRate,
       },
       simulcast: true,
     },
   };
 }
 
-function legacyRoomOptions(): RoomOptions {
+function legacyRoomOptions(): LiveKitRoomOptionsLite {
   return {
     adaptiveStream: ADAPTIVE_STREAM,
   };

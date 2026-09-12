@@ -887,16 +887,21 @@ export function EndLiveDialog({
 
 export function LiveHostCameraSwitch() {
   const camera = useHostCamera();
-  if (!camera.ready) return null;
+  const disabled = !camera.ready || camera.switching;
   return (
     <View style={styles.sideRail} pointerEvents="box-none">
       <LiveIconButton
-        onPress={camera.switching ? undefined : camera.switchCamera}
+        onPress={disabled ? undefined : camera.switchCamera}
         accessibilityLabel={camera.facing === 'user' ? 'Switch to back camera' : 'Switch to front camera'}
       >
-        <CameraSwitchIcon size={18} color={camera.switching ? 'rgba(255,247,240,0.45)' : Palette.ivory} />
+        <CameraSwitchIcon
+          size={18}
+          color={disabled ? 'rgba(255,247,240,0.45)' : Palette.ivory}
+        />
       </LiveIconButton>
-      <Text style={styles.sideRailLabel}>{camera.facing === 'user' ? 'Front' : 'Back'}</Text>
+      <Text style={[styles.sideRailLabel, disabled && styles.sideRailLabelDim]}>
+        {camera.facing === 'user' ? 'Front' : 'Back'}
+      </Text>
     </View>
   );
 }
@@ -921,11 +926,16 @@ export function LiveHostTopBar({
   return (
     <>
       <View style={styles.hostTopBar}>
-        {onLeave ? (
-          <LiveIconButton onPress={onLeave}>
-            <ChevronBackIcon size={18} color={Palette.ivory} />
-          </LiveIconButton>
-        ) : null}
+        <View style={styles.hostLeftCol}>
+          {onLeave ? (
+            <LiveIconButton onPress={onLeave}>
+              <ChevronBackIcon size={18} color={Palette.ivory} />
+            </LiveIconButton>
+          ) : (
+            <View style={styles.hostLeftPlaceholder} />
+          )}
+          <LiveHostCameraSwitch />
+        </View>
         <LiveBadgeRow
           viewers={viewers}
           duration={duration}
@@ -1434,8 +1444,16 @@ const styles = StyleSheet.create({
   },
   hostTopBar: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 6,
+  },
+  hostLeftCol: {
+    alignItems: 'center',
+    gap: 10,
+  },
+  hostLeftPlaceholder: {
+    width: 34,
+    height: 34,
   },
   hostTopSpacer: {
     flex: 1,
@@ -1467,5 +1485,8 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(27,17,19,0.7)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
+  },
+  sideRailLabelDim: {
+    color: 'rgba(255,247,240,0.45)',
   },
 });

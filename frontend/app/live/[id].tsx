@@ -534,7 +534,7 @@ export default function LiveViewerScreen() {
           host={activeSession.host}
         />
 
-        <KeyboardSafeDock absolute style={styles.composerWrap}>
+        <KeyboardSafeDock absolute gap={16} style={styles.composerWrap}>
           <LiveComposer
             value={draft}
             onChangeText={setDraft}
@@ -825,7 +825,6 @@ const styles = StyleSheet.create({
   composerWrap: {
     paddingHorizontal: SIDE_INSET,
     paddingTop: 12,
-    paddingBottom: 0,
   },
   endedScreen: {
     paddingHorizontal: 20,
