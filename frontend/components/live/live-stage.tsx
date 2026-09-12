@@ -20,11 +20,16 @@ import { Palette, Radius, Typography } from '@/constants/theme';
 import type { LiveConnection, LiveComment, LiveMediaCredentials } from '@/data/types';
 import { loadLiveKitNative, resetLiveKitNativeLoad, getLiveKitLoadFailure, getLiveKitLoadFailureDetail, type LiveKitNative } from '@/lib/livekit-native';
 import {
+  applyLivePublishEncoding,
+  getLiveCaptureOptions,
   getLiveKitRoomOptions,
+  getLivePublishEncoding,
   loadLiveVideoProfileOverride,
   logLiveVideoProfile,
   resolveLiveVideoProfile,
+  type LiveCameraFacing,
   type LiveVideoProfileResolution,
+  type LiveVideoTier,
 } from '@/lib/live-video-profile';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -328,6 +333,8 @@ const LiveKitVideoLayer = memo(function LiveKitVideoLayer({
           platform: Platform.OS,
           profile: resolveLiveVideoProfile(),
           totalMemoryBytes,
+          // Host CameraLayer starts on front camera.
+          facingMode: 'user',
         }),
       });
     })();
@@ -444,6 +451,7 @@ const LiveKitVideoLayer = memo(function LiveKitVideoLayer({
           rn={mods.rn}
           client={mods.client}
           isHost={isHost}
+          videoTier={videoProfile.resolution.tier}
           onCameraApi={onCameraApi}
         />
       </LiveKitRoom>
@@ -455,11 +463,13 @@ function CameraLayer({
   rn,
   client,
   isHost,
+  videoTier,
   onCameraApi,
 }: {
   rn: LiveKitModule;
   client: LivekitClient;
   isHost: boolean;
+  videoTier: LiveVideoTier;
   onCameraApi?: (api: HostCameraApi) => void;
 }) {
   const { VideoTrack, useTracks, useLocalParticipant } = rn;
@@ -473,7 +483,11 @@ function CameraLayer({
     let cancelled = false;
     (async () => {
       try {
-        await localParticipant.setCameraEnabled(true, { facingMode: facing });
+        const capture =
+          videoTier === 'legacy'
+            ? { facingMode: 'user' as LiveCameraFacing }
+            : getLiveCaptureOptions('user', videoTier);
+        await localParticipant.setCameraEnabled(true, capture);
         await localParticipant.setMicrophoneEnabled(true);
         if (!cancelled) setPublishError(null);
       } catch (err) {
@@ -494,28 +508,62 @@ function CameraLayer({
     const next: CameraFacing = facing === 'user' ? 'environment' : 'user';
     setSwitching(true);
     void (async () => {
+      const capture =
+        videoTier === 'legacy'
+          ? { facingMode: next }
+          : getLiveCaptureOptions(next, videoTier);
+      const encoding = getLivePublishEncoding(next, videoTier);
       try {
         const publication = localParticipant.getTrackPublication(client.Track.Source.Camera);
         const track = publication?.track as
           | {
-              restartTrack?: (opts: { facingMode: CameraFacing }) => Promise<void>;
+              restartTrack?: (opts: {
+                facingMode: LiveCameraFacing;
+                resolution?: { width: number; height: number; frameRate?: number };
+              }) => Promise<void>;
               mediaStreamTrack?: { _switchCamera?: () => void };
+              sender?: {
+                getParameters: () => { encodings?: Array<{ maxBitrate?: number; maxFramerate?: number }> };
+                setParameters: (params: {
+                  encodings?: Array<{ maxBitrate?: number; maxFramerate?: number }>;
+                }) => Promise<void>;
+              };
             }
           | undefined;
         if (typeof track?.restartTrack === 'function') {
-          await track.restartTrack({ facingMode: next });
-        } else if (typeof track?.mediaStreamTrack?._switchCamera === 'function') {
+          await track.restartTrack(capture);
+          await applyLivePublishEncoding(track, encoding);
+        } else if (videoTier === 'legacy' && typeof track?.mediaStreamTrack?._switchCamera === 'function') {
           track.mediaStreamTrack._switchCamera();
         } else {
           await localParticipant.setCameraEnabled(false);
-          await localParticipant.setCameraEnabled(true, { facingMode: next });
+          await localParticipant.setCameraEnabled(true, capture);
+          const republished = localParticipant.getTrackPublication(client.Track.Source.Camera)?.track as
+            | {
+                sender?: {
+                  getParameters: () => { encodings?: Array<{ maxBitrate?: number; maxFramerate?: number }> };
+                  setParameters: (params: {
+                    encodings?: Array<{ maxBitrate?: number; maxFramerate?: number }>;
+                  }) => Promise<void>;
+                };
+              }
+            | undefined;
+          await applyLivePublishEncoding(republished, encoding);
         }
         setFacing(next);
+        if (videoTier !== 'legacy') {
+          console.log('[live-video-profile] camera switch', {
+            facing: next,
+            tier: videoTier,
+            capture,
+            encoding,
+          });
+        }
       } catch (err) {
         console.warn('[livekit] switch camera failed', err);
         try {
           await localParticipant.setCameraEnabled(false);
-          await localParticipant.setCameraEnabled(true, { facingMode: next });
+          await localParticipant.setCameraEnabled(true, capture);
           setFacing(next);
         } catch (fallbackErr) {
           console.warn('[livekit] switch camera fallback failed', fallbackErr);
@@ -524,7 +572,7 @@ function CameraLayer({
         setSwitching(false);
       }
     })();
-  }, [client.Track.Source.Camera, facing, isHost, localParticipant, switching]);
+  }, [client.Track.Source.Camera, facing, isHost, localParticipant, switching, videoTier]);
 
   const tracks = useTracks([client.Track.Source.Camera], { onlySubscribed: !isHost });
   const track = tracks[0];
