@@ -407,7 +407,7 @@ export default function ShippingDetailsScreen() {
                 value={activeDraft.deliveryNote}
                 multiline
                 style={styles.noteInput}
-                onFocus={() => keyboardScroll.onFieldFocus('note')}
+                onFocus={() => keyboardScroll.onFieldFocus('note', { multiline: true })}
                 onChangeText={(deliveryNote) => checkout.updateDraft({ deliveryNote })}
               />
             </View>

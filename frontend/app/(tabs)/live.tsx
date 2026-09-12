@@ -10,6 +10,7 @@ import { getLiveImage } from '@/data/images';
 import { useLive } from '@/context/live-context';
 import type { LiveSession } from '@/data/types';
 import { formatLiveSchedule, formatNaira } from '@/lib/format';
+import { apiFetch } from '@/lib/api';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { StatusBar, setStatusBarStyle } from 'expo-status-bar';
@@ -36,11 +37,12 @@ function categoryLine(session: LiveSession, includeCategory = true) {
 export default function LiveDiscoveryScreen() {
   const { top, tabScrollBottom } = useScreenInsets();
   const router = useRouter();
-  const { session, publicProfiles, ensurePublicProfile } = useAuth();
+  const { session, publicProfiles, ensurePublicProfile, refreshSession } = useAuth();
   const { liveNow, upcoming, recentlyEnded, loading, loadError, refresh, goLiveNow, isLiveSaved, toggleSaveLive } =
     useLive();
   const { isConnected } = useNetworkStatus();
   const [startingId, setStartingId] = useState<string | null>(null);
+  const [canHostLive, setCanHostLive] = useState(Boolean(session?.canHostLive));
 
   useFocusEffect(
     useCallback(() => {
@@ -48,6 +50,38 @@ export default function LiveDiscoveryScreen() {
       void refresh();
       return () => setStatusBarStyle('dark');
     }, [refresh]),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      async function checkHostAccess() {
+        if (!session) {
+          if (!cancelled) setCanHostLive(false);
+          return;
+        }
+        if (session.canHostLive) {
+          if (!cancelled) setCanHostLive(true);
+          return;
+        }
+        try {
+          const data = await apiFetch<{ canHostLive: boolean }>('/live/host-access');
+          if (cancelled) return;
+          if (data.canHostLive) {
+            setCanHostLive(true);
+            void refreshSession();
+          } else {
+            setCanHostLive(false);
+          }
+        } catch {
+          if (!cancelled) setCanHostLive(Boolean(session.canHostLive));
+        }
+      }
+      void checkHostAccess();
+      return () => {
+        cancelled = true;
+      };
+    }, [refreshSession, session]),
   );
 
   useEffect(() => {
@@ -75,8 +109,22 @@ export default function LiveDiscoveryScreen() {
     <View style={[styles.screen, { paddingTop: top }]}>
       <StatusBar style="light" />
       <View style={styles.header}>
-        <Text style={styles.title}>Live</Text>
-        <Text style={styles.subtitle}>Shop in real time with Throve sellers</Text>
+        <View style={styles.headerRow}>
+          <View style={styles.headerCopy}>
+            <Text style={styles.title}>Live</Text>
+            <Text style={styles.subtitle}>Shop in real time with Throve sellers</Text>
+          </View>
+          {canHostLive ? (
+            <Pressable
+              onPress={() => router.push('/live/prepare')}
+              style={styles.createLiveBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Create live"
+            >
+              <Text style={styles.createLiveBtnText}>Create live</Text>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
 
       <LiquidRefreshScrollView
@@ -434,6 +482,15 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 8,
   },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  headerCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
   title: {
     fontSize: 28,
     lineHeight: 28,
@@ -446,6 +503,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: Typography.body,
     color: IVORY_60,
+  },
+  createLiveBtn: {
+    marginTop: 2,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 16,
+    backgroundColor: Palette.ivory,
+  },
+  createLiveBtnText: {
+    fontSize: 12,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.espresso,
   },
   body: {
     paddingHorizontal: 20,

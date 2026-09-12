@@ -67,6 +67,7 @@ function RootNavigator() {
       <Stack.Screen name="search" />
       <Stack.Screen name="category-browse" />
       <Stack.Screen name="privacy-policy" />
+      <Stack.Screen name="buyer-protection" />
       <Stack.Screen name="product/[id]" />
       <Stack.Screen name="live" />
       <Stack.Screen name="checkout" />

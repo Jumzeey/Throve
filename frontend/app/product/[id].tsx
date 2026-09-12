@@ -379,9 +379,15 @@ export default function ProductScreen() {
                 amount,
                 initiator: 'buyer',
               })
-              .then((created) => {
+              .then(async (created) => {
                 setOfferOpen(false);
-                if (created) setBanner(`Offer of ${formatNaira(amount)} sent`);
+                if (!created) return;
+                try {
+                  const conv = await inbox.openOrCreateConversation(product.seller, product.id, username);
+                  router.push(`/inbox/chat/${conv.id}`);
+                } catch {
+                  setBanner(`Offer of ${formatNaira(amount)} sent`);
+                }
               });
           }}
         />

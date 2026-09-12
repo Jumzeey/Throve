@@ -9,7 +9,8 @@ import {
   LiveHostTopBar,
   LiveStage,
 } from '@/components/live/live-stage';
-import { PinnedProductCard, type PinnedProductVariant } from '@/components/live/pinned-product-card';
+import { FeaturedLiveCard } from '@/components/live/featured-live-card';
+import type { PinnedProductVariant } from '@/components/live/pinned-product-card';
 import { AppImage } from '@/components/ui/app-image';
 import { SpinnerArcIcon } from '@/components/ui/icons';
 import { Palette, Radius, Typography } from '@/constants/theme';
@@ -39,13 +40,14 @@ function formatLiveDuration(ms: number) {
 }
 
 /** Space reserved above the absolutely docked composer (input row + top padding). */
-const COMPOSER_CLEARANCE = 70;
+const COMPOSER_INPUT = 58;
 
 export default function LiveBroadcastScreen() {
   const router = useRouter();
-  const { top } = useScreenInsets();
+  const { top, sheetBottom } = useScreenInsets();
   const keyboard = useKeyboardInset();
   const keyboardOpen = keyboard.height > 0;
+  const dockClearance = COMPOSER_INPUT + sheetBottom;
   const now = useLiveClock();
   const { session } = useAuth();
   const { getListing } = useListings();
@@ -264,7 +266,6 @@ export default function LiveBroadcastScreen() {
   const connection = live.getConnection(liveSession.id);
   const comments = live.getComments(liveSession.id);
   const products = live.getProducts(liveSession.id);
-  const pinnedListing = pinnedProduct ? getListing(pinnedProduct.listingId) : undefined;
   const moderators = live.getModerators(liveSession.id);
   const sessionId = liveSession.id;
   const suggestedMods = inbox
@@ -282,15 +283,6 @@ export default function LiveBroadcastScreen() {
     setCommentDraft('');
   }
 
-  function pinNextProduct() {
-    if (!products.length) return;
-    const available = products.filter((p) => p.soldCount < p.stock || p.available > 0 || p.reservedCount > 0);
-    const pool = available.length ? available : products;
-    const currentIndex = pool.findIndex((p) => p.isPinned);
-    const next = pool[(currentIndex + 1) % pool.length];
-    if (next) void live.pinProduct(sessionId, next.id);
-  }
-
   async function reportComment(comment: LiveComment) {
     try {
       await apiFetch(`/live/sessions/${sessionId}/report`, {
@@ -303,17 +295,6 @@ export default function LiveBroadcastScreen() {
     }
     setTimeout(() => setNotice(null), 2200);
   }
-
-  const subtitle = [
-    pinnedProduct?.size && pinnedProduct.size !== '—'
-      ? pinnedProduct.size
-      : pinnedListing?.size && pinnedListing.size !== '—'
-        ? pinnedListing.size
-        : null,
-    pinnedProduct?.condition ?? pinnedListing?.condition,
-  ]
-    .filter(Boolean)
-    .join(' · ');
 
   return (
     <View style={styles.screen}>
@@ -366,7 +347,7 @@ export default function LiveBroadcastScreen() {
           style={[
             styles.commentsArea,
             keyboardOpen ? styles.commentsAreaKeyboard : null,
-            !pinnedProduct || keyboardOpen ? { marginBottom: COMPOSER_CLEARANCE } : null,
+            keyboardOpen ? { marginBottom: dockClearance } : null,
           ]}
         >
           {comments.length === 0 ? (
@@ -395,18 +376,18 @@ export default function LiveBroadcastScreen() {
 
         <LiveConnectionOverlay connection={connection} />
 
-        {pinnedProduct && !keyboardOpen ? (
-          <View style={[styles.productWrap, { marginBottom: COMPOSER_CLEARANCE }]} pointerEvents="box-none">
-            <PinnedProductCard
-              role="host"
-              title={pinnedProduct.title ?? pinnedListing?.title ?? 'Product'}
-              subtitle={subtitle || undefined}
-              price={formatNaira(pinnedProduct.livePrice)}
-              listingId={pinnedProduct.listingId}
-              imageUri={pinnedProduct.photoUrls?.[0]}
-              variant={productVariant}
-              onChangeProduct={() => setPickerOpen(true)}
-              onNextProduct={pinNextProduct}
+        {!keyboardOpen ? (
+          <View style={[styles.productWrap, { marginBottom: dockClearance }]} pointerEvents="box-none">
+            <FeaturedLiveCard
+              title={pinnedProduct?.title}
+              price={pinnedProduct ? formatNaira(pinnedProduct.livePrice) : undefined}
+              listingId={pinnedProduct?.listingId}
+              imageUri={pinnedProduct?.photoUrls?.[0]}
+              variant={pinnedProduct ? productVariant : 'none'}
+              itemCount={products.length}
+              actionLabel="Change"
+              onPress={() => setPickerOpen(true)}
+              onBrowseCatalog={() => setPickerOpen(true)}
             />
           </View>
         ) : null}
@@ -593,6 +574,7 @@ const styles = StyleSheet.create({
   productWrap: {
     paddingHorizontal: 14,
     paddingTop: 8,
+    alignItems: 'flex-end',
   },
   notice: {
     paddingHorizontal: 16,

@@ -1,40 +1,60 @@
 import {
-  LiveCommentRow,
   LiveComposer,
   LiveConnectionOverlay,
-  LiveHostChip,
   LiveReportSheet,
   LiveStage,
-  LiveViewerTopBar,
 } from '@/components/live/live-stage';
-import { PinnedProductCard, type PinnedProductVariant } from '@/components/live/pinned-product-card';
+import { FeaturedLiveCard } from '@/components/live/featured-live-card';
+import { LiveCatalogSheet, liveProductVariant } from '@/components/live/live-catalog-sheet';
+import { LiveListingDrawer } from '@/components/live/live-listing-drawer';
+import { LiveWatchersSheet } from '@/components/live/watchers-sheet';
+import type { PinnedProductVariant } from '@/components/live/pinned-product-card';
+import { ProfileAvatar } from '@/components/ui/profile-avatar';
+import { ModeratorBadge } from '@/components/ui/status-chip';
+import {
+  BagIcon,
+  ChevronBackIcon,
+  HeartIcon,
+  MoreHorizontalIcon,
+  ShareIcon,
+  UserIcon,
+} from '@/components/ui/icons';
 import { Palette, Typography } from '@/constants/theme';
-import type { LiveConnection, LiveMediaCredentials } from '@/data/types';
+import type { LiveConnection, LiveMediaCredentials, LiveStreamProduct } from '@/data/types';
 import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
-import { useLive, useLiveClock } from '@/context/live-context';
+import { useLive } from '@/context/live-context';
 import { apiFetch } from '@/lib/api';
-import { formatCountdown, formatNaira } from '@/lib/format';
+import { formatNaira } from '@/lib/format';
+import { openNativeShare } from '@/lib/share-listing';
 import { KeyboardSafeDock } from '@/components/ui/keyboard-safe';
 import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Dimensions,
+  Pressable,
+  Share,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
-/** Space reserved above the absolutely docked composer (input row + top padding). */
-const COMPOSER_CLEARANCE = 70;
+const SIDE_INSET = 14;
 
 export default function LiveViewerScreen() {
   const router = useRouter();
   const { top, sheetBottom } = useScreenInsets();
   const keyboard = useKeyboardInset();
   const keyboardOpen = keyboard.height > 0;
+  const dockClearance = 58 + Math.max(sheetBottom, 22);
   const { id } = useLocalSearchParams<{ id: string }>();
   const { session } = useAuth();
   const live = useLive();
   const checkout = useCheckout();
+
   const [draft, setDraft] = useState('');
   const [note, setNote] = useState<string | null>(null);
   const [credentials, setCredentials] = useState<LiveMediaCredentials | null>(null);
@@ -43,6 +63,13 @@ export default function LiveViewerScreen() {
   const [claimError, setClaimError] = useState<string | null>(null);
   const [claiming, setClaiming] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [watchersOpen, setWatchersOpen] = useState(false);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [listingOpen, setListingOpen] = useState(false);
+  const [drawerProduct, setDrawerProduct] = useState<LiveStreamProduct | null>(null);
+  const [liked, setLiked] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followBusy, setFollowBusy] = useState(false);
   const claimingRef = useRef(false);
 
   const sessionId = Array.isArray(id) ? id[0] : id;
@@ -53,6 +80,8 @@ export default function LiveViewerScreen() {
 
   const subscribeSession = live.subscribeSession;
   const fetchLiveMedia = live.fetchLiveMedia;
+  const shortScreen = Dimensions.get('window').height < 720;
+  const maxComments = shortScreen ? 2 : 3;
 
   useEffect(() => {
     if (!sessionId || viewSession?.status === 'ended') return;
@@ -91,28 +120,61 @@ export default function LiveViewerScreen() {
     if (live.roomNotice) setNote(live.roomNotice);
   }, [live.roomNotice]);
 
+  useEffect(() => {
+    if (keyboardOpen) {
+      setCatalogOpen(false);
+      setListingOpen(false);
+      setReportOpen(false);
+      setWatchersOpen(false);
+    }
+  }, [keyboardOpen]);
+
+  useEffect(() => {
+    const host = viewSession?.host;
+    if (!host || host === session?.username) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const profile = await apiFetch<{ isFollowing?: boolean }>(
+          `/profiles/${encodeURIComponent(host)}/public`,
+        );
+        if (!cancelled) setIsFollowing(Boolean(profile.isFollowing));
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.username, viewSession?.host]);
+
   const pinnedProduct = viewSession ? live.getPinnedProduct(viewSession.id) : undefined;
-  const pinnedListing = pinnedProduct
-    ? live.resolveListing(pinnedProduct.listingId)
-    : live.resolveListing(viewSession?.pinnedListingId);
+  const products = viewSession ? live.getProducts(viewSession.id) : [];
   const claim = viewSession ? live.getClaim(viewSession.id) : undefined;
   const hasActiveClaim = Boolean(
     claim && claim.status === 'active' && claim.productId === pinnedProduct?.id,
   );
   const claimedByMe = Boolean(hasActiveClaim && session?.username === claim?.username);
-  const reservedCount = pinnedProduct?.reservedCount ?? 0;
-  const soldCount = pinnedProduct?.soldCount ?? 0;
-  const stock = pinnedProduct?.stock ?? 0;
-  const available = pinnedProduct?.available ?? Math.max(0, stock - reservedCount - soldCount);
 
-  const productVariant: PinnedProductVariant = useMemo(() => {
-    if (!pinnedProduct) return 'available';
-    const soldOut = soldCount >= stock || (available <= 0 && reservedCount <= 0);
-    if (soldOut) return 'sold';
-    if (claimedByMe) return 'your_claim';
-    if (reservedCount > 0 && available <= 0) return 'reserved';
-    return 'available';
-  }, [available, claimedByMe, pinnedProduct, reservedCount, soldCount, stock]);
+  const productVariant: PinnedProductVariant | 'none' = useMemo(() => {
+    if (!pinnedProduct) return 'none';
+    return liveProductVariant(pinnedProduct, claimedByMe);
+  }, [claimedByMe, pinnedProduct]);
+
+  const drawerVariant: PinnedProductVariant = useMemo(() => {
+    if (!drawerProduct) return 'available';
+    const mine = Boolean(
+      claim &&
+        claim.status === 'active' &&
+        claim.productId === drawerProduct.id &&
+        session?.username === claim.username,
+    );
+    return liveProductVariant(drawerProduct, mine);
+  }, [claim, drawerProduct, session?.username]);
+
+  const drawerListing = drawerProduct ? live.resolveListing(drawerProduct.listingId) : null;
+  const comments = viewSession ? live.getComments(viewSession.id) : [];
+  const visibleComments = comments.slice(-maxComments);
 
   const onConnectionChange = useCallback(
     (state: LiveConnection) => {
@@ -147,7 +209,7 @@ export default function LiveViewerScreen() {
             <Text style={styles.endedWatchLabel}>Watch · unavailable</Text>
           </View>
           <Text style={styles.endedHint}>
-            Ended sessions can't be entered. View the seller's profile instead.
+            Ended sessions can&apos;t be entered. View the seller&apos;s profile instead.
           </Text>
         </View>
         <View style={styles.endedActions}>
@@ -169,8 +231,8 @@ export default function LiveViewerScreen() {
 
   const activeSession = viewSession;
   const connection = live.getConnection(activeSession.id);
-  const comments = live.getComments(activeSession.id);
   const username = session.username;
+  const isOwnLive = username === activeSession.host;
 
   function leave() {
     router.replace('/(tabs)/live');
@@ -178,6 +240,52 @@ export default function LiveViewerScreen() {
 
   function openSeller() {
     router.push({ pathname: '/seller/[username]', params: { username: activeSession.host } });
+  }
+
+  function openListing(product: LiveStreamProduct) {
+    setDrawerProduct(product);
+    setCatalogOpen(false);
+    setListingOpen(true);
+  }
+
+  function openFeatured() {
+    if (pinnedProduct) openListing(pinnedProduct);
+    else setCatalogOpen(true);
+  }
+
+  async function toggleFollow() {
+    if (isOwnLive || followBusy) return;
+    setFollowBusy(true);
+    try {
+      const result = await apiFetch<{ isFollowing: boolean }>(
+        `/profiles/${encodeURIComponent(activeSession.host)}/follow`,
+        { method: isFollowing ? 'DELETE' : 'POST' },
+      );
+      setIsFollowing(result.isFollowing);
+      setNote(result.isFollowing ? `You're following ${activeSession.host}` : `Unfollowed ${activeSession.host}`);
+      setTimeout(() => setNote(null), 1800);
+    } catch {
+      setNote("Couldn't update follow. Try again.");
+      setTimeout(() => setNote(null), 1800);
+    } finally {
+      setFollowBusy(false);
+    }
+  }
+
+  async function shareLive() {
+    const featured = pinnedProduct ?? products[0];
+    if (featured?.listingId) {
+      await openNativeShare({
+        id: featured.listingId,
+        title: featured.title ?? activeSession.title,
+        price: featured.livePrice,
+      });
+      return;
+    }
+    await Share.share({
+      message: `Watch ${activeSession.host} live on Throve: ${activeSession.title}`,
+      title: activeSession.title,
+    });
   }
 
   async function submitReport(kind: 'session' | 'user' | 'listing') {
@@ -212,13 +320,13 @@ export default function LiveViewerScreen() {
     setDraft('');
   }
 
-  async function claimNow() {
-    if (!pinnedProduct || claimingRef.current) return;
+  async function claimProduct(product: LiveStreamProduct) {
+    if (claimingRef.current) return;
     claimingRef.current = true;
     setClaiming(true);
     setClaimError(null);
     try {
-      await live.claimProduct(activeSession.id, pinnedProduct.id, 1);
+      await live.claimProduct(activeSession.id, product.id, 1);
     } catch (err) {
       setClaimError(err instanceof Error ? err.message : 'Claim failed');
     } finally {
@@ -227,20 +335,21 @@ export default function LiveViewerScreen() {
     }
   }
 
-  async function buyNow() {
-    if (!pinnedProduct || claimingRef.current) return;
+  async function buyNowProduct(product: LiveStreamProduct) {
+    if (claimingRef.current) return;
     claimingRef.current = true;
     setClaiming(true);
     setClaimError(null);
     try {
-      const nextClaim = await live.claimProduct(activeSession.id, pinnedProduct.id, 1);
+      const nextClaim = await live.claimProduct(activeSession.id, product.id, 1);
       await checkout.startCheckout({
-        listingId: pinnedProduct.listingId,
+        listingId: product.listingId,
         liveSessionId: activeSession.id,
-        liveStreamProductId: pinnedProduct.id,
+        liveStreamProductId: product.id,
         claimId: nextClaim.id,
         buyer: username,
       });
+      setListingOpen(false);
       router.push('/checkout/shipping');
     } catch (err) {
       setClaimError(err instanceof Error ? err.message : 'Claim failed');
@@ -250,30 +359,21 @@ export default function LiveViewerScreen() {
     }
   }
 
-  async function goCheckout() {
-    if (!pinnedProduct) return;
+  async function goCheckout(product: LiveStreamProduct) {
     try {
       await checkout.startCheckout({
-        listingId: pinnedProduct.listingId,
+        listingId: product.listingId,
         liveSessionId: activeSession.id,
-        liveStreamProductId: pinnedProduct.id,
+        liveStreamProductId: product.id,
         claimId: claim?.id,
         buyer: username,
       });
+      setListingOpen(false);
       router.push('/checkout/shipping');
     } catch (err) {
       setClaimError(err instanceof Error ? err.message : 'Checkout failed');
     }
   }
-
-  const sizeLabel =
-    pinnedProduct?.size && pinnedProduct.size !== '—'
-      ? pinnedProduct.size
-      : pinnedListing?.size && pinnedListing.size !== '—'
-        ? pinnedListing.size
-        : null;
-  const conditionLabel = pinnedProduct?.condition ?? pinnedListing?.condition;
-  const subtitle = [sizeLabel, conditionLabel].filter(Boolean).join(' · ');
 
   return (
     <View style={styles.screen}>
@@ -291,46 +391,140 @@ export default function LiveViewerScreen() {
         onConnectionChange={onConnectionChange}
       >
         <View style={[styles.topArea, { paddingTop: top + 8 }]}>
-          <LiveViewerTopBar
-            viewers={activeSession.viewers}
-            sessionId={activeSession.id}
-            onClose={leave}
-            onMore={() => setReportOpen(true)}
-          />
-          <LiveHostChip
-            host={activeSession.host}
-            photoUrl={activeSession.hostPhotoUrl}
-            subtitle={`${activeSession.title} · View profile`}
-            onPress={openSeller}
-          />
+          <Pressable onPress={leave} style={styles.iconBtn} accessibilityLabel="Back">
+            <ChevronBackIcon size={17} color={Palette.ivory} strokeWidth={1.9} />
+          </Pressable>
+
+          <Pressable style={styles.hostPill} accessibilityLabel="Host profile">
+            <Pressable onPress={openSeller} style={styles.hostPress} accessibilityLabel="Open seller">
+              <ProfileAvatar
+                uri={activeSession.hostPhotoUrl}
+                username={activeSession.host}
+                style={styles.hostAvatar}
+              />
+              <View style={styles.hostMeta}>
+                <Text style={styles.hostName} numberOfLines={1}>
+                  {activeSession.host}
+                </Text>
+                <View style={styles.hostStatusRow}>
+                  <View style={styles.liveDot} />
+                  <Text style={styles.liveLabel}>LIVE</Text>
+                </View>
+              </View>
+            </Pressable>
+            <Pressable
+              onPress={() => setWatchersOpen(true)}
+              hitSlop={6}
+              accessibilityLabel="Viewers"
+              style={styles.viewersPress}
+            >
+              <Text style={styles.viewersLabel}>
+                · {activeSession.viewers ?? 0} viewer{(activeSession.viewers ?? 0) === 1 ? '' : 's'}
+              </Text>
+            </Pressable>
+          </Pressable>
+
+          {!isOwnLive ? (
+            <Pressable
+              onPress={() => void toggleFollow()}
+              style={[styles.followBtn, isFollowing && styles.followBtnOn]}
+              disabled={followBusy}
+              accessibilityLabel={isFollowing ? 'Following' : 'Follow'}
+            >
+              <Text style={[styles.followLabel, isFollowing && styles.followLabelOn]}>
+                {isFollowing ? 'Following' : 'Follow'}
+              </Text>
+            </Pressable>
+          ) : null}
+
+          <View style={styles.topSpacer} />
+
+          <Pressable onPress={() => setReportOpen(true)} style={styles.iconBtn} accessibilityLabel="More">
+            <MoreHorizontalIcon />
+          </Pressable>
         </View>
 
         <View style={styles.flex} />
 
+        {!keyboardOpen ? (
+          <View style={[styles.rail, { bottom: dockClearance + 118 }]} pointerEvents="box-none">
+            <Pressable
+              onPress={() => setLiked((v) => !v)}
+              style={styles.railBtn}
+              accessibilityLabel={liked ? 'Unlike' : 'Like'}
+            >
+              <HeartIcon size={20} color="#FFD3DE" filled={liked} />
+            </Pressable>
+            <Pressable
+              onPress={() => setCatalogOpen(true)}
+              style={styles.railBtn}
+              accessibilityLabel="Items in this live"
+            >
+              <BagIcon size={19} color={Palette.ivory} />
+              {products.length > 0 ? (
+                <View style={styles.railBadge}>
+                  <Text style={styles.railBadgeText}>{products.length > 99 ? '99+' : products.length}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+            <Text style={styles.railCaption}>Items</Text>
+            <Pressable onPress={() => void shareLive()} style={styles.railBtn} accessibilityLabel="Share">
+              <ShareIcon size={18} color={Palette.ivory} />
+            </Pressable>
+          </View>
+        ) : null}
+
         <View
           style={[
-            styles.commentsArea,
-            keyboardOpen ? styles.commentsAreaKeyboard : null,
-            !pinnedProduct || keyboardOpen ? { marginBottom: COMPOSER_CLEARANCE } : null,
+            styles.bottomStack,
+            { marginBottom: dockClearance, paddingHorizontal: SIDE_INSET },
+            keyboardOpen ? styles.bottomStackKeyboard : null,
           ]}
+          pointerEvents="box-none"
         >
-          <ScrollView style={styles.commentList} contentContainerStyle={styles.commentListBody}>
-            {comments.map((comment) => (
-              <LiveCommentRow
-                key={comment.id}
-                comment={comment}
-                isModerator={live.isModerator(activeSession.id, comment.user)}
-                showActions={Boolean(
-                  session?.username &&
-                    (session.username === activeSession.host ||
-                      live.isModerator(activeSession.id, session.username)),
-                )}
-                onRemove={() => {
-                  void live.removeComment(activeSession.id, comment.id);
-                }}
-              />
-            ))}
-          </ScrollView>
+          <View style={styles.chatColumn} pointerEvents="box-none">
+            {visibleComments.length === 0 ? (
+              <View style={styles.emptyChat}>
+                <Text style={styles.emptyChatText}>Be the first to say something</Text>
+              </View>
+            ) : (
+              visibleComments.map((comment, index) => {
+                const age = visibleComments.length - 1 - index;
+                const opacity = age === 0 ? 1 : age === 1 ? 0.78 : 0.42;
+                return (
+                  <View key={comment.id} style={[styles.commentRow, { opacity }]}>
+                    <View style={styles.commentAvatar}>
+                      <UserIcon size={12} color={Palette.muted3} />
+                    </View>
+                    <View style={styles.commentBubble}>
+                      <Text style={styles.commentText}>
+                        <Text style={styles.commentUser}>{comment.user} </Text>
+                        {comment.text}
+                      </Text>
+                      {live.isModerator(activeSession.id, comment.user) ? (
+                        <View style={styles.modWrap}>
+                          <ModeratorBadge />
+                        </View>
+                      ) : null}
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
+
+          {!keyboardOpen ? (
+            <FeaturedLiveCard
+              title={pinnedProduct?.title}
+              price={pinnedProduct ? formatNaira(pinnedProduct.livePrice) : undefined}
+              listingId={pinnedProduct?.listingId}
+              imageUri={pinnedProduct?.photoUrls?.[0]}
+              variant={productVariant}
+              itemCount={products.length}
+              onPress={openFeatured}
+              onBrowseCatalog={() => setCatalogOpen(true)}
+            />
+          ) : null}
         </View>
 
         <LiveConnectionOverlay
@@ -340,28 +534,13 @@ export default function LiveViewerScreen() {
           host={activeSession.host}
         />
 
-        {pinnedProduct && !keyboardOpen ? (
-          <View style={[styles.productWrap, { marginBottom: COMPOSER_CLEARANCE }]} pointerEvents="box-none">
-            <LiveClaimCard
-              title={pinnedProduct.title ?? pinnedListing?.title ?? 'Product'}
-              subtitle={subtitle || undefined}
-              price={formatNaira(pinnedProduct.livePrice)}
-              listingId={pinnedProduct.listingId}
-              imageUri={pinnedProduct.photoUrls?.[0]}
-              variant={productVariant}
-              expiresAt={claim?.expiresAt}
-              claimedByMe={claimedByMe}
-              claimError={claimError}
-              claiming={claiming}
-              onClaim={claimNow}
-              onBuyNow={buyNow}
-              onCheckout={goCheckout}
-            />
-          </View>
-        ) : null}
-
         <KeyboardSafeDock absolute style={styles.composerWrap}>
-          <LiveComposer value={draft} onChangeText={setDraft} onSend={send} placeholder="Add a comment..." />
+          <LiveComposer
+            value={draft}
+            onChangeText={setDraft}
+            onSend={send}
+            placeholder={visibleComments.length === 0 ? 'Be the first to say something' : 'Say something…'}
+          />
         </KeyboardSafeDock>
       </LiveStage>
 
@@ -373,32 +552,56 @@ export default function LiveViewerScreen() {
         onReportListing={() => void submitReport('listing')}
         onLeave={leave}
       />
+
+      <LiveWatchersSheet
+        visible={watchersOpen}
+        sessionId={activeSession.id}
+        onClose={() => setWatchersOpen(false)}
+      />
+
+      <LiveCatalogSheet
+        visible={catalogOpen}
+        products={products}
+        pinnedProductId={pinnedProduct?.id}
+        claimedProductId={claim?.status === 'active' ? claim.productId : null}
+        onClose={() => setCatalogOpen(false)}
+        onSelect={openListing}
+      />
+
+      <LiveListingDrawer
+        visible={listingOpen}
+        product={drawerProduct}
+        listing={drawerListing}
+        variant={drawerVariant}
+        claimExpiresAt={
+          claim?.status === 'active' && claim.productId === drawerProduct?.id ? claim.expiresAt : undefined
+        }
+        claiming={claiming}
+        claimError={claimError}
+        featuredInLive={drawerProduct?.id === pinnedProduct?.id}
+        remainingCatalogCount={Math.max(0, products.length - (drawerProduct ? 1 : 0))}
+        signedIn={Boolean(session)}
+        onClose={() => {
+          setListingOpen(false);
+          setClaimError(null);
+        }}
+        onAddToCart={() => {
+          if (drawerProduct) void claimProduct(drawerProduct);
+        }}
+        onBuyNow={() => {
+          if (drawerProduct) void buyNowProduct(drawerProduct);
+        }}
+        onCheckout={() => {
+          if (drawerProduct) void goCheckout(drawerProduct);
+        }}
+        onBrowseCatalog={() => {
+          setListingOpen(false);
+          setCatalogOpen(true);
+        }}
+        onSignIn={() => router.push('/(auth)/welcome')}
+      />
     </View>
   );
-}
-
-function LiveClaimCard({
-  expiresAt,
-  claimedByMe,
-  ...props
-}: {
-  title: string;
-  subtitle?: string;
-  price: string;
-  listingId?: string;
-  imageUri?: string;
-  variant: PinnedProductVariant;
-  expiresAt?: number;
-  claimedByMe: boolean;
-  claimError: string | null;
-  claiming: boolean;
-  onClaim: () => void;
-  onBuyNow: () => void;
-  onCheckout: () => void;
-}) {
-  const now = useLiveClock();
-  const countdown = claimedByMe && expiresAt ? formatCountdown(expiresAt - now) : undefined;
-  return <PinnedProductCard {...props} countdown={countdown} />;
 }
 
 const styles = StyleSheet.create({
@@ -415,27 +618,214 @@ const styles = StyleSheet.create({
   },
   toastText: { color: Palette.ivory, fontSize: 12 },
   topArea: {
-    gap: 14,
-    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingHorizontal: SIDE_INSET,
   },
-  commentsArea: {
-    maxHeight: 180,
-    paddingHorizontal: 16,
+  iconBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(20,12,14,0.62)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,247,240,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hostPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(20,12,14,0.62)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,247,240,0.16)',
+    borderRadius: 24,
+    paddingVertical: 5,
+    paddingLeft: 5,
+    paddingRight: 12,
+    maxWidth: 200,
+    minWidth: 0,
+  },
+  hostPress: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minWidth: 0,
+    flexShrink: 1,
+  },
+  viewersPress: {
+    paddingVertical: 4,
+  },
+  hostAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+  },
+  hostMeta: {
+    minWidth: 0,
+    flexShrink: 1,
+  },
+  hostName: {
+    fontSize: 12.5,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.ivory,
+  },
+  hostStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
+  liveDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#E8503C',
+  },
+  liveLabel: {
+    fontSize: 9.5,
+    fontFamily: Typography.bodyBold,
+    letterSpacing: 1,
+    color: '#FFD9D2',
+  },
+  viewersLabel: {
+    fontSize: 10.5,
+    fontFamily: Typography.body,
+    color: '#F0E2DA',
+  },
+  followBtn: {
+    minHeight: 30,
+    paddingHorizontal: 13,
+    borderRadius: 16,
+    backgroundColor: Palette.plum,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  followBtnOn: {
+    backgroundColor: 'rgba(20,12,14,0.62)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,247,240,0.22)',
+  },
+  followLabel: {
+    fontSize: 11.5,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.ivory,
+  },
+  followLabelOn: {
+    color: 'rgba(255,247,240,0.82)',
+  },
+  topSpacer: { flex: 1 },
+  rail: {
+    position: 'absolute',
+    right: SIDE_INSET,
+    alignItems: 'center',
+    gap: 10,
+    zIndex: 4,
+  },
+  railBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(20,12,14,0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,247,240,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  railBadge: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    borderRadius: 9,
+    backgroundColor: Palette.plum,
+    borderWidth: 1.5,
+    borderColor: Palette.liveDark,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  railBadgeText: {
+    fontSize: 10,
+    fontFamily: Typography.bodyBold,
+    color: Palette.ivory,
+  },
+  railCaption: {
+    marginTop: -6,
+    fontSize: 10,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.ivory,
+    textShadowColor: 'rgba(0,0,0,0.6)',
+    textShadowRadius: 3,
+    textShadowOffset: { width: 0, height: 1 },
+  },
+  bottomStack: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 10,
+  },
+  bottomStackKeyboard: {
     marginBottom: 8,
   },
-  commentsAreaKeyboard: {
-    maxHeight: 140,
+  chatColumn: {
+    flex: 1,
+    minWidth: 0,
+    maxWidth: 214,
+    gap: 6,
   },
-  commentList: { flexGrow: 0 },
-  commentListBody: { gap: 10, paddingBottom: 8 },
-  productWrap: {
-    paddingHorizontal: 14,
-    paddingTop: 8,
+  emptyChat: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(20,12,14,0.7)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,247,240,0.18)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  emptyChatText: {
+    fontSize: 11.5,
+    fontFamily: Typography.body,
+    color: '#F0E6DE',
+  },
+  commentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 7,
+  },
+  commentAvatar: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#D9CCC2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  commentBubble: {
+    flexShrink: 1,
+    backgroundColor: 'rgba(20,12,14,0.82)',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  modWrap: {
+    marginTop: 4,
+  },
+  commentUser: {
+    fontFamily: Typography.bodyBold,
+    color: '#F6C77E',
+  },
+  commentText: {
+    fontSize: 11.5,
+    lineHeight: 16,
+    fontFamily: Typography.body,
+    color: Palette.ivory,
   },
   composerWrap: {
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    backgroundColor: 'rgba(27,17,19,0.55)',
+    paddingHorizontal: SIDE_INSET,
+    paddingTop: 12,
+    paddingBottom: 0,
   },
   endedScreen: {
     paddingHorizontal: 20,

@@ -9,6 +9,7 @@ function resolveApiUrl() {
 }
 
 const API_URL = resolveApiUrl();
+const NETWORK_RETRY_DELAY_MS = 1500;
 
 export function unreachableBackendMessage() {
   const isLocal = /localhost|127\.0\.0\.1/.test(API_URL);
@@ -38,9 +39,41 @@ export function isTransientApiError(err: unknown) {
   return typeof err.status === 'number' && err.status >= 500;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function getAccessToken() {
   const { data } = await supabase.auth.getSession();
   return data.session?.access_token ?? null;
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  if (init.signal) {
+    if (init.signal.aborted) controller.abort();
+    else init.signal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (init.signal?.aborted) throw err;
+    if (controller.signal.aborted) {
+      throw new ApiError('Request timed out. Check your connection and try again.', 'TIMEOUT');
+    }
+    throw new ApiError(unreachableBackendMessage(), 'NETWORK_ERROR');
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function apiFetch<T>(
@@ -49,33 +82,34 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const token = await getAccessToken();
   const { timeoutMs = 45_000, ...requestInit } = init;
-  const headers = new Headers(requestInit.headers);
+  const headers = new Headers();
+  new Headers(requestInit.headers).forEach((value, key) => headers.set(key, value));
   headers.set('Content-Type', 'application/json');
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  if (requestInit.signal) {
-    if (requestInit.signal.aborted) controller.abort();
-    else requestInit.signal.addEventListener('abort', () => controller.abort(), { once: true });
+  const url = `${API_URL}${path}`;
+  let response: Response | undefined;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      response = await fetchWithTimeout(url, { ...requestInit, headers }, timeoutMs);
+      lastError = undefined;
+      break;
+    } catch (err) {
+      lastError = err;
+      const isNetwork = err instanceof ApiError && err.code === 'NETWORK_ERROR';
+      if (!isNetwork || attempt === 1) throw err;
+      await sleep(NETWORK_RETRY_DELAY_MS);
+    }
   }
 
-  let response: Response;
-  try {
-    response = await fetch(`${API_URL}${path}`, {
-      ...requestInit,
-      headers,
-      signal: controller.signal,
-    });
-  } catch (err) {
-    if (requestInit.signal?.aborted) throw err;
-    if (controller.signal.aborted) {
-      throw new ApiError('Request timed out. Check your connection and try again.', 'TIMEOUT');
-    }
-    throw new ApiError(unreachableBackendMessage(), 'NETWORK_ERROR');
-  } finally {
-    clearTimeout(timer);
+  if (!response) {
+    throw lastError instanceof Error
+      ? lastError
+      : new ApiError(unreachableBackendMessage(), 'NETWORK_ERROR');
   }
+
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
@@ -91,27 +125,41 @@ export async function apiUpload<T>(path: string, formData: FormData, opts?: { ti
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
   const timeoutMs = opts?.timeoutMs ?? 120_000;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const url = `${API_URL}${path}`;
+  let response: Response | undefined;
+  let lastError: unknown;
 
-  let response: Response;
-  try {
-    response = await fetch(`${API_URL}${path}`, {
-      method: 'POST',
-      headers,
-      body: formData,
-      signal: controller.signal,
-    });
-  } catch (err) {
-    if (controller.signal.aborted) {
-      throw new ApiError(
-        'Photo upload timed out. Use a stronger connection or fewer / smaller photos, then try again.',
-        'TIMEOUT',
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      response = await fetchWithTimeout(
+        url,
+        {
+          method: 'POST',
+          headers,
+          body: formData,
+        },
+        timeoutMs,
       );
+      lastError = undefined;
+      break;
+    } catch (err) {
+      lastError = err;
+      if (err instanceof ApiError && err.code === 'TIMEOUT') {
+        throw new ApiError(
+          'Photo upload timed out. Use a stronger connection or fewer / smaller photos, then try again.',
+          'TIMEOUT',
+        );
+      }
+      const isNetwork = err instanceof ApiError && err.code === 'NETWORK_ERROR';
+      if (!isNetwork || attempt === 1) throw err;
+      await sleep(NETWORK_RETRY_DELAY_MS);
     }
-    throw new ApiError(unreachableBackendMessage(), 'NETWORK_ERROR');
-  } finally {
-    clearTimeout(timer);
+  }
+
+  if (!response) {
+    throw lastError instanceof Error
+      ? lastError
+      : new ApiError(unreachableBackendMessage(), 'NETWORK_ERROR');
   }
 
   const payload = await response.json().catch(() => ({}));

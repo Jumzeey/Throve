@@ -234,11 +234,14 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
   const applyPaidOrder = useCallback(
     async (order: Order) => {
       if (draft) await live.completeSale(draft.listingId);
-      setLastOrder(order);
-      setOrders((current) => [order, ...current.filter((item) => item.id !== order.id)]);
+      const buyerUsername = session?.username?.trim();
+      const normalized: Order =
+        buyerUsername && order.buyer !== buyerUsername ? { ...order, buyer: buyerUsername } : order;
+      setLastOrder(normalized);
+      setOrders((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)]);
       setDraft(null);
     },
-    [draft, live],
+    [draft, live, session?.username],
   );
 
   const initPayment = useCallback(async () => {

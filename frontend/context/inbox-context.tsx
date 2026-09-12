@@ -71,7 +71,7 @@ export function offerStatusStyle(status: OfferStatus) {
 }
 
 export function minOfferAmount(listingPrice: number) {
-  return Math.ceil(listingPrice * 0.5);
+  return Math.ceil(listingPrice * 0.4);
 }
 
 export function validateOfferAmount(amount: number, listingPrice: number) {

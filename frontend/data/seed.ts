@@ -344,16 +344,6 @@ export const LISTINGS: Listing[] = [
 
 export const LIVE_SESSIONS: LiveSession[] = [
   {
-    id: 'live1',
-    host: 'ada.thrifts',
-    title: 'Friday Thrift Pull',
-    status: 'live',
-    viewers: 128,
-    pinnedListingId: 'l1',
-    department: 'Women',
-    featuredListingIds: ['l1', 'l9', 'l13'],
-  },
-  {
     id: 'live2',
     host: 'sneakerspot.ng',
     title: 'Sneaker Restock',
@@ -363,13 +353,7 @@ export const LIVE_SESSIONS: LiveSession[] = [
   },
 ];
 
-export const LIVE_COMMENTS: Record<string, LiveComment[]> = {
-  live1: [
-    { id: 'c1', user: 'funke_b', text: 'Is the wrap dress still available?' },
-    { id: 'c2', user: 'chidinma.o', text: 'Love this pull' },
-    { id: 'c3', user: 'ijeoma.a', text: 'Size M please!' },
-  ],
-};
+export const LIVE_COMMENTS: Record<string, LiveComment[]> = {};
 
 export const REVIEWS: Record<string, Review[]> = {
   'ada.thrifts': [

@@ -2,7 +2,7 @@ import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
 import { CheckoutProgress } from '@/components/checkout/checkout-progress';
-import { ClockIcon, ProhibitedIcon, ShieldCheckIcon } from '@/components/ui/icons';
+import { ClockIcon, InfoCircleIcon, ProhibitedIcon, ShieldCheckIcon } from '@/components/ui/icons';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { leaveCheckout, useCheckout } from '@/context/checkout-context';
@@ -181,8 +181,9 @@ export default function CheckoutSummaryScreen() {
             />
             <Row label={deliveryLabelText} value={formatNaira(totals.delivery.fee)} />
             <Row
-              label={`Buyer Protection fee (5% of item, max ₦2,500)`}
+              label="Buyer Protection fee"
               value={formatNaira(totals.protectionFee)}
+              onInfoPress={() => router.push('/buyer-protection')}
             />
             <View style={styles.totalDivider} />
             <Row label="Total to pay" value={formatNaira(totals.total)} bold />
@@ -190,16 +191,22 @@ export default function CheckoutSummaryScreen() {
         ) : null}
 
         {!sold && !expired ? (
-          <View style={styles.protectBox}>
+          <Pressable
+            onPress={() => router.push('/buyer-protection')}
+            style={styles.protectBox}
+            accessibilityRole="button"
+            accessibilityLabel="Learn about Buyer Protection"
+          >
             <ShieldCheckIcon color={Palette.success} />
             <View style={styles.stateCopy}>
               <Text style={styles.protectTitle}>Buyer Protection is included</Text>
               <Text style={styles.protectBody}>
-                Covers non-delivery and items that are wrong or materially different from the listing. Change of mind
-                is not covered.
+                Covers non-delivery and items that are wrong or materially different from the listing. Tap for full
+                details.
               </Text>
             </View>
-          </View>
+            <InfoCircleIcon size={16} color={Palette.muted} />
+          </Pressable>
         ) : null}
 
         {expired || sold ? (
@@ -229,15 +236,24 @@ function Row({
   value,
   bold,
   struck,
+  onInfoPress,
 }: {
   label: string;
   value: string;
   bold?: boolean;
   struck?: boolean;
+  onInfoPress?: () => void;
 }) {
   return (
     <View style={styles.row}>
-      <Text style={[styles.rowLabel, bold ? styles.rowLabelBold : null]}>{label}</Text>
+      <View style={styles.rowLabelWrap}>
+        <Text style={[styles.rowLabel, bold ? styles.rowLabelBold : null]}>{label}</Text>
+        {onInfoPress ? (
+          <Pressable onPress={onInfoPress} hitSlop={8} accessibilityLabel={`${label} information`}>
+            <InfoCircleIcon size={15} color={Palette.muted} />
+          </Pressable>
+        ) : null}
+      </View>
       <Text style={[styles.rowValue, bold ? styles.rowValueBold : null, struck ? styles.struck : null]}>{value}</Text>
     </View>
   );
@@ -437,8 +453,14 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 12,
   },
-  rowLabel: {
+  rowLabelWrap: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  rowLabel: {
+    flexShrink: 1,
     fontSize: 13,
     lineHeight: 19,
     fontFamily: Typography.body,

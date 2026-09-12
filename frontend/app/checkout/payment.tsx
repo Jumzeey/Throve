@@ -5,6 +5,7 @@ import {
   AlertCircleIcon,
   CheckIcon,
   ClockIcon,
+  InfoCircleIcon,
   LockIcon,
   ProhibitedIcon,
   WifiOffIcon,
@@ -21,7 +22,7 @@ import { formatNaira } from '@/lib/format';
 import { Redirect, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ExpiredCheckout } from './shipping';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -225,7 +226,11 @@ export default function PaymentScreen() {
           <View style={styles.divider} />
           <Row label="Item price" value={formatNaira(totals.itemPrice)} />
           <Row label="Delivery" value={formatNaira(totals.delivery.fee)} />
-          <Row label="Buyer Protection" value={formatNaira(totals.protectionFee)} />
+          <Row
+            label="Buyer Protection fee"
+            value={formatNaira(totals.protectionFee)}
+            onInfoPress={() => router.push('/buyer-protection')}
+          />
           <View style={styles.divider} />
           <Row label="Total" value={formatNaira(totals.total)} bold />
         </View>
@@ -344,10 +349,27 @@ export default function PaymentScreen() {
   );
 }
 
-function Row({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+function Row({
+  label,
+  value,
+  bold,
+  onInfoPress,
+}: {
+  label: string;
+  value: string;
+  bold?: boolean;
+  onInfoPress?: () => void;
+}) {
   return (
     <View style={styles.row}>
-      <Text style={[styles.rowLabel, bold && styles.rowBold]}>{label}</Text>
+      <View style={styles.rowLabelWrap}>
+        <Text style={[styles.rowLabel, bold && styles.rowBold]}>{label}</Text>
+        {onInfoPress ? (
+          <Pressable onPress={onInfoPress} hitSlop={8} accessibilityLabel={`${label} information`}>
+            <InfoCircleIcon size={15} color={Palette.muted} />
+          </Pressable>
+        ) : null}
+      </View>
       <Text style={[styles.rowValue, bold && styles.rowBold]}>{value}</Text>
     </View>
   );
@@ -424,8 +446,9 @@ const styles = StyleSheet.create({
     color: Palette.muted,
   },
   divider: { height: 1, backgroundColor: Palette.divider, marginVertical: 2 },
-  row: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
-  rowLabel: { flex: 1, fontSize: 13, fontFamily: Typography.body, color: Palette.body },
+  row: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, alignItems: 'center' },
+  rowLabelWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  rowLabel: { flexShrink: 1, fontSize: 13, fontFamily: Typography.body, color: Palette.body },
   rowValue: { fontSize: 13, fontFamily: Typography.bodyMedium, color: Palette.espresso },
   rowBold: { fontFamily: Typography.bodySemiBold, color: Palette.espresso },
   secureBox: {

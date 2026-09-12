@@ -32,6 +32,15 @@ npx expo prebuild
 npx expo run:ios   # or run:android
 ```
 
+4. Optional Android encode A/B — set in `frontend/.env` then rebuild:
+
+```bash
+# legacy (default) | test (H.264 720p @ 2.5 Mbps + dynacast; low-end auto-tiers down)
+EXPO_PUBLIC_LIVE_VIDEO_PROFILE=legacy
+```
+
+See `files/LIVE_VIDEO_PROFILE_AB_TEST.md` before flipping the default to `test`.
+
 ### Claim concurrency smoke test
 
 ```bash

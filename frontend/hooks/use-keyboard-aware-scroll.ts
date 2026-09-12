@@ -1,6 +1,6 @@
 import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Dimensions,
   Platform,
@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 
 const FIELD_GAP = 16;
+const MULTILINE_FIELD_GAP = 88;
 
 /**
  * Pads a ScrollView and scrolls the focused field above the keyboard.
@@ -25,8 +26,10 @@ export function useKeyboardAwareScroll() {
 
   const scrollRef = useRef<ScrollView>(null);
   const focusedNode = useRef<View | null>(null);
+  const focusedGap = useRef(FIELD_GAP);
   const scrollY = useRef(0);
   const anchors = useRef<Record<string, View | null>>({});
+  const [multilineFocused, setMultilineFocused] = useState(false);
 
   const ensureFocusedVisible = useCallback(() => {
     const node = focusedNode.current;
@@ -35,7 +38,7 @@ export function useKeyboardAwareScroll() {
 
     node.measureInWindow((_x, y, _w, height) => {
       const keyboardTop = screenY > 0 ? screenY : Dimensions.get('window').height - kb;
-      const overlap = y + height + FIELD_GAP - keyboardTop;
+      const overlap = y + height + focusedGap.current - keyboardTop;
       if (overlap > 0) {
         scrollRef.current?.scrollTo({
           y: Math.max(0, scrollY.current + overlap),
@@ -46,7 +49,10 @@ export function useKeyboardAwareScroll() {
   }, []);
 
   useEffect(() => {
-    if (keyboard.height <= 0) return;
+    if (keyboard.height <= 0) {
+      setMultilineFocused(false);
+      return;
+    }
     const timer = setTimeout(ensureFocusedVisible, 60);
     return () => clearTimeout(timer);
   }, [keyboard.height, keyboard.screenY, ensureFocusedVisible]);
@@ -58,10 +64,16 @@ export function useKeyboardAwareScroll() {
   }, []);
 
   const onFieldFocus = useCallback(
-    (key: string) => {
+    (key: string, options?: { multiline?: boolean }) => {
       focusedNode.current = anchors.current[key] ?? null;
+      const multiline = Boolean(options?.multiline);
+      focusedGap.current = multiline ? MULTILINE_FIELD_GAP : FIELD_GAP;
+      setMultilineFocused(multiline);
       setTimeout(ensureFocusedVisible, 50);
       setTimeout(ensureFocusedVisible, 280);
+      if (multiline) {
+        setTimeout(ensureFocusedVisible, 450);
+      }
     },
     [ensureFocusedVisible],
   );
@@ -72,7 +84,9 @@ export function useKeyboardAwareScroll() {
 
   const contentPaddingBottom =
     Platform.OS === 'android'
-      ? (keyboard.height > 0 ? keyboard.height + 24 : bottom + 24)
+      ? keyboard.height > 0
+        ? keyboard.height + 24 + (multilineFocused ? 40 : 0)
+        : bottom + 24
       : Math.max(bottom, 30);
 
   return {

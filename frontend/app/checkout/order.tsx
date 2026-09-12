@@ -1,7 +1,7 @@
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
-import { ShieldCheckIcon } from '@/components/ui/icons';
+import { ShieldCheckIcon, InfoCircleIcon } from '@/components/ui/icons';
 import { LoadingSkeleton } from '@/components/ui/loading-skeleton';
 import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { ScreenHeader } from '@/components/ui/screen-header';
@@ -391,7 +391,11 @@ export default function CheckoutOrderScreen() {
                 <Text style={styles.cardLabel}>Payment summary</Text>
                 <MoneyRow label="Item price" value={formatNaira(order.itemPrice)} />
                 <MoneyRow label="Delivery" value={formatNaira(order.deliveryFee)} />
-                <MoneyRow label="Buyer Protection fee (5%, max ₦2,500)" value={formatNaira(protectionFee)} />
+                <MoneyRow
+                  label="Buyer Protection fee"
+                  value={formatNaira(protectionFee)}
+                  onInfoPress={() => router.push('/buyer-protection')}
+                />
                 <View style={styles.divider} />
                 <MoneyRow label="Total paid" value={formatNaira(order.total)} bold />
               </View>
@@ -770,15 +774,24 @@ function MoneyRow({
   value,
   bold,
   danger,
+  onInfoPress,
 }: {
   label: string;
   value: string;
   bold?: boolean;
   danger?: boolean;
+  onInfoPress?: () => void;
 }) {
   return (
     <View style={styles.moneyRow}>
-      <Text style={[styles.moneyLabel, bold ? styles.moneyBold : null]}>{label}</Text>
+      <View style={styles.moneyLabelWrap}>
+        <Text style={[styles.moneyLabel, bold ? styles.moneyBold : null]}>{label}</Text>
+        {onInfoPress ? (
+          <Pressable onPress={onInfoPress} hitSlop={8} accessibilityLabel={`${label} information`}>
+            <InfoCircleIcon size={15} color={Palette.muted} />
+          </Pressable>
+        ) : null}
+      </View>
       <Text style={[styles.moneyValue, bold ? styles.moneyBold : null, danger ? styles.moneyDanger : null]}>
         {value}
       </Text>
@@ -953,8 +966,9 @@ const styles = StyleSheet.create({
   },
   protectTitle: { fontSize: 13, fontFamily: Typography.bodySemiBold, color: '#3F5A3C', marginBottom: 3 },
   protectBody: { fontSize: 11.5, lineHeight: 18, fontFamily: Typography.body, color: '#5C6B58' },
-  moneyRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
-  moneyLabel: { flex: 1, fontSize: 13, fontFamily: Typography.body, color: Palette.body },
+  moneyRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, alignItems: 'center' },
+  moneyLabelWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  moneyLabel: { flexShrink: 1, fontSize: 13, fontFamily: Typography.body, color: Palette.body },
   moneyValue: { fontSize: 13, fontFamily: Typography.body, color: Palette.espresso, fontVariant: ['tabular-nums'] },
   moneyBold: { fontFamily: Typography.bodySemiBold, fontSize: 15 },
   moneyDanger: { color: Palette.errorText },

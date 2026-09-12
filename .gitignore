@@ -44,6 +44,9 @@ yarn-error.*
 backend/.env
 frontend/.env
 
+# Cursor local MCP / agent config (may contain API keys)
+.cursor/
+
 # typescript
 *.tsbuildinfo
 

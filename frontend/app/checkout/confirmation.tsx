@@ -49,6 +49,9 @@ export default function CheckoutConfirmationScreen() {
           clearPoll();
           return true;
         }
+        if (verified.status === 'successful') {
+          await checkout.refresh({ silent: true });
+        }
       }
       if (status.status === 'failed' || status.status === 'cancelled') {
         clearPoll();
@@ -79,13 +82,14 @@ export default function CheckoutConfirmationScreen() {
         const ok = await resolveFromTx();
         if (!ok && ticksRef.current >= 8) {
           clearPoll();
+          void checkout.refresh({ silent: true });
           setPhase('uncertain');
         }
       })();
     }, 2500);
 
     return () => clearPoll();
-  }, [clearPoll, order, resolveFromTx, txRef]);
+  }, [checkout, clearPoll, order, resolveFromTx, txRef]);
 
   if (!order && !txRef) {
     return <Redirect href="/(tabs)" />;

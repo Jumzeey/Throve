@@ -31,6 +31,26 @@ async function listingTitle(
   return (data?.title as string) || 'your listing';
 }
 
+async function listingPrice(
+  supabase: ReturnType<typeof import('../lib/supabase.js').createSupabaseClient>,
+  listingId: string,
+) {
+  const { data } = await supabase.from('listings').select('price').eq('id', listingId).maybeSingle();
+  const price = Number(data?.price);
+  return Number.isFinite(price) && price > 0 ? price : null;
+}
+
+function minOfferAmount(listingPrice: number) {
+  return Math.ceil(listingPrice * 0.4);
+}
+
+function validateOfferAgainstListing(amount: number, listingPrice: number): string | null {
+  const min = minOfferAmount(listingPrice);
+  if (amount < min) return `Offer must be at least ${formatNaira(min)}.`;
+  if (amount >= listingPrice) return 'Offer must be below the listing price.';
+  return null;
+}
+
 /** Ensure the listing chat exists and post a message both parties will see in the thread. */
 async function postOfferToChat(input: {
   listingId: string;
@@ -506,6 +526,38 @@ router.post('/offers', requireAuth, async (req, res) => {
   const sellerId = await usernameToId(supabase, parsed.data.seller);
   if (!buyerId || !sellerId) return sendError(res, 404, 'Participant not found');
 
+  const price = await listingPrice(supabase, parsed.data.listingId);
+  if (price == null) return sendError(res, 404, 'Listing not found');
+  const amountError = validateOfferAgainstListing(parsed.data.amount, price);
+  if (amountError) return sendError(res, 400, amountError);
+
+  const { data: priorPending } = await supabase
+    .from('offers')
+    .select('id, amount')
+    .eq('listing_id', parsed.data.listingId)
+    .eq('buyer_id', buyerId)
+    .eq('status', 'pending');
+
+  if (priorPending && priorPending.length > 0) {
+    await supabase
+      .from('offers')
+      .update({ status: 'withdrawn' })
+      .eq('listing_id', parsed.data.listingId)
+      .eq('buyer_id', buyerId)
+      .eq('status', 'pending');
+
+    for (const prior of priorPending) {
+      void postOfferToChat({
+        listingId: parsed.data.listingId,
+        buyerId,
+        sellerId,
+        senderId: userId,
+        text: `Replaced previous offer of ${formatNaira(Number(prior.amount) || 0)}`,
+        skipMessageNotify: true,
+      });
+    }
+  }
+
   const expiresAt = new Date(Date.now() + OFFER_TTL_MS).toISOString();
   const { data, error } = await supabase
     .from('offers')
@@ -610,6 +662,10 @@ router.patch('/offers/:id', requireAuth, async (req, res) => {
   } else if (parsed.data.action === 'counter') {
     if (!isSeller) return sendError(res, 403, 'Not allowed');
     if (!parsed.data.amount) return sendError(res, 400, 'Counter amount required');
+    const price = await listingPrice(supabase, String(offer.listing_id));
+    if (price == null) return sendError(res, 404, 'Listing not found');
+    const amountError = validateOfferAgainstListing(parsed.data.amount, price);
+    if (amountError) return sendError(res, 400, amountError);
     patch.previous_amount = offer.amount;
     patch.amount = parsed.data.amount;
     patch.initiator = 'seller';

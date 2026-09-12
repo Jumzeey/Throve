@@ -1,6 +1,7 @@
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
+import { ChatOfferCard } from '@/components/inbox/chat-offer-card';
 import {
   CheckIcon,
   ChevronBackIcon,
@@ -17,6 +18,7 @@ import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { StatusChip, type ListingChipVariant } from '@/components/ui/status-chip';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
+import { useCheckout } from '@/context/checkout-context';
 import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
 import { getListingImageSource } from '@/data/images';
@@ -30,7 +32,7 @@ import { chatDayLabel, formatChatClock, formatNaira } from '@/lib/format';
 import { formatLastSeen, isOnline } from '@/lib/presence';
 import { effectiveOfferStatus, formatOfferCountdown, offerChipVariant } from '@/lib/offer-display';
 import { supabase } from '@/lib/supabase';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image,
@@ -66,6 +68,7 @@ export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { session, publicProfiles, ensurePublicProfile, upsertPublicProfile } = useAuth();
   const inbox = useInbox();
+  const checkout = useCheckout();
   const { markRead, offersOnListing, subscribeConversation } = inbox;
   const { getListing } = useListings();
   const { isConnected } = useNetworkStatus();
@@ -76,6 +79,7 @@ export default function ChatScreen() {
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [buyingOffer, setBuyingOffer] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [blockConfirm, setBlockConfirm] = useState(false);
   const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
@@ -170,40 +174,51 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (!other) return;
+    let cancelled = false;
     const refresh = () => {
       void ensurePublicProfile(other, { force: true }).catch(() => undefined);
     };
     refresh();
     const timer = setInterval(refresh, 20_000);
-    const otherId = otherCardRef.current?.userId;
-    const filter = otherId ? `id=eq.${otherId}` : `username=eq.${other}`;
+
     const channel = supabase
       .channel(`presence-profile:${other}`)
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'profiles', filter },
+        { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `username=eq.${other}` },
         (payload) => {
-          const last = (payload.new as { last_seen_at?: string | null }).last_seen_at;
+          if (cancelled) return;
+          const row = payload.new as {
+            last_seen_at?: string | null;
+            photo_url?: string | null;
+            id?: string;
+          };
           const prev = otherCardRef.current;
+          const photoFromPayload = row.photo_url?.trim();
           upsertPublicProfile({
             username: other,
-            userId: prev?.userId ?? otherId,
+            userId: prev?.userId ?? row.id,
             bio: prev?.bio ?? '',
             location: prev?.location ?? '',
-            photoUri: prev?.photoUri,
+            photoUri:
+              photoFromPayload && /^https?:\/\//i.test(photoFromPayload)
+                ? photoFromPayload
+                : prev?.photoUri,
             followerCount: prev?.followerCount,
             followingCount: prev?.followingCount,
             isFollowing: prev?.isFollowing,
-            lastSeenAt: last ? new Date(last).getTime() : null,
+            lastSeenAt: row.last_seen_at ? new Date(row.last_seen_at).getTime() : null,
           });
         },
       )
       .subscribe();
+
     return () => {
+      cancelled = true;
       clearInterval(timer);
       void supabase.removeChannel(channel);
     };
-  }, [ensurePublicProfile, other, publicProfiles[other]?.userId, upsertPublicProfile]);
+  }, [ensurePublicProfile, other, upsertPublicProfile]);
 
   const sendPayload = useCallback(
     async (text: string, localImage: string | null, failedId?: string) => {
@@ -334,6 +349,26 @@ export default function ChatScreen() {
     await inbox.toggleBlock(other);
   }
 
+  async function buyAcceptedOffer() {
+    if (!activeOffer || !listing || activeOffer.buyer !== me || buyingOffer) return;
+    if (effectiveOfferStatus(activeOffer) !== 'accepted') return;
+    setBuyingOffer(true);
+    try {
+      await checkout.startCheckout({
+        listingId: listing.id,
+        buyer: me,
+        offerId: activeOffer.id,
+        itemPrice: activeOffer.amount,
+        listedPrice: listing.price,
+      });
+      router.push('/checkout/shipping');
+    } catch {
+      /* offer details remains available */
+    } finally {
+      setBuyingOffer(false);
+    }
+  }
+
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: Math.max(top, 14) }]}>
@@ -428,6 +463,9 @@ export default function ChatScreen() {
                 {group.items.map((message) => {
                   const mine = message.from === me;
                   const status = deliveryStatus(message);
+                  const bubbleAvatar = mine
+                    ? session.photoUri
+                    : publicProfiles[other]?.photoUri;
                   return (
                     <Pressable
                       key={message.id}
@@ -437,39 +475,71 @@ export default function ChatScreen() {
                       }}
                       delayLongPress={380}
                       style={[styles.bubbleRow, mine ? styles.rowMine : styles.rowTheirs]}>
-                      <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
-                        {message.imageUrl ? (
-                          <Pressable
-                            onPress={() => setViewerUri(message.imageUrl!)}
-                            accessibilityRole="imagebutton"
-                            accessibilityLabel="View photo">
-                            <AppImage source={message.imageUrl} style={styles.bubbleImage} />
-                          </Pressable>
-                        ) : null}
-                        {message.text ? (
-                          <Text style={[styles.bubbleText, mine ? styles.bubbleTextMine : styles.bubbleTextTheirs]}>
-                            {message.text}
+                      {!mine ? (
+                        <ProfileAvatar
+                          uri={bubbleAvatar}
+                          username={other}
+                          style={styles.bubbleAvatar}
+                        />
+                      ) : null}
+                      <View style={styles.bubbleCol}>
+                        <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
+                          {message.imageUrl ? (
+                            <Pressable
+                              onPress={() => setViewerUri(message.imageUrl!)}
+                              accessibilityRole="imagebutton"
+                              accessibilityLabel="View photo">
+                              <AppImage source={message.imageUrl} style={styles.bubbleImage} />
+                            </Pressable>
+                          ) : null}
+                          {message.text ? (
+                            <Text style={[styles.bubbleText, mine ? styles.bubbleTextMine : styles.bubbleTextTheirs]}>
+                              {message.text}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <View style={[styles.metaRow, mine ? styles.metaMine : styles.metaTheirs]}>
+                          <Text style={[styles.meta, mine ? styles.metaMineText : styles.metaTheirsText]}>
+                            {formatChatClock(message.createdAt)}
                           </Text>
-                        ) : null}
+                          {status ? (
+                            <MessageChecksIcon
+                              size={13}
+                              double={status !== 'sent'}
+                              color={status === 'read' ? Palette.plum : Palette.muted3}
+                            />
+                          ) : null}
+                        </View>
                       </View>
-                      <View style={[styles.metaRow, mine ? styles.metaMine : styles.metaTheirs]}>
-                        <Text style={[styles.meta, mine ? styles.metaMineText : styles.metaTheirsText]}>
-                          {formatChatClock(message.createdAt)}
-                        </Text>
-                        {status ? (
-                          <MessageChecksIcon
-                            size={13}
-                            double={status !== 'sent'}
-                            color={status === 'read' ? Palette.plum : Palette.muted3}
-                          />
-                        ) : null}
-                      </View>
+                      {mine ? (
+                        <ProfileAvatar
+                          uri={bubbleAvatar}
+                          username={me}
+                          style={styles.bubbleAvatar}
+                        />
+                      ) : null}
                     </Pressable>
                   );
                 })}
               </View>
             ))
           )}
+
+          {activeOffer && listing ? (
+            <ChatOfferCard
+              offer={activeOffer}
+              listingPrice={listing.price}
+              isBuyer={activeOffer.buyer === me}
+              mine={activeOffer.initiator === 'buyer' ? activeOffer.buyer === me : activeOffer.seller === me}
+              buying={buyingOffer}
+              onOpen={() => router.push(`/inbox/offer/${activeOffer.id}`)}
+              onBuyNow={
+                activeOffer.buyer === me && offerStatus === 'accepted' && !listingPurchaseClosed
+                  ? () => void buyAcceptedOffer()
+                  : undefined
+              }
+            />
+          ) : null}
 
           {failed.map((item) => (
             <View key={item.localId} style={[styles.bubbleRow, styles.rowMine]}>
@@ -855,15 +925,25 @@ const styles = StyleSheet.create({
     color: Palette.muted3,
   },
   bubbleRow: {
-    maxWidth: '78%',
+    maxWidth: '92%',
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
   },
   rowMine: {
     alignSelf: 'flex-end',
-    alignItems: 'flex-end',
   },
   rowTheirs: {
     alignSelf: 'flex-start',
-    alignItems: 'flex-start',
+  },
+  bubbleCol: {
+    flexShrink: 1,
+    maxWidth: '86%',
+  },
+  bubbleAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
   },
   bubble: {
     paddingVertical: 11,

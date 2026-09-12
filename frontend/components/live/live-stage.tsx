@@ -19,9 +19,18 @@ import { LiveWatchersSheet } from '@/components/live/watchers-sheet';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import type { LiveConnection, LiveComment, LiveMediaCredentials } from '@/data/types';
 import { loadLiveKitNative, resetLiveKitNativeLoad, getLiveKitLoadFailure, getLiveKitLoadFailureDetail, type LiveKitNative } from '@/lib/livekit-native';
+import {
+  getLiveKitRoomOptions,
+  loadLiveVideoProfileOverride,
+  logLiveVideoProfile,
+  resolveLiveVideoProfile,
+  type LiveVideoProfileResolution,
+} from '@/lib/live-video-profile';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
-import { createContext, memo, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
-import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Keyboard, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
+import * as Device from 'expo-device';
 
 type Props = {
   credentials: LiveMediaCredentials | null;
@@ -295,6 +304,37 @@ const LiveKitVideoLayer = memo(function LiveKitVideoLayer({
   const [failureReason, setFailureReason] = useState<'expo_go' | 'failed' | null>(null);
   const [failureDetail, setFailureDetail] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
+  const profileLoggedRef = useRef(false);
+  const [videoProfile, setVideoProfile] = useState<{
+    totalMemoryBytes: number | null;
+    resolution: LiveVideoProfileResolution;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      await loadLiveVideoProfileOverride();
+      if (cancelled) return;
+      let totalMemoryBytes: number | null = null;
+      if (Platform.OS === 'android') {
+        const mem = Device.totalMemory;
+        if (mem != null && Number.isFinite(mem) && mem > 0) {
+          totalMemoryBytes = mem;
+        }
+      }
+      setVideoProfile({
+        totalMemoryBytes,
+        resolution: getLiveKitRoomOptions({
+          platform: Platform.OS,
+          profile: resolveLiveVideoProfile(),
+          totalMemoryBytes,
+        }),
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -323,7 +363,13 @@ const LiveKitVideoLayer = memo(function LiveKitVideoLayer({
     };
   }, [credentials.token, credentials.url, retryKey]);
 
-  const onConnected = useCallback(() => onConnectionChange?.('live'), [onConnectionChange]);
+  const onConnected = useCallback(() => {
+    if (isHost && videoProfile && !profileLoggedRef.current) {
+      profileLoggedRef.current = true;
+      logLiveVideoProfile(videoProfile.resolution, videoProfile.totalMemoryBytes);
+    }
+    onConnectionChange?.('live');
+  }, [isHost, onConnectionChange, videoProfile]);
   const onDisconnected = useCallback(() => onConnectionChange?.('lost'), [onConnectionChange]);
   const onError = useCallback(
     (err?: unknown) => {
@@ -375,7 +421,7 @@ const LiveKitVideoLayer = memo(function LiveKitVideoLayer({
     );
   }
 
-  if (!mods) {
+  if (!mods || !videoProfile) {
     return <ConnectingStage label={isHost ? 'Starting camera…' : 'Joining stream…'} />;
   }
 
@@ -389,7 +435,7 @@ const LiveKitVideoLayer = memo(function LiveKitVideoLayer({
         connect
         audio={isHost}
         video={isHost}
-        options={{ adaptiveStream: { pixelDensity: 'screen' } }}
+        options={videoProfile.resolution.roomOptions}
         onConnected={onConnected}
         onDisconnected={onDisconnected}
         onError={onError}
@@ -641,18 +687,45 @@ export function LiveComposer({
   onSend: () => void;
   placeholder?: string;
 }) {
+  const inputRef = useRef<TextInput>(null);
+  const focusedRef = useRef(false);
+  const keyboard = useKeyboardInset();
+
+  function handleSend() {
+    onSend();
+    // Blur so the next tap re-focuses and the soft keyboard can open again (Android).
+    inputRef.current?.blur();
+    Keyboard.dismiss();
+  }
+
   return (
     <View style={styles.composer}>
       <TextInput
+        ref={inputRef}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor={LIVE_IVORY_60}
         style={styles.composerInput}
         returnKeyType="send"
-        onSubmitEditing={onSend}
+        blurOnSubmit={false}
+        showSoftInputOnFocus
+        onFocus={() => {
+          focusedRef.current = true;
+        }}
+        onBlur={() => {
+          focusedRef.current = false;
+        }}
+        onPressIn={() => {
+          // Focus without keyboard (common after dismiss): bounce focus to reopen IME.
+          if (Platform.OS === 'android' && focusedRef.current && keyboard.height <= 0) {
+            inputRef.current?.blur();
+            requestAnimationFrame(() => inputRef.current?.focus());
+          }
+        }}
+        onSubmitEditing={handleSend}
       />
-      <Pressable onPress={onSend} style={styles.sendButton}>
+      <Pressable onPress={handleSend} style={styles.sendButton}>
         <SendIcon />
       </Pressable>
     </View>

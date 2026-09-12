@@ -423,21 +423,6 @@ export const SEED_REVIEWS = [
 
 export const SEED_LIVE = [
   {
-    key: 1,
-    host: 'ada.thrifts',
-    title: 'Friday Thrift Pull',
-    status: 'live' as const,
-    viewers: 128,
-    department: 'Women' as const,
-    pinnedListing: 'l1',
-    featuredListingSlugs: ['l1', 'l9', 'l13'],
-    comments: [
-      { user: 'funke_b', text: 'Is the wrap dress still available?' },
-      { user: 'chidinma.o', text: 'Love this pull' },
-      { user: 'ijeoma.a', text: 'Size M please!' },
-    ],
-  },
-  {
     key: 2,
     host: 'sneakerspot.ng',
     title: 'Sneaker Restock',

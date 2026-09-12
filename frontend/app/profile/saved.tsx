@@ -150,9 +150,15 @@ export default function SavedItemsScreen() {
               amount,
               initiator: 'buyer',
             })
-            .then((created) => {
+            .then(async (created) => {
               setOfferFor(null);
-              if (created) router.push(`/inbox/offer/${created.id}`);
+              if (!created || !offerFor) return;
+              try {
+                const conv = await inbox.openOrCreateConversation(offerFor.seller, offerFor.id, username);
+                router.push(`/inbox/chat/${conv.id}`);
+              } catch {
+                router.push(`/inbox/offer/${created.id}`);
+              }
             });
         }}
       />
