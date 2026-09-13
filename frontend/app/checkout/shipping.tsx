@@ -1,11 +1,12 @@
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
 import { CheckoutProgress } from '@/components/checkout/checkout-progress';
-import { LocationField } from '@/components/ui/location-field';
+import { LocationField, isResolvedPlacesPick } from '@/components/ui/location-field';
 import { PhoneField } from '@/components/ui/phone-field';
 import { PickerField } from '@/components/ui/picker-field';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
+import { KeyboardSafeScreen } from '@/components/ui/keyboard-safe';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { leaveCheckout, useCheckout } from '@/context/checkout-context';
@@ -13,19 +14,11 @@ import { useLive } from '@/context/live-context';
 import { useListings } from '@/context/listings-context';
 import { matchNigeriaState, NIGERIA_STATES } from '@/data/nigeria-states';
 import { DEFAULT_COUNTRY_ISO } from '@/data/country-codes';
-import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { formatPhoneE164, isValidPhone, parseStoredPhone } from '@/lib/phone';
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 type FieldErrors = {
   name?: string;
@@ -79,22 +72,24 @@ function validateName(name: string) {
   return null;
 }
 
-function validateAddress(address: string) {
+function validateAddress(address: string, placeSelected: boolean) {
   const trimmed = address.trim();
-  if (!trimmed) return 'Search or enter your delivery address.';
+  if (!placeSelected || !trimmed) {
+    return 'Search and select a delivery address from the list.';
+  }
   if (trimmed.length < 5) return 'Add a fuller street or place name.';
   return null;
 }
 
 function validateCity(city: string) {
   const trimmed = city.trim();
-  if (!trimmed) return 'City / area is required. Pick an address so we can fill it.';
+  if (!trimmed) return 'City / area is required. Pick an address from the list so we can fill it.';
   return null;
 }
 
 function validateState(state: string) {
   const trimmed = state.trim();
-  if (!trimmed) return 'State is required. Pick a delivery address in Nigeria.';
+  if (!trimmed) return 'State is required. Pick a delivery address from the list.';
   if (!isNigeriaState(trimmed)) return 'Choose a Nigerian state for delivery.';
   return null;
 }
@@ -107,6 +102,7 @@ function validateShipping(input: {
   address: string;
   city: string;
   state: string;
+  placeSelected: boolean;
 }): FieldErrors {
   const errors: FieldErrors = {};
   const nameError = validateName(input.name);
@@ -114,7 +110,7 @@ function validateShipping(input: {
   if (!isValidPhone(input.countryIso, input.nationalNumber)) {
     errors.phone = 'Enter a valid phone number so the rider can reach you.';
   }
-  const addressError = validateAddress(input.address);
+  const addressError = validateAddress(input.address, input.placeSelected);
   if (addressError) errors.address = addressError;
   const cityError = validateCity(input.city);
   if (cityError) errors.city = cityError;
@@ -130,11 +126,11 @@ export default function ShippingDetailsScreen() {
   const { getListing } = useListings();
   const checkout = useCheckout();
   const { isConnected } = useNetworkStatus();
-  const keyboardScroll = useKeyboardAwareScroll();
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [saveError, setSaveError] = useState(false);
   const [continuing, setContinuing] = useState(false);
   const [attempted, setAttempted] = useState(false);
+  const [addressPlaceId, setAddressPlaceId] = useState<string | null>(null);
   const autofilledFor = useRef<string | null>(null);
 
   const initialPhone = parseStoredPhone(session?.phone);
@@ -142,6 +138,10 @@ export default function ShippingDetailsScreen() {
   const [nationalNumber, setNationalNumber] = useState(initialPhone.nationalNumber);
 
   const draft = checkout.draft;
+
+  useEffect(() => {
+    setAddressPlaceId(null);
+  }, [draft?.listingId]);
 
   // Prefill once per checkout draft from the signed-in profile.
   useEffect(() => {
@@ -174,9 +174,7 @@ export default function ShippingDetailsScreen() {
         patch.state = fromLocation.state;
       }
     }
-    if (!draft.address.trim() && session.location.trim()) {
-      patch.address = session.location.trim();
-    }
+    // Do not prefill free-text address — checkout requires a Maps list selection.
 
     if (Object.keys(patch).length) checkout.updateDraft(patch);
   }, [checkout, draft, session]);
@@ -190,6 +188,8 @@ export default function ShippingDetailsScreen() {
     if (draft.phone !== next) checkout.updateDraft({ phone: next });
   }, [checkout, countryIso, draft, nationalNumber]);
 
+  const placeSelected = Boolean(addressPlaceId && !addressPlaceId.startsWith('manual:'));
+
   const liveErrors = useMemo(
     () =>
       validateShipping({
@@ -200,8 +200,18 @@ export default function ShippingDetailsScreen() {
         address: draft?.address ?? '',
         city: draft?.city ?? '',
         state: draft?.state ?? '',
+        placeSelected,
       }),
-    [countryIso, draft?.address, draft?.city, draft?.name, draft?.phone, draft?.state, nationalNumber],
+    [
+      countryIso,
+      draft?.address,
+      draft?.city,
+      draft?.name,
+      draft?.phone,
+      draft?.state,
+      nationalNumber,
+      placeSelected,
+    ],
   );
 
   if (!draft) {
@@ -239,6 +249,7 @@ export default function ShippingDetailsScreen() {
       address: activeDraft.address,
       city: activeDraft.city,
       state: activeDraft.state,
+      placeSelected,
     });
     setFieldErrors(nextErrors);
     setSaveError(false);
@@ -261,16 +272,9 @@ export default function ShippingDetailsScreen() {
       <ScreenHeader title="Checkout" onBack={cancel} />
       <CheckoutProgress step={1} />
 
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView
-          ref={keyboardScroll.scrollRef}
-          onScroll={keyboardScroll.onScroll}
-          scrollEventThrottle={16}
-          contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl + keyboardScroll.contentPaddingBottom }]}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
-        >
+      <KeyboardSafeScreen contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl }]}>
+        {(keyboardScroll) => (
+          <>
           {!isConnected ? (
             <OfflineBanner title="No connection" message="Reconnect to continue checkout." />
           ) : null}
@@ -346,29 +350,39 @@ export default function ShippingDetailsScreen() {
               <LocationField
                 label="Delivery address"
                 mode="address"
-                placeholder="Search for a place"
+                requireListSelection
+                placeholder="Search and select a place"
                 value={
                   activeDraft.address
                     ? [activeDraft.address, activeDraft.city, activeDraft.state].filter(Boolean).join(', ')
                     : ''
                 }
                 error={shownErrors.address}
-                hint="Search a Nigerian delivery address. City and state fill in when available."
+                hint="You must pick an address from the search results. Typing alone is not enough."
                 onFocus={() => keyboardScroll.onFieldFocus('address')}
                 onSelect={(place) => {
-                checkout.updateDraft({
-                  address: place.addressLine || place.formattedAddress,
-                  city: place.city || place.label.split(',')[0]?.trim() || '',
-                  state: matchNigeriaState(place.state),
-                });
-                setFieldErrors((current) => ({
-                  ...current,
-                  address: undefined,
-                  city: undefined,
-                  state: undefined,
-                }));
-              }}
-            />
+                  if (!isResolvedPlacesPick(place)) {
+                    setAddressPlaceId(null);
+                    setFieldErrors((current) => ({
+                      ...current,
+                      address: 'Search and select a delivery address from the list.',
+                    }));
+                    return;
+                  }
+                  setAddressPlaceId(place.placeId);
+                  checkout.updateDraft({
+                    address: place.addressLine || place.formattedAddress,
+                    city: place.city || place.label.split(',')[0]?.trim() || '',
+                    state: matchNigeriaState(place.state),
+                  });
+                  setFieldErrors((current) => ({
+                    ...current,
+                    address: undefined,
+                    city: undefined,
+                    state: undefined,
+                  }));
+                }}
+              />
             </View>
 
             <View ref={keyboardScroll.setAnchor('city')} collapsable={false} style={styles.row}>
@@ -422,13 +436,14 @@ export default function ShippingDetailsScreen() {
           />
           {!canContinue ? (
             <Text style={styles.helper}>
-              Name, phone, and a full Nigerian delivery address are required.
+              Name, phone, and a delivery address selected from the map list are required.
             </Text>
           ) : (
             <Text style={styles.helper}>Next: choose your delivery method.</Text>
           )}
-        </ScrollView>
-      </KeyboardAvoidingView>
+          </>
+        )}
+      </KeyboardSafeScreen>
     </View>
   );
 }
@@ -470,7 +485,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Palette.ivory,
   },
-  flex: { flex: 1 },
   body: {
     paddingHorizontal: Spacing.xl,
     paddingTop: Spacing.xl,

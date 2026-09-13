@@ -21,6 +21,7 @@ import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
 import { useInbox } from '@/context/inbox-context';
 import { useListings } from '@/context/listings-context';
+import { KeyboardSafeDock } from '@/components/ui/keyboard-safe';
 import { getListingImageSource } from '@/data/images';
 import type { ChatMessage, Offer } from '@/data/types';
 import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
@@ -32,11 +33,10 @@ import { chatDayLabel, formatChatClock, formatNaira } from '@/lib/format';
 import { formatLastSeen, isOnline } from '@/lib/presence';
 import { effectiveOfferStatus, formatOfferCountdown, offerChipVariant } from '@/lib/offer-display';
 import { supabase } from '@/lib/supabase';
-import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
+import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -44,7 +44,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  useWindowDimensions,
   View,
 } from 'react-native';
 
@@ -61,10 +60,8 @@ type ReportTarget = {
 
 export default function ChatScreen() {
   const router = useRouter();
-  const { top, bottom, sheetBottom } = useScreenInsets();
-  const { height: windowHeight } = useWindowDimensions();
-  const keyboard = useKeyboardInset();
-  const keyboardBottom = keyboard.height;
+  const { top, sheetBottom } = useScreenInsets();
+  const keyboardBottom = useKeyboardInset().height;
   const { id } = useLocalSearchParams<{ id: string }>();
   const { session, publicProfiles, ensurePublicProfile, upsertPublicProfile } = useAuth();
   const inbox = useInbox();
@@ -87,6 +84,7 @@ export default function ChatScreen() {
   const [failed, setFailed] = useState<FailedLocal[]>([]);
   const [accessDenied, setAccessDenied] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [loadingConv, setLoadingConv] = useState(false);
 
   const username = session?.username ?? '';
   const conv = id ? inbox.getConversation(id) : undefined;
@@ -155,6 +153,28 @@ export default function ChatScreen() {
     if (!id) return;
     return subscribeConversation(id);
   }, [id, subscribeConversation]);
+
+  // Keep offers fresh so accepted → Buy now shows without leaving chat.
+  useFocusEffect(
+    useCallback(() => {
+      void inbox.refresh({ silent: true }).catch(() => undefined);
+    }, [inbox]),
+  );
+
+  useEffect(() => {
+    if (!id || conv || accessDenied || !session) return;
+    let cancelled = false;
+    setLoadingConv(true);
+    void inbox
+      .refresh({ silent: true })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setLoadingConv(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accessDenied, conv, id, inbox, session]);
 
   useEffect(() => {
     if (!reportDone) return;
@@ -260,7 +280,7 @@ export default function ChatScreen() {
     return <Redirect href="/(auth)/welcome" />;
   }
 
-  if (accessDenied || (id && !conv) || (conv && !conv.participants.includes(session.username))) {
+  if (accessDenied || (conv && !conv.participants.includes(session.username))) {
     return (
       <View style={[styles.screen, { paddingTop: Math.max(top, 14) }]}>
         <View style={styles.deniedWrap}>
@@ -272,11 +292,21 @@ export default function ChatScreen() {
     );
   }
 
+  if (id && !conv) {
+    return (
+      <View style={[styles.screen, { paddingTop: Math.max(top, 14) }]}>
+        <View style={styles.deniedWrap}>
+          <SpinnerArcIcon size={28} color={Palette.muted3} />
+          <Text style={styles.deniedTitle}>{loadingConv ? 'Opening chat…' : 'Conversation not found'}</Text>
+          {!loadingConv ? (
+            <Button label="Back to Inbox" variant="secondary" onPress={() => router.replace('/(tabs)/inbox')} />
+          ) : null}
+        </View>
+      </View>
+    );
+  }
+
   const conversation = conv!;
-  const composerPad =
-    Platform.OS === 'android' && keyboard.height > 0
-      ? Math.max(0, windowHeight - keyboard.screenY) + 24
-      : Math.max(bottom, 12);
   const hasPayload = Boolean(draft.trim() || pendingImage);
   const sendDisabled = !canSend || !hasPayload || sending;
   const listingStatus = (listing?.status ?? 'available') as ListingChipVariant;
@@ -447,7 +477,7 @@ export default function ChatScreen() {
         </View>
       ) : null}
 
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={styles.flex}>
         <ScrollView
           ref={scrollRef}
           contentContainerStyle={styles.thread}
@@ -589,7 +619,7 @@ export default function ChatScreen() {
         ) : null}
 
         {!blocked ? (
-          <View style={[styles.composer, { paddingBottom: composerPad }]}>
+          <KeyboardSafeDock style={styles.composer} gap={24}>
             <Pressable
               onPress={onAttachImage}
               disabled={!canSend || sending}
@@ -622,11 +652,11 @@ export default function ChatScreen() {
               accessibilityLabel="Send message">
               {sending ? <SpinnerArcIcon size={16} color={Palette.ivory} /> : <SendIcon size={16} color={Palette.ivory} />}
             </Pressable>
-          </View>
+          </KeyboardSafeDock>
         ) : (
-          <View style={{ height: composerPad }} />
+          <View style={{ height: sheetBottom }} />
         )}
-      </KeyboardAvoidingView>
+      </View>
 
       <Modal visible={menuOpen} transparent animationType="slide" onRequestClose={() => setMenuOpen(false)}>
         <Pressable style={styles.overlay} onPress={() => setMenuOpen(false)}>

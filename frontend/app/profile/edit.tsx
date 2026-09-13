@@ -1,4 +1,4 @@
-import { LocationField } from '@/components/ui/location-field';
+import { LocationField, placeDisplayLabel } from '@/components/ui/location-field';
 import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
@@ -7,35 +7,23 @@ import { ProgressBar } from '@/components/ui/loading-skeleton';
 import { PhoneField } from '@/components/ui/phone-field';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
+import { KeyboardSafeScreen } from '@/components/ui/keyboard-safe';
 import { Palette, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { DEFAULT_COUNTRY_ISO } from '@/data/country-codes';
-import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
 import { useNetworkStatus } from '@/hooks/use-network-status';
-import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { ApiError } from '@/lib/api';
 import { ensureMediaLibraryPermission } from '@/lib/listing-photos';
 import { formatPhoneE164, isValidPhone, parseStoredPhone } from '@/lib/phone';
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import {
-  BackHandler,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 
 type LeavePrompt = 'idle' | 'confirm';
 
 export default function EditProfileScreen() {
   const router = useRouter();
-  const { bottom } = useScreenInsets();
-  const keyboardScroll = useKeyboardAwareScroll();
   const { session, updateProfile, setProfilePhoto, isReady } = useAuth();
   const { isConnected } = useNetworkStatus();
 
@@ -245,19 +233,9 @@ export default function EditProfileScreen() {
   return (
     <View style={styles.screen}>
       <ScreenHeader title="Edit profile" onBack={requestLeave} />
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView
-          ref={keyboardScroll.scrollRef}
-          onScroll={keyboardScroll.onScroll}
-          scrollEventThrottle={16}
-          contentContainerStyle={[
-            styles.body,
-            { paddingBottom: Spacing.xxxl + Math.max(keyboardScroll.contentPaddingBottom, bottom) },
-          ]}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          showsVerticalScrollIndicator={false}
-          automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}>
+      <KeyboardSafeScreen contentContainerStyle={styles.body}>
+        {(keyboardScroll) => (
+          <>
           {!isConnected ? (
             <OfflineBanner title="No connection" message="Reconnect to save your changes." />
           ) : null}
@@ -380,7 +358,7 @@ export default function EditProfileScreen() {
                 }}
                 multiline
                 style={styles.bio}
-                onFocus={() => keyboardScroll.onFieldFocus('bio')}
+                onFocus={() => keyboardScroll.onFieldFocus('bio', { multiline: true })}
               />
             </View>
             <View ref={keyboardScroll.setAnchor('location')} collapsable={false}>
@@ -391,7 +369,9 @@ export default function EditProfileScreen() {
                 hint="Search or type your city or area."
                 onFocus={() => keyboardScroll.onFieldFocus('location')}
                 onSelect={(place) => {
-                  setLocation(place.label || place.formattedAddress);
+                  const next = placeDisplayLabel(place, 'profile');
+                  if (!next) return;
+                  setLocation(next);
                   setSaved(false);
                 }}
               />
@@ -404,8 +384,9 @@ export default function EditProfileScreen() {
             onPress={() => void onSave()}
             disabled={!isConnected || uploading || (!dirty && !saved)}
           />
-        </ScrollView>
-      </KeyboardAvoidingView>
+          </>
+        )}
+      </KeyboardSafeScreen>
     </View>
   );
 }
@@ -425,7 +406,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Palette.ivory,
   },
-  flex: { flex: 1 },
   body: {
     paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing.xxxl,

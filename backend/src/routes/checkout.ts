@@ -20,6 +20,7 @@ import { createServiceClient } from '../lib/supabase.js';
 import { type AuthedRequest, requireAuth } from '../middleware/auth.js';
 import { buyerProtectionFee, shippingFee } from '../lib/listing-catalog.js';
 import { autoCompleteAtFrom, mapOrderJson, runAutoCompleteDueOrders } from '../lib/order-map.js';
+import { newOrderId } from '../lib/checkout-fulfill.js';
 
 const router = Router();
 const RESERVE_MS = 10 * 60 * 1000;
@@ -153,18 +154,17 @@ router.post('/start', requireAuth, async (req, res) => {
   listedPrice = listing.price;
   if (itemPrice == null) itemPrice = listing.price;
 
-  // Non-live path: reserve catalog listing
-  if (!liveStreamProductId) {
-    if (listing.status === 'reserved') {
-      const { data: claim } = await supabase
-        .from('live_claims')
-        .select('*')
-        .eq('listing_id', listingId)
-        .eq('status', 'active')
-        .maybeSingle();
-      if (claim && claim.user_id !== userId) return sendError(res, 400, 'Listing reserved by another buyer');
-    } else if (listing.status === 'available') {
-      await supabase.from('listings').update({ status: 'reserved' }).eq('id', listingId);
+  // Catalog stays available until claim (live) or paid order fulfillment.
+  // Do not reserve on checkout start — that made “Add to cart” / shipping feel like a hold.
+  if (!liveStreamProductId && listing.status === 'reserved') {
+    const { data: claim } = await supabase
+      .from('live_claims')
+      .select('*')
+      .eq('listing_id', listingId)
+      .eq('status', 'active')
+      .maybeSingle();
+    if (claim && claim.user_id !== userId) {
+      return sendError(res, 400, 'Listing reserved by another buyer');
     }
   }
 
@@ -285,10 +285,10 @@ router.post('/complete', requireAuth, async (req, res) => {
   const protectionFee = buyerProtectionFee(itemPrice);
   const total = itemPrice + deliveryFee + protectionFee;
 
-  const { count } = await supabase.from('orders').select('*', { count: 'exact', head: true });
-  const orderId = `ORD${1001 + (count ?? 0)}`;
+  const service = createServiceClient();
+  const orderId = newOrderId();
 
-  const { data, error } = await supabase
+  const { data, error } = await service
     .from('orders')
     .insert({
       id: orderId,

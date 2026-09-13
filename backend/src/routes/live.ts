@@ -25,7 +25,7 @@ import { createServiceClient, createSupabaseClient } from '../lib/supabase.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
 
 const router = Router();
-const CLAIM_TTL_SECONDS = 5 * 60;
+const CLAIM_TTL_SECONDS = 3 * 60;
 
 function formatStart(iso: string) {
   try {
@@ -1049,6 +1049,7 @@ router.get('/sessions/:id/comments', optionalAuth, async (req, res) => {
         user: user?.username ?? 'unknown',
         text: row.text,
         clientId: row.client_id ?? undefined,
+        photoUrl: user?.photoUri ?? undefined,
       };
     }),
   );
@@ -1080,6 +1081,7 @@ router.post('/sessions/:id/comments', requireAuth, async (req, res) => {
     user: user?.username ?? 'unknown',
     text: data.text,
     clientId: data.client_id ?? undefined,
+    photoUrl: user?.photoUri ?? undefined,
   });
 });
 

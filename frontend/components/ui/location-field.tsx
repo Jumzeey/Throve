@@ -1,5 +1,7 @@
 import { MapPinIcon, SearchIcon, CloseIcon } from '@/components/ui/icons';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
+import { useKeyboardDockPadding } from '@/hooks/use-keyboard-bottom-inset';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import {
   createPlacesSession,
   fetchPlaceDetails,
@@ -18,8 +20,10 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  Keyboard,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -27,7 +31,6 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Props = {
   label?: string;
@@ -38,10 +41,38 @@ type Props = {
   regionCode?: string;
   /** profile = city/region label; address = full delivery place */
   mode?: 'profile' | 'address';
+  /**
+   * When true, the user must pick a suggestion (or current location).
+   * Free-typed “Use this location” is disabled — used for checkout delivery.
+   */
+  requireListSelection?: boolean;
   containerStyle?: StyleProp<ViewStyle>;
   onSelect: (place: ResolvedPlace) => void;
   onFocus?: () => void;
 };
+
+export function isResolvedPlacesPick(place: ResolvedPlace) {
+  return Boolean(place.placeId) && !place.placeId.startsWith('manual:');
+}
+
+/** Display string for form fields (profile city label preferred). */
+export function placeDisplayLabel(place: ResolvedPlace, mode: 'profile' | 'address' = 'profile') {
+  if (mode === 'address') {
+    return (
+      place.formattedAddress?.trim() ||
+      place.addressLine?.trim() ||
+      place.label?.trim() ||
+      [place.city, place.state].filter(Boolean).join(', ')
+    );
+  }
+  return (
+    place.label?.trim() ||
+    [place.city, place.state].filter(Boolean).join(', ') ||
+    place.formattedAddress?.trim() ||
+    place.addressLine?.trim() ||
+    ''
+  );
+}
 
 export function LocationField({
   label = 'Location',
@@ -51,6 +82,7 @@ export function LocationField({
   error,
   regionCode = 'NG',
   mode = 'profile',
+  requireListSelection = false,
   containerStyle,
   onSelect,
   onFocus,
@@ -79,6 +111,7 @@ export function LocationField({
         visible={open}
         mode={mode}
         regionCode={regionCode}
+        requireListSelection={requireListSelection}
         initialQuery={value}
         onClose={() => setOpen(false)}
         onSelect={(place) => {
@@ -121,21 +154,28 @@ function placeFromManual(text: string, mode: 'profile' | 'address'): ResolvedPla
   };
 }
 
-function friendlyPlacesError(err: unknown) {
+function friendlyPlacesError(err: unknown, requireListSelection: boolean) {
   const raw = err instanceof Error ? err.message : '';
   if (/not configured|GOOGLE_MAPS|503|API key/i.test(raw)) {
-    return 'Place search is unavailable right now. You can type your location instead.';
+    return requireListSelection
+      ? 'Place search is unavailable right now. Try again shortly — you must pick an address from the list.'
+      : 'Place search is unavailable right now. You can type your location instead.';
   }
   if (/network|fetch|failed/i.test(raw)) {
-    return 'We couldn’t reach place search. Check your connection, or type your location.';
+    return requireListSelection
+      ? 'We couldn’t reach place search. Check your connection and try again.'
+      : 'We couldn’t reach place search. Check your connection, or type your location.';
   }
-  return 'We couldn’t load places. Try again, or type your location.';
+  return requireListSelection
+    ? 'We couldn’t load places. Try again and select an address from the list.'
+    : 'We couldn’t load places. Try again, or type your location.';
 }
 
 function LocationPickerModal({
   visible,
   mode,
   regionCode,
+  requireListSelection,
   initialQuery,
   onClose,
   onSelect,
@@ -143,11 +183,13 @@ function LocationPickerModal({
   visible: boolean;
   mode: 'profile' | 'address';
   regionCode: string;
+  requireListSelection: boolean;
   initialQuery?: string;
   onClose: () => void;
   onSelect: (place: ResolvedPlace) => void;
 }) {
-  const insets = useSafeAreaInsets();
+  const { top, bottom } = useScreenInsets();
+  const padBottom = useKeyboardDockPadding(12, bottom + 12);
   const [enabled, setEnabled] = useState(true);
   const [query, setQuery] = useState(initialQuery ?? '');
   const [sessionToken, setSessionToken] = useState<string | undefined>();
@@ -159,7 +201,10 @@ function LocationPickerModal({
   const [mapUri, setMapUri] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const allowManual = !requireListSelection;
 
+  // Only reset when the modal opens. Do not depend on initialQuery — a parent
+  // value update while open (after onSelect) would wipe the pending preview.
   useEffect(() => {
     if (!visible) return;
     setQuery(initialQuery ?? '');
@@ -167,13 +212,15 @@ function LocationPickerModal({
     setPreview(null);
     setMapUri(null);
     setError(null);
+    setResolvingId(null);
     void placesEnabled()
       .then((ok) => setEnabled(ok))
       .catch(() => setEnabled(false));
     void createPlacesSession()
       .then(setSessionToken)
       .catch(() => setSessionToken(undefined));
-  }, [visible, initialQuery]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seed from initialQuery only on open
+  }, [visible]);
 
   const runSearch = useCallback(
     async (text: string, token?: string) => {
@@ -189,8 +236,8 @@ function LocationPickerModal({
         setSuggestions(results);
       } catch (err) {
         setSuggestions([]);
-        const message = friendlyPlacesError(err);
-        if (/unavailable right now|type your location/i.test(message)) {
+        const message = friendlyPlacesError(err, requireListSelection);
+        if (allowManual && /unavailable right now|type your location/i.test(message)) {
           setEnabled(false);
         }
         setError(message);
@@ -198,7 +245,7 @@ function LocationPickerModal({
         setLoading(false);
       }
     },
-    [enabled, regionCode],
+    [allowManual, enabled, regionCode, requireListSelection],
   );
 
   useEffect(() => {
@@ -212,11 +259,23 @@ function LocationPickerModal({
     };
   }, [enabled, query, runSearch, sessionToken, visible]);
 
+  function applyPlace(place: ResolvedPlace) {
+    Keyboard.dismiss();
+    onSelect(place);
+  }
+
   async function pickSuggestion(item: PlaceSuggestion) {
     setResolvingId(item.placeId);
     setError(null);
     try {
       const place = await fetchPlaceDetails(item.placeId, sessionToken);
+      // Profile location: apply immediately so the form field updates without a
+      // second "Use this location" tap (easy to miss under the keyboard).
+      if (mode === 'profile') {
+        applyPlace(place);
+        return;
+      }
+      Keyboard.dismiss();
       setPreview(place);
       if (place.lat != null && place.lng != null) {
         const uri = await fetchStaticMapDataUri(place.lat, place.lng);
@@ -225,7 +284,7 @@ function LocationPickerModal({
         setMapUri(null);
       }
     } catch (err) {
-      setError(friendlyPlacesError(err));
+      setError(friendlyPlacesError(err, requireListSelection));
     } finally {
       setResolvingId(null);
     }
@@ -237,21 +296,30 @@ function LocationPickerModal({
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
       if (!permission.granted) {
-        setError('Allow location access to use your current position, or type your location below.');
+        setError(
+          requireListSelection
+            ? 'Allow location access, or search and select an address from the list.'
+            : 'Allow location access to use your current position, or type your location below.',
+        );
         return;
       }
       const position = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
       const place = await reverseGeocodeCoords(position.coords.latitude, position.coords.longitude);
+      if (mode === 'profile') {
+        applyPlace(place);
+        return;
+      }
+      Keyboard.dismiss();
       setPreview(place);
-      setQuery(mode === 'profile' ? place.label : place.formattedAddress);
+      setQuery(place.formattedAddress || place.label);
       if (place.lat != null && place.lng != null) {
         setMapUri(await fetchStaticMapDataUri(place.lat, place.lng));
       }
     } catch (err) {
-      setError(friendlyPlacesError(err));
-      setEnabled(false);
+      setError(friendlyPlacesError(err, requireListSelection));
+      if (allowManual) setEnabled(false);
     } finally {
       setLocating(false);
     }
@@ -259,21 +327,29 @@ function LocationPickerModal({
 
   function confirmPreview() {
     if (!preview) return;
-    onSelect(preview);
+    if (requireListSelection && !isResolvedPlacesPick(preview)) {
+      setError('Select an address from the search results to continue.');
+      return;
+    }
+    applyPlace(preview);
   }
 
   function confirmManual() {
+    if (!allowManual) {
+      setError('Select an address from the list — typed addresses are not accepted.');
+      return;
+    }
     const trimmed = query.trim();
     if (!trimmed) {
       setError('Enter a location to continue.');
       return;
     }
-    onSelect(placeFromManual(trimmed, mode));
+    applyPlace(placeFromManual(trimmed, mode));
   }
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={[styles.modal, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 12 }]}>
+      <View style={[styles.modal, { paddingTop: top + 8, paddingBottom: padBottom }]}>
         <View style={styles.modalHeader}>
           <Text style={styles.modalTitle}>Choose location</Text>
           <Pressable onPress={onClose} hitSlop={12} style={styles.closeBtn}>
@@ -295,7 +371,9 @@ function LocationPickerModal({
               mode === 'address'
                 ? enabled
                   ? 'Street, area, or landmark'
-                  : 'Type your delivery address'
+                  : allowManual
+                    ? 'Type your delivery address'
+                    : 'Search requires Maps — try again'
                 : enabled
                   ? 'City, area, or landmark'
                   : 'Type your city or area'
@@ -303,9 +381,9 @@ function LocationPickerModal({
             placeholderTextColor={Palette.disabled}
             style={styles.searchInput}
             autoFocus
-            returnKeyType={enabled ? 'search' : 'done'}
+            returnKeyType={enabled || !allowManual ? 'search' : 'done'}
             onSubmitEditing={() => {
-              if (!enabled) confirmManual();
+              if (!enabled && allowManual) confirmManual();
             }}
           />
           {loading ? <ActivityIndicator color={Palette.plum} /> : null}
@@ -319,49 +397,62 @@ function LocationPickerModal({
             {locating ? <ActivityIndicator color={Palette.plum} /> : <MapPinIcon size={15} color={Palette.plum} />}
             <Text style={styles.currentLabel}>{locating ? 'Finding you…' : 'Use current location'}</Text>
           </Pressable>
-        ) : (
+        ) : allowManual ? (
           <Text style={styles.manualHint}>Type your location, then confirm below.</Text>
+        ) : (
+          <Text style={styles.manualHint}>
+            Delivery address must be selected from the map results. Place search is offline — close and try again.
+          </Text>
         )}
 
         {error ? <Text style={styles.modalError}>{error}</Text> : null}
 
-        {!enabled ? (
+        {!enabled && allowManual ? (
           <Pressable
             onPress={confirmManual}
             style={({ pressed }) => [styles.primaryAction, styles.manualConfirm, pressed && styles.pressed]}>
             <Text style={styles.primaryActionLabel}>Use this location</Text>
           </Pressable>
         ) : preview ? (
-          <View style={styles.previewCard}>
-            {mapUri ? <Image source={{ uri: mapUri }} style={styles.map} resizeMode="cover" /> : null}
-            <Text style={styles.previewTitle}>
-              {mode === 'profile' ? preview.label : preview.formattedAddress}
-            </Text>
-            {mode === 'profile' && preview.formattedAddress !== preview.label ? (
-              <Text style={styles.previewSub}>{preview.formattedAddress}</Text>
-            ) : null}
-            <View style={styles.previewActions}>
-              <Pressable
-                onPress={() => void Linking.openURL(googleMapsAppUrl(preview))}
-                style={styles.secondaryAction}>
-                <Text style={styles.secondaryActionLabel}>Open in Maps</Text>
-              </Pressable>
-              <Pressable onPress={confirmPreview} style={styles.primaryAction}>
-                <Text style={styles.primaryActionLabel}>Use this location</Text>
-              </Pressable>
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            contentContainerStyle={styles.previewScroll}
+            showsVerticalScrollIndicator={false}>
+            <View style={styles.previewCard}>
+              {mapUri ? <Image source={{ uri: mapUri }} style={styles.map} resizeMode="cover" /> : null}
+              <Text style={styles.previewTitle}>
+                {mode === 'profile' ? placeDisplayLabel(preview, 'profile') : placeDisplayLabel(preview, 'address')}
+              </Text>
+              {mode === 'profile' &&
+              preview.formattedAddress &&
+              preview.formattedAddress !== placeDisplayLabel(preview, 'profile') ? (
+                <Text style={styles.previewSub}>{preview.formattedAddress}</Text>
+              ) : null}
+              <View style={styles.previewActions}>
+                <Pressable
+                  onPress={() => void Linking.openURL(googleMapsAppUrl(preview))}
+                  style={styles.secondaryAction}>
+                  <Text style={styles.secondaryActionLabel}>Open in Maps</Text>
+                </Pressable>
+                <Pressable onPress={confirmPreview} style={styles.primaryAction}>
+                  <Text style={styles.primaryActionLabel}>Use this location</Text>
+                </Pressable>
+              </View>
             </View>
-          </View>
-        ) : (
+          </ScrollView>
+        ) : enabled ? (
           <FlatList
             data={suggestions}
             keyExtractor={(item) => item.placeId}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
             contentContainerStyle={styles.list}
             ListEmptyComponent={
               query.trim().length >= 2 && !loading ? (
                 <Text style={styles.empty}>No matching places. Try a nearby landmark or street.</Text>
               ) : (
-                <Text style={styles.empty}>Search for a place to select.</Text>
+                <Text style={styles.empty}>Search and select a place from the list to continue.</Text>
               )
             }
             renderItem={({ item }) => (
@@ -379,7 +470,7 @@ function LocationPickerModal({
               </Pressable>
             )}
           />
-        )}
+        ) : null}
       </View>
     </Modal>
   );
@@ -537,8 +628,12 @@ const styles = StyleSheet.create({
     fontFamily: Typography.body,
     color: Palette.muted,
   },
+  previewScroll: {
+    paddingTop: 14,
+    paddingBottom: 24,
+    flexGrow: 1,
+  },
   previewCard: {
-    marginTop: 14,
     borderRadius: Radius.lg,
     borderWidth: 1,
     borderColor: Palette.border,

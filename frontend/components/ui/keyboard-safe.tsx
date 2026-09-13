@@ -1,4 +1,5 @@
-import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
+import { useKeyboardAwareScroll, type KeyboardAwareScrollApi } from '@/hooks/use-keyboard-aware-scroll';
+import { useKeyboardDockPadding } from '@/hooks/use-keyboard-bottom-inset';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import type { ReactNode } from 'react';
 import {
@@ -8,7 +9,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  useWindowDimensions,
   View,
   type StyleProp,
   type ViewStyle,
@@ -26,11 +26,13 @@ type SheetProps = {
  * Bottom sheet that lifts above the software keyboard (iOS + Android).
  * Place inside a transparent full-screen Modal — Android Modals do not
  * resize with the soft keyboard, so we pad explicitly from keyboard metrics.
+ *
+ * Uses window/keyboard overlap (same as KeyboardSafeDock) so adjustResize
+ * devices are not double-padded.
  */
 export function KeyboardSafeSheet({ children, onDismiss, style, gap = 12 }: SheetProps) {
   const { sheetBottom } = useScreenInsets();
-  const { height: keyboardHeight } = useKeyboardInset();
-  const padBottom = keyboardHeight > 0 ? keyboardHeight + gap : sheetBottom;
+  const padBottom = useKeyboardDockPadding(gap, sheetBottom);
 
   return (
     <View style={styles.sheetRoot}>
@@ -65,27 +67,27 @@ type DockProps = {
 /**
  * Bottom-docked composer / action bar that stays above the software keyboard.
  * Prefer this over hand-rolled `paddingBottom: keyboard.height` in screens.
+ *
+ * Uses window-frame vs keyboard `screenY` overlap so Android works whether the
+ * activity resized (`adjustResize`) or stayed full-bleed (edge-to-edge / OEM).
  */
 export function KeyboardSafeDock({ children, style, gap = 12, absolute = false }: DockProps) {
   const { sheetBottom } = useScreenInsets();
-  const { height: windowHeight } = useWindowDimensions();
-  const { height: keyboardHeight, screenY } = useKeyboardInset();
-  const open = keyboardHeight > 0;
-  // Expo/Android may already resize the window — don't double-lift.
-  const windowAlreadyResized = open && screenY > 0 && Math.abs(windowHeight - screenY) < 48;
-  const padBottom = !open
-    ? sheetBottom
-    : windowAlreadyResized
-      ? Math.max(gap, 12)
-      : keyboardHeight + gap;
+  const padBottom = useKeyboardDockPadding(gap, sheetBottom);
 
   return (
-    <View style={[absolute ? styles.dockAbsolute : null, style, { paddingBottom: padBottom }]}>{children}</View>
+    <View style={[absolute ? styles.dockAbsolute : null, style, { paddingBottom: padBottom }]}>
+      {children}
+    </View>
   );
 }
 
 type ScreenProps = {
-  children: ReactNode;
+  /**
+   * Form body. Pass a function to receive scroll anchors / focus helpers
+   * (same API as `useKeyboardAwareScroll`).
+   */
+  children: ReactNode | ((api: KeyboardAwareScrollApi) => ReactNode);
   style?: StyleProp<ViewStyle>;
   contentContainerStyle?: StyleProp<ViewStyle>;
   /** When false, children are not wrapped in a ScrollView. */
@@ -94,7 +96,8 @@ type ScreenProps = {
 };
 
 /**
- * Full-screen form wrapper: KeyboardAvoidingView + ScrollView with keyboard insets.
+ * Full-screen form wrapper: KeyboardAvoidingView (iOS) + ScrollView with
+ * overlap-based keyboard padding and focused-field scrolling (Android).
  */
 export function KeyboardSafeScreen({
   children,
@@ -103,17 +106,19 @@ export function KeyboardSafeScreen({
   scroll = true,
   keyboardVerticalOffset = 0,
 }: ScreenProps) {
-  const { bottom } = useScreenInsets();
-  const { height: keyboardHeight } = useKeyboardInset();
-  const extraPad = Platform.OS === 'android' && keyboardHeight > 0 ? keyboardHeight + 24 : Math.max(bottom + 24, 40);
+  const keyboardScroll = useKeyboardAwareScroll();
+  const body = typeof children === 'function' ? children(keyboardScroll) : children;
+  const flatContent = StyleSheet.flatten(contentContainerStyle) as ViewStyle | undefined;
+  const basePadBottom = typeof flatContent?.paddingBottom === 'number' ? flatContent.paddingBottom : 0;
 
   if (!scroll) {
     return (
       <KeyboardAvoidingView
         style={[styles.flex, style]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={keyboardVerticalOffset}>
-        {children}
+        keyboardVerticalOffset={keyboardVerticalOffset}
+      >
+        {body}
       </KeyboardAvoidingView>
     );
   }
@@ -122,14 +127,23 @@ export function KeyboardSafeScreen({
     <KeyboardAvoidingView
       style={[styles.flex, style]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={keyboardVerticalOffset}>
+      keyboardVerticalOffset={keyboardVerticalOffset}
+    >
       <ScrollView
-        contentContainerStyle={[{ flexGrow: 1, paddingBottom: extraPad }, contentContainerStyle]}
+        ref={keyboardScroll.scrollRef}
+        onScroll={keyboardScroll.onScroll}
+        scrollEventThrottle={16}
+        contentContainerStyle={[
+          { flexGrow: 1 },
+          contentContainerStyle,
+          { paddingBottom: basePadBottom + keyboardScroll.contentPaddingBottom },
+        ]}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
-        showsVerticalScrollIndicator={false}>
-        {children}
+        automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
+        showsVerticalScrollIndicator={false}
+      >
+        {body}
       </ScrollView>
     </KeyboardAvoidingView>
   );

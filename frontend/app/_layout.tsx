@@ -30,7 +30,7 @@ import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
-// Keep the native Throve splash up until we explicitly hide it.
+// Keep the native Throve splash up until first JS frame — then we hide immediately.
 void NativeSplash.preventAutoHideAsync();
 
 const ThroveTheme = {
@@ -48,12 +48,7 @@ const ThroveTheme = {
 function RootNavigator() {
   const { isReady, isAuthenticatingLink } = useAuth();
 
-  useEffect(() => {
-    if (isReady && !isAuthenticatingLink) {
-      void NativeSplash.hideAsync();
-    }
-  }, [isReady, isAuthenticatingLink]);
-
+  // Only block on deep-link auth. Disk session restore is near-instant.
   if (!isReady || isAuthenticatingLink) {
     return <SplashScreen />;
   }
@@ -80,7 +75,8 @@ function RootNavigator() {
 }
 
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
+  // Load fonts in the background — do not gate the whole app on them.
+  useFonts({
     PlayfairDisplay_400Regular,
     PlayfairDisplay_600SemiBold,
     PlayfairDisplay_700Bold,
@@ -94,12 +90,9 @@ export default function RootLayout() {
     if (Platform.OS === 'android') {
       void SystemUI.setBackgroundColorAsync(Palette.ivory);
     }
+    // Drop native splash on first paint; in-app splash covers the brief auth disk read.
+    void NativeSplash.hideAsync();
   }, []);
-
-  // Keep native splash visible until fonts are ready; then show matching in-app splash.
-  if (!fontsLoaded) {
-    return null;
-  }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -108,14 +101,14 @@ export default function RootLayout() {
           <ListingsProvider>
             <InboxProvider>
               <NotificationsProvider>
-              <LiveProvider>
-                <CheckoutProvider>
-                  <ThemeProvider value={ThroveTheme}>
-                    <StatusBar style="dark" />
-                    <RootNavigator />
-                  </ThemeProvider>
-                </CheckoutProvider>
-              </LiveProvider>
+                <LiveProvider>
+                  <CheckoutProvider>
+                    <ThemeProvider value={ThroveTheme}>
+                      <StatusBar style="dark" />
+                      <RootNavigator />
+                    </ThemeProvider>
+                  </CheckoutProvider>
+                </LiveProvider>
               </NotificationsProvider>
             </InboxProvider>
           </ListingsProvider>

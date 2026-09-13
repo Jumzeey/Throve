@@ -36,6 +36,8 @@ export async function mapOrderJson(
     listingTitle: row.listing_title,
     buyer: buyer?.username ?? 'unknown',
     seller: seller?.username ?? 'unknown',
+    buyerId: String(row.buyer_id),
+    sellerId: String(row.seller_id),
     name: row.name,
     address: row.address,
     city: row.city,

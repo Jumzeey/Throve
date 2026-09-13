@@ -12,11 +12,16 @@ import type { Order } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { formatNaira } from '@/lib/format';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Redirect, useRouter } from 'expo-router';
+import { Redirect, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 type Tab = 'purchases' | 'sales';
+
+function sameUser(orderUsername: string | undefined, sessionUsername: string | undefined) {
+  if (!orderUsername || !sessionUsername) return false;
+  return orderUsername.trim().toLowerCase() === sessionUsername.trim().toLowerCase();
+}
 
 export default function OrdersScreen() {
   const router = useRouter();
@@ -26,12 +31,22 @@ export default function OrdersScreen() {
   const [tab, setTab] = useState<Tab>('purchases');
 
   const purchases = useMemo(
-    () => orders.filter((order) => order.buyer === session?.username),
-    [orders, session?.username],
+    () =>
+      orders.filter(
+        (order) =>
+          (session?.userId && order.buyerId === session.userId) ||
+          sameUser(order.buyer, session?.username),
+      ),
+    [orders, session?.userId, session?.username],
   );
   const sales = useMemo(
-    () => orders.filter((order) => order.seller === session?.username),
-    [orders, session?.username],
+    () =>
+      orders.filter(
+        (order) =>
+          (session?.userId && order.sellerId === session.userId) ||
+          sameUser(order.seller, session?.username),
+      ),
+    [orders, session?.userId, session?.username],
   );
   const visible = tab === 'purchases' ? purchases : sales;
 
@@ -39,6 +54,13 @@ export default function OrdersScreen() {
     await refresh({ silent: true });
   }, [refresh]);
   const { refreshing, onRefresh } = usePullRefresh(pullTask);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!session) return;
+      void refresh({ silent: true });
+    }, [refresh, session]),
+  );
 
   const showSkeleton = loading && orders.length === 0 && !refreshing;
   const showError = loadError && !showSkeleton && orders.length === 0;

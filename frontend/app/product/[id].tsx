@@ -221,11 +221,13 @@ export default function ProductScreen() {
               <View style={styles.protectRow}>
                 <ShieldCheckIcon />
                 <Text style={styles.protectTotal}>{formatNaira(protectedTotal)}</Text>
-                <Text style={styles.protectLabel}>incl. Buyer Protection</Text>
+                <Text style={styles.protectLabel}>
+                  incl. Buyer Protection ({formatNaira(protection)})
+                </Text>
               </View>
               <Text style={styles.protectCopy}>
-                Covers your payment until the order completes — automatically 48 hours after delivery, or as soon as you
-                confirm receipt.{' '}
+                Buyer Protection is 5% of the item price (₦300 minimum, ₦2,500 maximum). It covers your payment until
+                the order completes — automatically 48 hours after delivery, or as soon as you confirm receipt.{' '}
                 <Text style={styles.learnMore} onPress={() => setProtectOpen(true)}>
                   Learn more
                 </Text>
@@ -543,6 +545,7 @@ const styles = StyleSheet.create({
   protectRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 7,
   },
   protectTotal: {
@@ -552,6 +555,7 @@ const styles = StyleSheet.create({
     color: Palette.successText,
   },
   protectLabel: {
+    flexShrink: 1,
     fontSize: 12.5,
     fontFamily: Typography.body,
     color: '#5C6B58',

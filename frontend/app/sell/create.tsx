@@ -5,11 +5,12 @@ import { PlusIcon } from '@/components/ui/icons';
 import { PickerField } from '@/components/ui/picker-field';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
+import { KeyboardSafeScreen } from '@/components/ui/keyboard-safe';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useListings } from '@/context/listings-context';
 import { useNetworkStatus } from '@/hooks/use-network-status';
-import { useScreenInsets } from '@/hooks/use-screen-insets';
+import type { KeyboardAwareScrollApi } from '@/hooks/use-keyboard-aware-scroll';
 import { formatNaira } from '@/lib/format';
 import {
   categoriesForDepartment,
@@ -28,21 +29,16 @@ import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
   type LayoutChangeEvent,
 } from 'react-native';
-import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
 
 export default function CreateListingScreen() {
   const router = useRouter();
-  const { bottom } = useScreenInsets();
-  const keyboardScroll = useKeyboardAwareScroll();
+  const keyboardScrollRef = useRef<KeyboardAwareScrollApi | null>(null);
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { session } = useAuth();
   const { form, setForm, getListing, loadFormFromListing, saveDraft, loading: listingsLoading } = useListings();
@@ -132,7 +128,7 @@ export default function CreateListingScreen() {
   function scrollToField(field: ListingFormIssueField) {
     const y = fieldOffsets.current[field];
     if (y == null) return;
-    keyboardScroll.scrollRef.current?.scrollTo({ y: Math.max(0, y - 16), animated: true });
+    keyboardScrollRef.current?.scrollRef.current?.scrollTo({ y: Math.max(0, y - 16), animated: true });
   }
 
   function preview() {
@@ -243,20 +239,11 @@ export default function CreateListingScreen() {
       {loading ? (
         <CreateListingSkeleton />
       ) : (
-        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView
-            ref={keyboardScroll.scrollRef}
-            onScroll={keyboardScroll.onScroll}
-            scrollEventThrottle={16}
-            contentContainerStyle={[
-              styles.body,
-              {
-                paddingBottom: Spacing.xxxl + Math.max(keyboardScroll.contentPaddingBottom, bottom),
-              },
-            ]}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-            automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}>
+        <KeyboardSafeScreen contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl }]}>
+          {(keyboardScroll) => {
+            keyboardScrollRef.current = keyboardScroll;
+            return (
+          <>
           {!isConnected ? (
             <AlertBanner variant="warning" title="No connection" message="Reconnect to save this listing." style={styles.banner} />
           ) : null}
@@ -563,8 +550,10 @@ export default function CreateListingScreen() {
               </View>
             </>
           ) : null}
-        </ScrollView>
-        </KeyboardAvoidingView>
+          </>
+            );
+          }}
+        </KeyboardSafeScreen>
       )}
 
       <Dialog
@@ -644,7 +633,6 @@ function CreateListingSkeleton() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Palette.ivory },
-  flex: { flex: 1 },
   body: { paddingHorizontal: Spacing.xl },
   banner: { marginBottom: Spacing.lg },
   retry: { marginBottom: Spacing.lg },

@@ -25,7 +25,7 @@ export default function SellerListingScreen() {
   const router = useRouter();
   const { sheetBottom } = useScreenInsets();
   const { id, notice } = useLocalSearchParams<{ id: string; notice?: string }>();
-  const { session } = useAuth();
+  const { session, publicProfiles, ensurePublicProfile } = useAuth();
   const { getListing, loadFormFromListing, setStatus, removeListing, canDelete } = useListings();
   const inbox = useInbox();
   const checkout = useCheckout();
@@ -47,6 +47,14 @@ export default function SellerListingScreen() {
   }, [note]);
 
   const listing = id ? getListing(id) : undefined;
+  const buyers = listing?.savedBy ?? [];
+
+  useEffect(() => {
+    for (const username of buyers) {
+      void ensurePublicProfile(username).catch(() => undefined);
+    }
+  }, [buyers, ensurePublicProfile]);
+
   const order = useMemo(
     () => (listing ? checkout.orders.find((entry) => entry.listingId === listing.id) : undefined),
     [checkout.orders, listing],
@@ -76,7 +84,6 @@ export default function SellerListingScreen() {
   }
 
   const item = listing;
-  const buyers = item.savedBy;
   const reserved = item.status === 'reserved' || checkout.draft?.listingId === item.id;
   const allowDelete = canDelete(item.id) && !reserved && item.status !== 'sold';
 
@@ -335,7 +342,11 @@ export default function SellerListingScreen() {
                   return (
                     <View key={username} style={styles.buyerRow}>
                       <View style={styles.buyerTop}>
-                        <ProfileAvatar username={username} style={styles.avatar} />
+                        <ProfileAvatar
+                          uri={publicProfiles[username]?.photoUri}
+                          username={username}
+                          style={styles.avatar}
+                        />
                         <View style={styles.buyerCopy}>
                           <Text style={styles.buyerName}>{username}</Text>
                           <Text style={styles.buyerMeta}>Saved this item</Text>

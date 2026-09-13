@@ -99,6 +99,45 @@ function watchersFromPresence(
   });
 }
 
+/** Merge comment lists by id; keep pending optimistic rows that aren't in `incoming` yet. */
+function mergeComments(existing: LiveComment[], incoming: LiveComment[]): LiveComment[] {
+  const byId = new Map<string, LiveComment>();
+  const byClient = new Map<string, string>();
+
+  for (const comment of existing) {
+    byId.set(comment.id, comment);
+    if (comment.clientId) byClient.set(comment.clientId, comment.id);
+  }
+
+  for (const comment of incoming) {
+    const priorId = comment.clientId ? byClient.get(comment.clientId) : undefined;
+    if (priorId && priorId !== comment.id && priorId.startsWith('temp_')) {
+      byId.delete(priorId);
+    }
+    const prev = byId.get(comment.id);
+    const user =
+      comment.user && comment.user !== 'viewer'
+        ? comment.user
+        : prev?.user && prev.user !== 'viewer'
+          ? prev.user
+          : comment.user || prev?.user || 'viewer';
+    byId.set(comment.id, {
+      ...prev,
+      ...comment,
+      user,
+      clientId: comment.clientId ?? prev?.clientId,
+      photoUrl: comment.photoUrl || prev?.photoUrl,
+    });
+    if (comment.clientId) byClient.set(comment.clientId, comment.id);
+  }
+
+  return [...byId.values()];
+}
+
+function newCommentClientId() {
+  return `c_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
 type StartLiveInput = {
   host: string;
   title: string;
@@ -136,6 +175,11 @@ type LiveContextValue = {
   toggleConnection: (sessionId: string) => void;
   pinProduct: (sessionId: string, productId: string) => Promise<void>;
   pinListing: (sessionId: string, listingId: string) => Promise<void>;
+  /** Attach one of the host's listings to an already-running live session. */
+  addProduct: (
+    sessionId: string,
+    input: { listingId: string; livePrice: number; stock?: number; isPinned?: boolean },
+  ) => Promise<LiveStreamProduct>;
   claimProduct: (sessionId: string, productId: string, quantity?: number) => Promise<LiveClaim>;
   claimListing: (sessionId: string, listingId: string, username: string) => Promise<void>;
   releaseClaim: (sessionId: string, productId: string, claimId: string) => Promise<void>;
@@ -215,6 +259,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [watchersBySession, setWatchersBySession] = useState<Record<string, LiveWatcher[]>>({});
   const [savedLives, setSavedLives] = useState<LiveSession[]>([]);
   const channelsRef = useRef<Record<string, RealtimeChannel>>({});
+  const channelSubsRef = useRef<Record<string, number>>({});
+  const commentFetchGenRef = useRef<Record<string, number>>({});
   const authRef = useRef(authSession);
   const sessionsRef = useRef(sessions);
   const modsRef = useRef(moderatorsBySession);
@@ -316,11 +362,18 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     if (session.moderators) {
       setModeratorsBySession((current) => ({ ...current, [sessionId]: session.moderators ?? [] }));
     }
+    const fetchGen = (commentFetchGenRef.current[sessionId] ?? 0) + 1;
+    commentFetchGenRef.current[sessionId] = fetchGen;
     const [comments, claims] = await Promise.all([
       apiFetch<LiveComment[]>(`/live/sessions/${sessionId}/comments`),
       apiFetch<LiveClaim[]>(`/live/sessions/${sessionId}/claims/me`).catch(() => [] as LiveClaim[]),
     ]);
-    setCommentsBySession((current) => ({ ...current, [sessionId]: comments }));
+    if (commentFetchGenRef.current[sessionId] === fetchGen) {
+      setCommentsBySession((current) => ({
+        ...current,
+        [sessionId]: mergeComments(current[sessionId] ?? [], comments),
+      }));
+    }
     const active = claims.find((c) => c.status === 'active');
     if (active) setClaimsBySession((current) => ({ ...current, [sessionId]: active }));
     return session;
@@ -328,9 +381,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   const subscribeSession = useCallback(
     (sessionId: string) => {
-      if (channelsRef.current[sessionId]) {
-        return () => undefined;
-      }
+      channelSubsRef.current[sessionId] = (channelSubsRef.current[sessionId] ?? 0) + 1;
 
       const trackPresence = (channel: RealtimeChannel) => {
         const payload = presenceTrackPayload(
@@ -342,6 +393,31 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         );
         return channel.track(payload, payload.username ? { presenceKey: payload.username } : undefined);
       };
+
+      const releaseSubscription = () => {
+        channelSubsRef.current[sessionId] = Math.max(0, (channelSubsRef.current[sessionId] ?? 1) - 1);
+        if ((channelSubsRef.current[sessionId] ?? 0) > 0) return;
+        const existing = channelsRef.current[sessionId];
+        if (existing) {
+          void supabase.removeChannel(existing);
+          delete channelsRef.current[sessionId];
+        }
+        delete channelSubsRef.current[sessionId];
+        setWatchersBySession((current) => {
+          if (!(sessionId in current)) return current;
+          const next = { ...current };
+          delete next[sessionId];
+          return next;
+        });
+      };
+
+      if (channelsRef.current[sessionId]) {
+        const existing = channelsRef.current[sessionId];
+        void hydrateSession(sessionId).then(() => {
+          if (channelsRef.current[sessionId] === existing) void trackPresence(existing);
+        });
+        return releaseSubscription;
+      }
 
       void hydrateSession(sessionId).then(() => {
         const existing = channelsRef.current[sessionId];
@@ -357,16 +433,38 @@ export function LiveProvider({ children }: { children: ReactNode }) {
             const row = payload.new as { id: string; user_id: string; text: string; client_id?: string };
             setCommentsBySession((current) => {
               const list = current[sessionId] ?? [];
-              if (list.some((c) => c.id === row.id || (row.client_id && c.clientId === row.client_id))) return current;
+              if (list.some((c) => c.id === row.id)) return current;
+              const byClient = row.client_id
+                ? list.find((c) => c.clientId === row.client_id)
+                : undefined;
+              if (byClient) {
+                return {
+                  ...current,
+                  [sessionId]: list.map((c) =>
+                    c.clientId === row.client_id
+                      ? { ...c, id: row.id, text: row.text, clientId: row.client_id }
+                      : c,
+                  ),
+                };
+              }
               return {
                 ...current,
-                [sessionId]: [...list, { id: row.id, user: 'viewer', text: row.text, clientId: row.client_id }],
+                [sessionId]: [
+                  ...list,
+                  { id: row.id, user: 'viewer', text: row.text, clientId: row.client_id },
+                ],
               };
             });
-            // Refresh comments to resolve usernames
+            // Resolve usernames without wiping newer comments from a slow/stale GET.
+            const fetchGen = (commentFetchGenRef.current[sessionId] ?? 0) + 1;
+            commentFetchGenRef.current[sessionId] = fetchGen;
             try {
               const comments = await apiFetch<LiveComment[]>(`/live/sessions/${sessionId}/comments`);
-              setCommentsBySession((current) => ({ ...current, [sessionId]: comments }));
+              if (commentFetchGenRef.current[sessionId] !== fetchGen) return;
+              setCommentsBySession((current) => ({
+                ...current,
+                [sessionId]: mergeComments(current[sessionId] ?? [], comments),
+              }));
             } catch {
               /* ignore */
             }
@@ -466,19 +564,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
       channelsRef.current[sessionId] = channel;
 
-      return () => {
-        const existing = channelsRef.current[sessionId];
-        if (existing) {
-          void supabase.removeChannel(existing);
-          delete channelsRef.current[sessionId];
-        }
-        setWatchersBySession((current) => {
-          if (!(sessionId in current)) return current;
-          const next = { ...current };
-          delete next[sessionId];
-          return next;
-        });
-      };
+      return releaseSubscription;
     },
     [hydrateSession],
   );
@@ -521,19 +607,45 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     return listing;
   }, []);
 
-  const sendComment = useCallback(async (sessionId: string, _user: string, text: string) => {
+  const sendComment = useCallback(async (sessionId: string, user: string, text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    const clientId = `c_${Date.now()}`;
-    const comment = await apiFetch<LiveComment>(`/live/sessions/${sessionId}/comments`, {
-      method: 'POST',
-      body: JSON.stringify({ text: trimmed, clientId }),
-    });
-    setCommentsBySession((current) => {
-      const list = current[sessionId] ?? [];
-      if (list.some((c) => c.id === comment.id || c.clientId === clientId)) return current;
-      return { ...current, [sessionId]: [...list, { ...comment, clientId }] };
-    });
+    const clientId = newCommentClientId();
+    const tempId = `temp_${clientId}`;
+    const optimisticUser = user.trim() || authRef.current?.username?.trim() || 'You';
+    const photoUrl = authRef.current?.photoUri;
+    setCommentsBySession((current) => ({
+      ...current,
+      [sessionId]: [
+        ...(current[sessionId] ?? []),
+        { id: tempId, user: optimisticUser, text: trimmed, clientId, photoUrl },
+      ],
+    }));
+    try {
+      const comment = await apiFetch<LiveComment>(`/live/sessions/${sessionId}/comments`, {
+        method: 'POST',
+        body: JSON.stringify({ text: trimmed, clientId }),
+      });
+      setCommentsBySession((current) => {
+        const list = current[sessionId] ?? [];
+        const withoutTemp = list.filter((c) => c.id !== tempId && c.id !== comment.id);
+        const keptUser =
+          comment.user && comment.user !== 'viewer' ? comment.user : optimisticUser;
+        return {
+          ...current,
+          [sessionId]: [
+            ...withoutTemp,
+            { ...comment, user: keptUser, clientId, photoUrl: comment.photoUrl ?? photoUrl },
+          ],
+        };
+      });
+    } catch (err) {
+      setCommentsBySession((current) => ({
+        ...current,
+        [sessionId]: (current[sessionId] ?? []).filter((c) => c.id !== tempId),
+      }));
+      throw err;
+    }
   }, []);
 
   const removeComment = useCallback(async (sessionId: string, commentId: string) => {
@@ -564,6 +676,28 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       await hydrateSession(sessionId);
     },
     [getProducts, hydrateSession, pinProduct],
+  );
+
+  const addProduct = useCallback(
+    async (
+      sessionId: string,
+      input: { listingId: string; livePrice: number; stock?: number; isPinned?: boolean },
+    ) => {
+      const product = await apiFetch<LiveStreamProduct>(`/live/sessions/${sessionId}/products`, {
+        method: 'POST',
+        body: JSON.stringify({
+          listingId: input.listingId,
+          livePrice: input.livePrice,
+          stock: input.stock ?? 1,
+          isPinned: input.isPinned ?? false,
+        }),
+      });
+      await hydrateSession(sessionId);
+      setRoomNotice(input.isPinned ? 'Product added and pinned' : 'Product added to this live');
+      setTimeout(() => setRoomNotice(null), 2200);
+      return product;
+    },
+    [hydrateSession],
   );
 
   const claimProduct = useCallback(
@@ -863,6 +997,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       toggleConnection,
       pinProduct,
       pinListing,
+      addProduct,
       claimProduct,
       claimListing,
       releaseClaim,
@@ -912,6 +1047,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       loading,
       pinListing,
       pinProduct,
+      addProduct,
       recentlyEnded,
       refresh,
       releaseClaim,

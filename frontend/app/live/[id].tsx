@@ -17,7 +17,6 @@ import {
   HeartIcon,
   MoreHorizontalIcon,
   ShareIcon,
-  UserIcon,
 } from '@/components/ui/icons';
 import { Palette, Typography } from '@/constants/theme';
 import type { LiveConnection, LiveMediaCredentials, LiveStreamProduct } from '@/data/types';
@@ -26,35 +25,46 @@ import { useCheckout } from '@/context/checkout-context';
 import { useLive } from '@/context/live-context';
 import { apiFetch } from '@/lib/api';
 import { formatNaira } from '@/lib/format';
-import { openNativeShare } from '@/lib/share-listing';
+import { buildLiveSwipeQueue } from '@/lib/live-swipe-queue';
+import { openLiveShare } from '@/lib/share-live';
 import { KeyboardSafeDock } from '@/components/ui/keyboard-safe';
-import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
+import { useKeyboardDockPadding, useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
+import * as Haptics from 'expo-haptics';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dimensions,
   Pressable,
-  Share,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 
 const SIDE_INSET = 14;
+const COMPOSER_INPUT = 58;
+const SWIPE_DISTANCE = 96;
+const SWIPE_VELOCITY = 900;
 
 export default function LiveViewerScreen() {
   const router = useRouter();
   const { top, sheetBottom } = useScreenInsets();
   const keyboard = useKeyboardInset();
   const keyboardOpen = keyboard.height > 0;
-  const dockClearance = 58 + Math.max(sheetBottom, 22);
+  const dockPad = useKeyboardDockPadding(16, Math.max(sheetBottom, 22));
+  const dockClearance = COMPOSER_INPUT + dockPad;
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { session } = useAuth();
+  const { session, publicProfiles, ensurePublicProfile } = useAuth();
   const live = useLive();
   const checkout = useCheckout();
-
   const [draft, setDraft] = useState('');
   const [note, setNote] = useState<string | null>(null);
   const [credentials, setCredentials] = useState<LiveMediaCredentials | null>(null);
@@ -70,7 +80,12 @@ export default function LiveViewerScreen() {
   const [liked, setLiked] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
+  const [swipeHintVisible, setSwipeHintVisible] = useState(true);
   const claimingRef = useRef(false);
+  const translateY = useSharedValue(0);
+  const sheetsBlocking = useSharedValue(0);
+  const nextIdRef = useRef<string | null>(null);
+  const prevIdRef = useRef<string | null>(null);
 
   const sessionId = Array.isArray(id) ? id[0] : id;
   const liveSession = sessionId ? live.getSession(sessionId) : undefined;
@@ -78,10 +93,99 @@ export default function LiveViewerScreen() {
   if (liveSession) heldSession.current = liveSession;
   const viewSession = liveSession ?? heldSession.current;
 
+  const swipeQueue = useMemo(
+    () => buildLiveSwipeQueue(live.liveNow, sessionId),
+    [live.liveNow, sessionId],
+  );
+  const sheetsOpen = reportOpen || watchersOpen || catalogOpen || listingOpen || keyboardOpen;
+  useEffect(() => {
+    sheetsBlocking.value = sheetsOpen ? 1 : 0;
+  }, [sheetsBlocking, sheetsOpen]);
+
+  nextIdRef.current = swipeQueue.nextId;
+  prevIdRef.current = swipeQueue.prevId;
+
   const subscribeSession = live.subscribeSession;
   const fetchLiveMedia = live.fetchLiveMedia;
   const shortScreen = Dimensions.get('window').height < 720;
-  const maxComments = shortScreen ? 2 : 3;
+  const maxComments = shortScreen ? 6 : 8;
+
+  const showEdgeToast = useCallback((message: string) => {
+    setNote(message);
+    setTimeout(() => setNote(null), 1800);
+  }, []);
+
+  const goToLive = useCallback(
+    (targetId: string | null, direction: 'next' | 'prev') => {
+      if (!targetId) {
+        showEdgeToast(direction === 'next' ? 'No more lives right now' : 'You’re at the first live');
+        return;
+      }
+      setSwipeHintVisible(false);
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
+      router.replace(`/live/${targetId}`);
+    },
+    [router, showEdgeToast],
+  );
+
+  const goNextLive = useCallback(() => {
+    goToLive(nextIdRef.current, 'next');
+  }, [goToLive]);
+
+  const goPrevLive = useCallback(() => {
+    goToLive(prevIdRef.current, 'prev');
+  }, [goToLive]);
+
+  const swipeGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetY([-20, 20])
+        .failOffsetX([-48, 48])
+        .onUpdate((event) => {
+          if (sheetsBlocking.value) return;
+          // Dampen so the live stays readable while dragging.
+          translateY.value = event.translationY * 0.28;
+        })
+        .onEnd((event) => {
+          if (sheetsBlocking.value) {
+            translateY.value = withSpring(0, { damping: 20, stiffness: 220 });
+            return;
+          }
+          const toNext = event.translationY < -SWIPE_DISTANCE || event.velocityY < -SWIPE_VELOCITY;
+          const toPrev = event.translationY > SWIPE_DISTANCE || event.velocityY > SWIPE_VELOCITY;
+          if (toNext) {
+            runOnJS(goNextLive)();
+          } else if (toPrev) {
+            runOnJS(goPrevLive)();
+          }
+          translateY.value = withSpring(0, { damping: 20, stiffness: 220 });
+        }),
+    [goNextLive, goPrevLive, sheetsBlocking, translateY],
+  );
+
+  const swipeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  useEffect(() => {
+    translateY.value = 0;
+    setDraft('');
+    setLiked(false);
+    setClaimError(null);
+    setClaiming(false);
+    setCatalogOpen(false);
+    setListingOpen(false);
+    setReportOpen(false);
+    setWatchersOpen(false);
+    setDrawerProduct(null);
+    setNote(null);
+  }, [sessionId, translateY]);
+
+  useEffect(() => {
+    if (!swipeQueue.nextId || !swipeHintVisible) return;
+    const timer = setTimeout(() => setSwipeHintVisible(false), 4500);
+    return () => clearTimeout(timer);
+  }, [swipeHintVisible, swipeQueue.nextId]);
 
   useEffect(() => {
     if (!sessionId || viewSession?.status === 'ended') return;
@@ -175,6 +279,17 @@ export default function LiveViewerScreen() {
   const drawerListing = drawerProduct ? live.resolveListing(drawerProduct.listingId) : null;
   const comments = viewSession ? live.getComments(viewSession.id) : [];
   const visibleComments = comments.slice(-maxComments);
+
+  useEffect(() => {
+    const names = new Set<string>();
+    if (viewSession?.host) names.add(viewSession.host);
+    for (const comment of visibleComments) {
+      if (comment.user) names.add(comment.user);
+    }
+    for (const name of names) {
+      void ensurePublicProfile(name).catch(() => undefined);
+    }
+  }, [ensurePublicProfile, viewSession?.host, visibleComments]);
 
   const onConnectionChange = useCallback(
     (state: LiveConnection) => {
@@ -273,19 +388,16 @@ export default function LiveViewerScreen() {
   }
 
   async function shareLive() {
-    const featured = pinnedProduct ?? products[0];
-    if (featured?.listingId) {
-      await openNativeShare({
-        id: featured.listingId,
-        title: featured.title ?? activeSession.title,
-        price: featured.livePrice,
+    try {
+      await openLiveShare({
+        id: activeSession.id,
+        title: activeSession.title,
+        host: activeSession.host,
       });
-      return;
+    } catch {
+      setNote("Couldn't open share. Try again.");
+      setTimeout(() => setNote(null), 2200);
     }
-    await Share.share({
-      message: `Watch ${activeSession.host} live on Throve: ${activeSession.title}`,
-      title: activeSession.title,
-    });
   }
 
   async function submitReport(kind: 'session' | 'user' | 'listing') {
@@ -315,9 +427,17 @@ export default function LiveViewerScreen() {
     setTimeout(() => setNote(null), 2200);
   }
 
-  function send() {
-    void live.sendComment(activeSession.id, username, draft);
+  async function send() {
+    const text = draft.trim();
+    if (!text) return;
     setDraft('');
+    try {
+      await live.sendComment(activeSession.id, username, text);
+    } catch {
+      setDraft(text);
+      setNote("Couldn't send that comment. Try again.");
+      setTimeout(() => setNote(null), 2200);
+    }
   }
 
   async function claimProduct(product: LiveStreamProduct) {
@@ -327,6 +447,8 @@ export default function LiveViewerScreen() {
     setClaimError(null);
     try {
       await live.claimProduct(activeSession.id, product.id, 1);
+      setNote('Claimed — complete checkout to buy.');
+      setTimeout(() => setNote(null), 2200);
     } catch (err) {
       setClaimError(err instanceof Error ? err.message : 'Claim failed');
     } finally {
@@ -376,11 +498,18 @@ export default function LiveViewerScreen() {
   }
 
   return (
-    <View style={styles.screen}>
+    <>
+    <GestureDetector gesture={swipeGesture}>
+      <Animated.View style={[styles.screen, swipeStyle]}>
       <StatusBar style="light" />
       {note ? (
         <View style={[styles.toast, { top: top + 8 }]}>
           <Text style={styles.toastText}>{note}</Text>
+        </View>
+      ) : null}
+      {swipeHintVisible && swipeQueue.nextId && !sheetsOpen ? (
+        <View style={[styles.swipeHint, { bottom: dockClearance + 72 }]} pointerEvents="none">
+          <Text style={styles.swipeHintText}>Swipe up for next live</Text>
         </View>
       ) : null}
       <LiveStage
@@ -395,10 +524,14 @@ export default function LiveViewerScreen() {
             <ChevronBackIcon size={17} color={Palette.ivory} strokeWidth={1.9} />
           </Pressable>
 
-          <Pressable style={styles.hostPill} accessibilityLabel="Host profile">
-            <Pressable onPress={openSeller} style={styles.hostPress} accessibilityLabel="Open seller">
+          <View style={styles.hostBlock}>
+            <Pressable onPress={openSeller} style={styles.hostIdentity} accessibilityLabel="Open seller">
               <ProfileAvatar
-                uri={activeSession.hostPhotoUrl}
+                uri={
+                  publicProfiles[activeSession.host]?.photoUri ??
+                  activeSession.hostPhotoUrl ??
+                  (session?.username === activeSession.host ? session.photoUri : undefined)
+                }
                 username={activeSession.host}
                 style={styles.hostAvatar}
               />
@@ -406,38 +539,33 @@ export default function LiveViewerScreen() {
                 <Text style={styles.hostName} numberOfLines={1}>
                   {activeSession.host}
                 </Text>
-                <View style={styles.hostStatusRow}>
+                <Pressable
+                  onPress={() => setWatchersOpen(true)}
+                  hitSlop={8}
+                  accessibilityLabel="Viewers"
+                  style={styles.hostStatusRow}
+                >
                   <View style={styles.liveDot} />
                   <Text style={styles.liveLabel}>LIVE</Text>
-                </View>
+                  <Text style={styles.viewersLabel}>
+                    · {activeSession.viewers ?? 0}
+                  </Text>
+                </Pressable>
               </View>
             </Pressable>
-            <Pressable
-              onPress={() => setWatchersOpen(true)}
-              hitSlop={6}
-              accessibilityLabel="Viewers"
-              style={styles.viewersPress}
-            >
-              <Text style={styles.viewersLabel}>
-                · {activeSession.viewers ?? 0} viewer{(activeSession.viewers ?? 0) === 1 ? '' : 's'}
-              </Text>
-            </Pressable>
-          </Pressable>
-
-          {!isOwnLive ? (
-            <Pressable
-              onPress={() => void toggleFollow()}
-              style={[styles.followBtn, isFollowing && styles.followBtnOn]}
-              disabled={followBusy}
-              accessibilityLabel={isFollowing ? 'Following' : 'Follow'}
-            >
-              <Text style={[styles.followLabel, isFollowing && styles.followLabelOn]}>
-                {isFollowing ? 'Following' : 'Follow'}
-              </Text>
-            </Pressable>
-          ) : null}
-
-          <View style={styles.topSpacer} />
+            {!isOwnLive ? (
+              <Pressable
+                onPress={() => void toggleFollow()}
+                style={[styles.followBtn, isFollowing && styles.followBtnOn]}
+                disabled={followBusy}
+                accessibilityLabel={isFollowing ? 'Following' : 'Follow'}
+              >
+                <Text style={[styles.followLabel, isFollowing && styles.followLabelOn]}>
+                  {isFollowing ? 'Following' : 'Follow'}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
 
           <Pressable onPress={() => setReportOpen(true)} style={styles.iconBtn} accessibilityLabel="More">
             <MoreHorizontalIcon />
@@ -475,11 +603,7 @@ export default function LiveViewerScreen() {
         ) : null}
 
         <View
-          style={[
-            styles.bottomStack,
-            { marginBottom: dockClearance, paddingHorizontal: SIDE_INSET },
-            keyboardOpen ? styles.bottomStackKeyboard : null,
-          ]}
+          style={[styles.bottomStack, { marginBottom: dockClearance, paddingHorizontal: SIDE_INSET }]}
           pointerEvents="box-none"
         >
           <View style={styles.chatColumn} pointerEvents="box-none">
@@ -493,9 +617,15 @@ export default function LiveViewerScreen() {
                 const opacity = age === 0 ? 1 : age === 1 ? 0.78 : 0.42;
                 return (
                   <View key={comment.id} style={[styles.commentRow, { opacity }]}>
-                    <View style={styles.commentAvatar}>
-                      <UserIcon size={12} color={Palette.muted3} />
-                    </View>
+                    <ProfileAvatar
+                      uri={
+                        comment.photoUrl ??
+                        publicProfiles[comment.user]?.photoUri ??
+                        (session?.username === comment.user ? session.photoUri : undefined)
+                      }
+                      username={comment.user}
+                      style={styles.commentAvatar}
+                    />
                     <View style={styles.commentBubble}>
                       <Text style={styles.commentText}>
                         <Text style={styles.commentUser}>{comment.user} </Text>
@@ -543,6 +673,8 @@ export default function LiveViewerScreen() {
           />
         </KeyboardSafeDock>
       </LiveStage>
+      </Animated.View>
+    </GestureDetector>
 
       <LiveReportSheet
         visible={reportOpen}
@@ -585,7 +717,7 @@ export default function LiveViewerScreen() {
           setListingOpen(false);
           setClaimError(null);
         }}
-        onAddToCart={() => {
+        onClaim={() => {
           if (drawerProduct) void claimProduct(drawerProduct);
         }}
         onBuyNow={() => {
@@ -600,13 +732,27 @@ export default function LiveViewerScreen() {
         }}
         onSignIn={() => router.push('/(auth)/welcome')}
       />
-    </View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Palette.liveDark },
   flex: { flex: 1 },
+  swipeHint: {
+    position: 'absolute',
+    alignSelf: 'center',
+    zIndex: 12,
+    backgroundColor: 'rgba(27,17,19,0.72)',
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  swipeHintText: {
+    fontSize: 12,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.ivory,
+  },
   toast: {
     position: 'absolute',
     alignSelf: 'center',
@@ -620,102 +766,94 @@ const styles = StyleSheet.create({
   topArea: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
+    gap: 10,
     paddingHorizontal: SIDE_INSET,
   },
   iconBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: 'rgba(20,12,14,0.62)',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(20,12,14,0.55)',
     borderWidth: 1,
-    borderColor: 'rgba(255,247,240,0.16)',
+    borderColor: 'rgba(255,247,240,0.14)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  hostPill: {
+  hostBlock: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(20,12,14,0.62)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,247,240,0.16)',
-    borderRadius: 24,
-    paddingVertical: 5,
-    paddingLeft: 5,
-    paddingRight: 12,
-    maxWidth: 200,
-    minWidth: 0,
+    gap: 10,
   },
-  hostPress: {
+  hostIdentity: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    minWidth: 0,
-    flexShrink: 1,
-  },
-  viewersPress: {
-    paddingVertical: 4,
+    gap: 10,
   },
   hostAvatar: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,247,240,0.2)',
   },
   hostMeta: {
+    flex: 1,
     minWidth: 0,
-    flexShrink: 1,
+    gap: 2,
   },
   hostName: {
-    fontSize: 12.5,
+    fontSize: 14,
     fontFamily: Typography.bodySemiBold,
     color: Palette.ivory,
   },
   hostStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
+    gap: 5,
+    alignSelf: 'flex-start',
   },
   liveDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: '#E8503C',
   },
   liveLabel: {
-    fontSize: 9.5,
+    fontSize: 10,
     fontFamily: Typography.bodyBold,
-    letterSpacing: 1,
+    letterSpacing: 0.8,
     color: '#FFD9D2',
   },
   viewersLabel: {
-    fontSize: 10.5,
+    fontSize: 11,
     fontFamily: Typography.body,
-    color: '#F0E2DA',
+    color: 'rgba(240,226,218,0.88)',
   },
   followBtn: {
-    minHeight: 30,
-    paddingHorizontal: 13,
+    minHeight: 32,
+    paddingHorizontal: 12,
     borderRadius: 16,
     backgroundColor: Palette.plum,
     alignItems: 'center',
     justifyContent: 'center',
   },
   followBtnOn: {
-    backgroundColor: 'rgba(20,12,14,0.62)',
+    backgroundColor: 'rgba(20,12,14,0.55)',
     borderWidth: 1,
-    borderColor: 'rgba(255,247,240,0.22)',
+    borderColor: 'rgba(255,247,240,0.2)',
   },
   followLabel: {
-    fontSize: 11.5,
+    fontSize: 12,
     fontFamily: Typography.bodySemiBold,
     color: Palette.ivory,
   },
   followLabelOn: {
     color: 'rgba(255,247,240,0.82)',
   },
-  topSpacer: { flex: 1 },
   rail: {
     position: 'absolute',
     right: SIDE_INSET,
@@ -766,9 +904,6 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 10,
   },
-  bottomStackKeyboard: {
-    marginBottom: 8,
-  },
   chatColumn: {
     flex: 1,
     minWidth: 0,
@@ -798,9 +933,6 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: '#D9CCC2',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   commentBubble: {
     flexShrink: 1,

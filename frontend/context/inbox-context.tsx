@@ -237,6 +237,10 @@ export function InboxProvider({ children }: { children: ReactNode }) {
               void playMessageTone(parseMessageTone(prefs.notifMessageTone));
             }
           }
+          // Offer accept/reject posts a system chat line — refresh offers so Buy now appears.
+          if (/\boffer\b/i.test(message.text ?? '')) {
+            void refresh({ silent: true }).catch(() => undefined);
+          }
         } catch {
           /* ignore */
         }
@@ -265,6 +269,10 @@ export function InboxProvider({ children }: { children: ReactNode }) {
             ),
           };
         });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'offers' }, () => {
+        // Seller accept/reject/withdraw must update buyer Buy now without leaving chat.
+        void refresh({ silent: true }).catch(() => undefined);
       })
       .subscribe();
 

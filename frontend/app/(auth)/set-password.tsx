@@ -7,9 +7,9 @@ import { Button } from '@/components/ui/button';
 import { MailIcon } from '@/components/ui/icons';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
+import { KeyboardSafeScreen } from '@/components/ui/keyboard-safe';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { validatePassword } from '@/lib/password';
 import { OTP_LENGTH } from '@/lib/otp';
@@ -17,7 +17,7 @@ import { remainingCooldownSec } from '@/lib/session-persistence';
 import { isValidEmail } from '@/lib/validation';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 type Stage = 'otp' | 'password' | 'done';
 type Purpose = 'setup' | 'change';
@@ -29,7 +29,6 @@ export default function SetPasswordScreen() {
   const params = useLocalSearchParams<{ email?: string; purpose?: string }>();
   const { session, sendPasswordOtp, setPasswordWithOtp, authResume, persistAuthResume, clearAuthResumeFlow } = useAuth();
   const { isConnected } = useNetworkStatus();
-  const keyboardScroll = useKeyboardAwareScroll();
 
   const purpose: Purpose =
     params.purpose === 'change' || params.purpose === 'setup'
@@ -209,161 +208,156 @@ export default function SetPasswordScreen() {
   return (
     <View style={styles.screen}>
       <ScreenHeader title="" onBack={onBack} />
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        {stage === 'otp' ? (
-          <ScrollView
-            ref={keyboardScroll.scrollRef}
-            contentContainerStyle={[styles.form, { paddingBottom: keyboardScroll.contentPaddingBottom }]}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-            showsVerticalScrollIndicator={false}
-            automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
-            onScroll={keyboardScroll.onScroll}
-            scrollEventThrottle={16}
-          >
-            <Text style={styles.heading}>{purpose === 'change' ? 'Confirm it’s you' : 'Set up your\npassword'}</Text>
-            <Text style={styles.lead}>
-              {purpose === 'change'
-                ? 'We’ll email a one-time code to verify before you change your password.'
-                : 'Existing accounts need a password. We’ll email a one-time code to verify it’s you.'}
-            </Text>
-            {!isConnected ? <OfflineBanner message="Reconnect to continue." /> : null}
-
-            {!otpSent ? (
-              <>
-                {!session ? (
-                  <TextField
-                    label="Email address"
-                    autoCapitalize="none"
-                    keyboardType="email-address"
-                    value={email}
-                    onChangeText={setEmail}
-                    error={fieldErrors.email}
-                  />
-                ) : (
-                  <View style={styles.emailCard}>
-                    <Text style={styles.emailCardLabel}>Sending to</Text>
-                    <Text style={styles.emailCardValue}>{email}</Text>
-                  </View>
-                )}
-                {error ? <AlertBanner variant="error" title="Couldn’t continue" message={error} style={styles.banner} /> : null}
-                <Button label="Send code" loading={loading} onPress={() => sendCode()} disabled={!isConnected} style={styles.submit} />
-              </>
-            ) : (
-              <>
-                <View style={styles.sentCard}>
-                  <View style={styles.sentIcon}>
-                    <MailIcon size={22} />
-                  </View>
-                  <View style={styles.sentCopy}>
-                    <Text style={styles.sentTitle}>Check your email</Text>
-                    <Text style={styles.sentBody}>
-                      We sent an {OTP_LENGTH}-digit code to{'\n'}
-                      <Text style={styles.sentEmail}>{email}</Text>
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.otpBlock}>
-                  <Text style={styles.otpLabel}>Verification code</Text>
-                  <OtpInput value={otp} onChange={setOtp} error={Boolean(error)} />
-                </View>
-
-                {info ? (
-                  <AlertBanner
-                    variant="info"
-                    title={info.includes('already emailed') ? 'Use your existing code' : 'Code resent'}
-                    message={info}
-                    style={styles.banner}
-                  />
-                ) : null}
-                {error ? <AlertBanner variant="error" title="Couldn’t continue" message={error} style={styles.banner} /> : null}
-
-                <Button
-                  label="Continue"
-                  loading={loading}
-                  onPress={onContinueOtp}
-                  disabled={!isConnected || otp.trim().length < OTP_LENGTH}
-                  style={styles.submit}
-                />
-
-                <Pressable
-                  onPress={() => sendCode(email, true)}
-                  disabled={resendDisabled}
-                  style={styles.resendWrap}
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: resendDisabled }}
-                >
-                  <Text style={[styles.resendText, resendDisabled ? styles.resendDisabled : null]}>{resendLabel}</Text>
-                </Pressable>
-              </>
-            )}
-          </ScrollView>
-        ) : null}
-
-        {stage === 'password' ? (
-          <ScrollView
-            ref={keyboardScroll.scrollRef}
-            contentContainerStyle={[styles.form, { paddingBottom: keyboardScroll.contentPaddingBottom }]}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-            showsVerticalScrollIndicator={false}
-            automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
-            onScroll={keyboardScroll.onScroll}
-            scrollEventThrottle={16}
-          >
-            <Text style={styles.heading}>{purpose === 'change' ? 'Choose a new\npassword' : 'Create your\npassword'}</Text>
-            <Text style={styles.lead}>Use a strong password you don’t reuse elsewhere.</Text>
-            {!isConnected ? <OfflineBanner message="Reconnect to save your password." /> : null}
-            <View style={styles.fields}>
-              <View ref={keyboardScroll.setAnchor('password')} collapsable={false}>
-                <PasswordField
-                  label="Password"
-                  value={password}
-                  onChangeText={setPassword}
-                  error={fieldErrors.password}
-                  onFocus={() => keyboardScroll.onFieldFocus('password')}
-                />
-              </View>
-              <PasswordStrengthMeter password={password} />
-              <PasswordRequirements password={password} />
-              <View ref={keyboardScroll.setAnchor('confirm')} collapsable={false}>
-                <PasswordField
-                  label="Confirm password"
-                  value={confirm}
-                  onChangeText={setConfirm}
-                  error={fieldErrors.confirm}
-                  onFocus={() => keyboardScroll.onFieldFocus('confirm')}
-                />
-              </View>
-            </View>
-            {error ? <AlertBanner variant="error" title="Couldn’t save password" message={error} style={styles.banner} /> : null}
-            <Button label="Save password" loading={loading} onPress={onSavePassword} disabled={!isConnected} style={styles.submit} />
-          </ScrollView>
-        ) : null}
-
-        {stage === 'done' ? (
-          <View style={styles.done}>
-            <View style={styles.doneCard}>
-              <MailIcon size={26} />
-              <Text style={styles.doneTitle}>Password ready</Text>
-              <Text style={styles.doneCopy}>
+      {stage === 'otp' ? (
+        <KeyboardSafeScreen contentContainerStyle={styles.form}>
+          {(keyboardScroll) => (
+            <>
+              <Text style={styles.heading}>{purpose === 'change' ? 'Confirm it’s you' : 'Set up your\npassword'}</Text>
+              <Text style={styles.lead}>
                 {purpose === 'change'
-                  ? 'Your password has been updated. You can use it the next time you sign in.'
-                  : 'Your password is set. You can sign in with email and password from now on.'}
+                  ? 'We’ll email a one-time code to verify before you change your password.'
+                  : 'Existing accounts need a password. We’ll email a one-time code to verify it’s you.'}
               </Text>
-              <Button label="Continue" onPress={finish} style={styles.doneBtn} />
-            </View>
+              {!isConnected ? <OfflineBanner message="Reconnect to continue." /> : null}
+
+              {!otpSent ? (
+                <>
+                  {!session ? (
+                    <View ref={keyboardScroll.setAnchor('email')} collapsable={false}>
+                      <TextField
+                        label="Email address"
+                        autoCapitalize="none"
+                        keyboardType="email-address"
+                        value={email}
+                        onChangeText={setEmail}
+                        error={fieldErrors.email}
+                        onFocus={() => keyboardScroll.onFieldFocus('email')}
+                      />
+                    </View>
+                  ) : (
+                    <View style={styles.emailCard}>
+                      <Text style={styles.emailCardLabel}>Sending to</Text>
+                      <Text style={styles.emailCardValue}>{email}</Text>
+                    </View>
+                  )}
+                  {error ? <AlertBanner variant="error" title="Couldn’t continue" message={error} style={styles.banner} /> : null}
+                  <Button label="Send code" loading={loading} onPress={() => sendCode()} disabled={!isConnected} style={styles.submit} />
+                </>
+              ) : (
+                <>
+                  <View style={styles.sentCard}>
+                    <View style={styles.sentIcon}>
+                      <MailIcon size={22} />
+                    </View>
+                    <View style={styles.sentCopy}>
+                      <Text style={styles.sentTitle}>Check your email</Text>
+                      <Text style={styles.sentBody}>
+                        We sent an {OTP_LENGTH}-digit code to{'\n'}
+                        <Text style={styles.sentEmail}>{email}</Text>
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View ref={keyboardScroll.setAnchor('otp')} collapsable={false} style={styles.otpBlock}>
+                    <Text style={styles.otpLabel}>Verification code</Text>
+                    <OtpInput
+                      value={otp}
+                      onChange={setOtp}
+                      error={Boolean(error)}
+                      onFocus={() => keyboardScroll.onFieldFocus('otp')}
+                    />
+                  </View>
+
+                  {info ? (
+                    <AlertBanner
+                      variant="info"
+                      title={info.includes('already emailed') ? 'Use your existing code' : 'Code resent'}
+                      message={info}
+                      style={styles.banner}
+                    />
+                  ) : null}
+                  {error ? <AlertBanner variant="error" title="Couldn’t continue" message={error} style={styles.banner} /> : null}
+
+                  <Button
+                    label="Continue"
+                    loading={loading}
+                    onPress={onContinueOtp}
+                    disabled={!isConnected || otp.trim().length < OTP_LENGTH}
+                    style={styles.submit}
+                  />
+
+                  <Pressable
+                    onPress={() => sendCode(email, true)}
+                    disabled={resendDisabled}
+                    style={styles.resendWrap}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: resendDisabled }}
+                  >
+                    <Text style={[styles.resendText, resendDisabled ? styles.resendDisabled : null]}>{resendLabel}</Text>
+                  </Pressable>
+                </>
+              )}
+            </>
+          )}
+        </KeyboardSafeScreen>
+      ) : null}
+
+      {stage === 'password' ? (
+        <KeyboardSafeScreen contentContainerStyle={styles.form}>
+          {(keyboardScroll) => (
+            <>
+              <Text style={styles.heading}>{purpose === 'change' ? 'Choose a new\npassword' : 'Create your\npassword'}</Text>
+              <Text style={styles.lead}>Use a strong password you don’t reuse elsewhere.</Text>
+              {!isConnected ? <OfflineBanner message="Reconnect to save your password." /> : null}
+              <View style={styles.fields}>
+                <View ref={keyboardScroll.setAnchor('password')} collapsable={false}>
+                  <PasswordField
+                    label="Password"
+                    value={password}
+                    onChangeText={setPassword}
+                    error={fieldErrors.password}
+                    onFocus={() => keyboardScroll.onFieldFocus('password')}
+                  />
+                </View>
+                <PasswordStrengthMeter password={password} />
+                <PasswordRequirements password={password} />
+                <View ref={keyboardScroll.setAnchor('confirm')} collapsable={false}>
+                  <PasswordField
+                    label="Confirm password"
+                    value={confirm}
+                    onChangeText={setConfirm}
+                    error={fieldErrors.confirm}
+                    onFocus={() => keyboardScroll.onFieldFocus('confirm')}
+                  />
+                </View>
+              </View>
+              {error ? <AlertBanner variant="error" title="Couldn’t save password" message={error} style={styles.banner} /> : null}
+              <Button label="Save password" loading={loading} onPress={onSavePassword} disabled={!isConnected} style={styles.submit} />
+            </>
+          )}
+        </KeyboardSafeScreen>
+      ) : null}
+
+      {stage === 'done' ? (
+        <View style={styles.done}>
+          <View style={styles.doneCard}>
+            <MailIcon size={26} />
+            <Text style={styles.doneTitle}>Password ready</Text>
+            <Text style={styles.doneCopy}>
+              {purpose === 'change'
+                ? 'Your password has been updated. You can use it the next time you sign in.'
+                : 'Your password is set. You can sign in with email and password from now on.'}
+            </Text>
+            <Button label="Continue" onPress={finish} style={styles.doneBtn} />
           </View>
-        ) : null}
-      </KeyboardAvoidingView>
+        </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Palette.ivory },
-  flex: { flex: 1 },
   form: { paddingHorizontal: 24, paddingBottom: 40 },
   heading: {
     fontFamily: Typography.display,

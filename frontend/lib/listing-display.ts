@@ -1,12 +1,12 @@
-import { DELIVERY_OPTIONS } from '@/data/checkout';
+import { DELIVERY_OPTIONS, buyerProtectionFee } from '@/data/checkout';
 import { getCachedListingCatalog } from '@/lib/listing-catalog';
 
 export const BUYER_PROTECTION_RATE = 0.05;
 export const BUYER_PROTECTION_MAX = 2500;
+export const BUYER_PROTECTION_MIN = 300;
 
-export function buyerProtectionFee(price: number) {
-  return Math.min(BUYER_PROTECTION_MAX, Math.max(0, Math.round(price * BUYER_PROTECTION_RATE)));
-}
+/** Re-export the canonical checkout formula (₦300 min, ₦2,500 max). */
+export { buyerProtectionFee };
 
 export function displayListingSize(size: string) {
   const trimmed = size.trim();

@@ -4,7 +4,7 @@ import { useAuth } from '@/context/auth-context';
 import { useListings } from '@/context/listings-context';
 import { CHECKOUT_RESERVE_MS, useLive } from '@/context/live-context';
 import type { Href } from 'expo-router';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 export type PaymentInitResult = {
   mode: 'simulate' | 'flutterwave';
@@ -89,12 +89,20 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const lastOrderRef = useRef<Order | null>(null);
+  lastOrderRef.current = lastOrder;
 
   const refresh = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) setLoading(true);
     try {
       const data = await apiFetch<Order[]>('/checkout/orders');
-      setOrders(data);
+      setOrders(() => {
+        const paid = lastOrderRef.current;
+        if (paid && !data.some((order) => order.id === paid.id)) {
+          return [paid, ...data];
+        }
+        return data;
+      });
       setLoadError(false);
     } catch {
       setLoadError(true);
@@ -172,10 +180,6 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
           deliveryMethod: null,
           expiresAt: started.expiresAt ?? Date.now() + CHECKOUT_RESERVE_MS,
         });
-        // Catalog holds reserve on the server — keep local cards in sync.
-        if (!input.liveSessionId && !input.liveStreamProductId) {
-          applyLocalStatus(started.listingId, 'reserved');
-        }
         setNow(Date.now());
         return true;
       } catch (err) {
@@ -183,7 +187,7 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
         throw new Error(message);
       }
     },
-    [applyLocalStatus],
+    [],
   );
 
   const updateDraft = useCallback(
@@ -233,15 +237,23 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
 
   const applyPaidOrder = useCallback(
     async (order: Order) => {
-      if (draft) await live.completeSale(draft.listingId);
+      try {
+        if (draft) await live.completeSale(draft.listingId);
+      } catch {
+        /* local cache update — never block a paid order on this */
+      }
       const buyerUsername = session?.username?.trim();
-      const normalized: Order =
-        buyerUsername && order.buyer !== buyerUsername ? { ...order, buyer: buyerUsername } : order;
+      const normalized: Order = {
+        ...order,
+        buyerId: order.buyerId ?? session?.userId,
+        buyer: buyerUsername || order.buyer,
+      };
       setLastOrder(normalized);
       setOrders((current) => [normalized, ...current.filter((item) => item.id !== normalized.id)]);
       setDraft(null);
+      void refresh({ silent: true }).catch(() => undefined);
     },
-    [draft, live, session?.username],
+    [draft, live, refresh, session?.userId, session?.username],
   );
 
   const initPayment = useCallback(async () => {

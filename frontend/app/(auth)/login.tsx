@@ -7,22 +7,19 @@ import { TextField } from '@/components/ui/text-field';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import type { PreferredLoginMethod } from '@/data/types';
-import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
+import { KeyboardSafeScreen } from '@/components/ui/keyboard-safe';
 import { useNetworkStatus } from '@/hooks/use-network-status';
-import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { getDeviceLoginPreference } from '@/lib/login-preference';
 import { remainingCooldownSec } from '@/lib/session-persistence';
 import { isValidEmail } from '@/lib/validation';
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 const RESEND_COOLDOWN_SEC = 30;
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { bottom } = useScreenInsets();
-  const keyboardScroll = useKeyboardAwareScroll();
   const { session, requestMagicLink, completeMagicLink, signInWithPassword, getLoginOptions, authResume, persistAuthResume, clearAuthResumeFlow } =
     useAuth();
   const { isConnected } = useNetworkStatus();
@@ -175,110 +172,100 @@ export default function LoginScreen() {
   return (
     <View style={styles.screen}>
       <ScreenHeader title="" onBack={onBack} />
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        {stage === 'form' ? (
-          <ScrollView
-            ref={keyboardScroll.scrollRef}
-            onScroll={keyboardScroll.onScroll}
-            scrollEventThrottle={16}
-            contentContainerStyle={[
-              styles.form,
-              { paddingBottom: Math.max(keyboardScroll.contentPaddingBottom, bottom + 16) },
-            ]}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-            automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
-          >
-            <Text style={styles.heading}>Welcome back</Text>
-            <Text style={styles.lead}>
-              {!ready
-                ? 'Sign in with your email and password.'
-                : isMagic
-                  ? "Enter your email and we'll send you a sign-in link."
-                  : 'Sign in with your email and password.'}
-            </Text>
-            {!isConnected ? <OfflineBanner message="Reconnect to sign in." /> : null}
+      {stage === 'form' ? (
+        <KeyboardSafeScreen contentContainerStyle={styles.form}>
+          {(keyboardScroll) => (
+            <>
+              <Text style={styles.heading}>Welcome back</Text>
+              <Text style={styles.lead}>
+                {!ready
+                  ? 'Sign in with your email and password.'
+                  : isMagic
+                    ? "Enter your email and we'll send you a sign-in link."
+                    : 'Sign in with your email and password.'}
+              </Text>
+              {!isConnected ? <OfflineBanner message="Reconnect to sign in." /> : null}
 
-            <View ref={keyboardScroll.setAnchor('email')} collapsable={false}>
-              <TextField
-                label="Email address"
-                autoCapitalize="none"
-                keyboardType="email-address"
-                value={email}
-                onChangeText={setEmail}
-                error={emailError}
-                onFocus={() => keyboardScroll.onFieldFocus('email')}
-              />
-            </View>
-            {ready && !isMagic ? (
-              <View ref={keyboardScroll.setAnchor('password')} collapsable={false}>
-                <PasswordField
-                  label="Password"
-                  value={password}
-                  onChangeText={setPassword}
-                  error={passwordError}
-                  containerStyle={styles.passwordField}
-                  onFocus={() => keyboardScroll.onFieldFocus('password')}
+              <View ref={keyboardScroll.setAnchor('email')} collapsable={false}>
+                <TextField
+                  label="Email address"
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  value={email}
+                  onChangeText={setEmail}
+                  error={emailError}
+                  onFocus={() => keyboardScroll.onFieldFocus('email')}
                 />
               </View>
-            ) : null}
+              {ready && !isMagic ? (
+                <View ref={keyboardScroll.setAnchor('password')} collapsable={false}>
+                  <PasswordField
+                    label="Password"
+                    value={password}
+                    onChangeText={setPassword}
+                    error={passwordError}
+                    containerStyle={styles.passwordField}
+                    onFocus={() => keyboardScroll.onFieldFocus('password')}
+                  />
+                </View>
+              ) : null}
 
-            {error ? (
-              <AlertBanner
-                variant="error"
-                title={isMagic ? "We couldn't send that link" : "We couldn't sign you in"}
-                message={error}
-                style={styles.banner}
-              />
-            ) : null}
+              {error ? (
+                <AlertBanner
+                  variant="error"
+                  title={isMagic ? "We couldn't send that link" : "We couldn't sign you in"}
+                  message={error}
+                  style={styles.banner}
+                />
+              ) : null}
 
-            <Button
-              label={ready && isMagic ? 'Send magic link' : 'Log in'}
-              loading={loading || !ready}
-              onPress={ready && isMagic ? () => onSendMagic(false) : onPasswordLogin}
-              disabled={!isConnected || !ready}
-              style={styles.submit}
-            />
-            {ready && !isMagic ? (
-              <Button label="Forgot password?" variant="ghost" onPress={() => router.push('/(auth)/recovery')} />
-            ) : null}
-
-            <View style={styles.divider} />
-            <Text style={styles.footer}>
-              New to Throve?{' '}
-              <Text style={styles.link} onPress={() => router.replace('/(auth)/signup')}>
-                Create an account
-              </Text>
-            </Text>
-          </ScrollView>
-        ) : (
-          <View style={styles.sent}>
-            <View style={styles.sentCard}>
-              <MailIcon size={26} />
-              <Text style={styles.title}>Check your email</Text>
-              <Text style={styles.copy}>We sent a sign-in link to {trimmedEmail}. Open it to continue.</Text>
               <Button
-                label={resendLabel}
-                variant="secondary"
-                loading={loading}
-                onPress={() => onSendMagic(true)}
-                disabled={resendDisabled}
-                style={styles.resend}
+                label={ready && isMagic ? 'Send magic link' : 'Log in'}
+                loading={loading || !ready}
+                onPress={ready && isMagic ? () => onSendMagic(false) : onPasswordLogin}
+                disabled={!isConnected || !ready}
+                style={styles.submit}
               />
-              {__DEV__ ? <Button label="Simulate: I clicked the link" loading={loading} onPress={onUseLink} /> : null}
-            </View>
-            {error ? <AlertBanner variant="error" title="We couldn't send that link" message={error} /> : null}
+              {ready && !isMagic ? (
+                <Button label="Forgot password?" variant="ghost" onPress={() => router.push('/(auth)/recovery')} />
+              ) : null}
+
+              <View style={styles.divider} />
+              <Text style={styles.footer}>
+                New to Throve?{' '}
+                <Text style={styles.link} onPress={() => router.replace('/(auth)/signup')}>
+                  Create an account
+                </Text>
+              </Text>
+            </>
+          )}
+        </KeyboardSafeScreen>
+      ) : (
+        <View style={styles.sent}>
+          <View style={styles.sentCard}>
+            <MailIcon size={26} />
+            <Text style={styles.title}>Check your email</Text>
+            <Text style={styles.copy}>We sent a sign-in link to {trimmedEmail}. Open it to continue.</Text>
+            <Button
+              label={resendLabel}
+              variant="secondary"
+              loading={loading}
+              onPress={() => onSendMagic(true)}
+              disabled={resendDisabled}
+              style={styles.resend}
+            />
+            {__DEV__ ? <Button label="Simulate: I clicked the link" loading={loading} onPress={onUseLink} /> : null}
           </View>
-        )}
-      </KeyboardAvoidingView>
+          {error ? <AlertBanner variant="error" title="We couldn't send that link" message={error} /> : null}
+        </View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Palette.ivory },
-  flex: { flex: 1 },
-  form: { paddingHorizontal: 24, flexGrow: 1 },
+  form: { paddingHorizontal: 24 },
   heading: {
     fontFamily: Typography.display,
     fontSize: 32,

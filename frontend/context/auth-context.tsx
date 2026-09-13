@@ -376,10 +376,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    // Failsafe: never leave splash up if AsyncStorage stalls.
+    const readyFailsafe = setTimeout(() => {
+      if (!cancelled) setIsReady(true);
+    }, 700);
 
     (async () => {
-      const resume = await loadAuthResume();
+      // Local disk only — never wait on network before dismissing splash.
+      const [resume, cached] = await Promise.all([loadAuthResume(), loadProfileCache()]);
       if (cancelled) return;
+
       setAuthResume(resume);
       if (resume?.kind === 'signup-verify') {
         setPendingSignup({
@@ -393,40 +399,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setPendingEmail(resume.email);
       }
 
-      try {
-        const initialUrl = await Linking.getInitialURL();
-        if (cancelled) return;
-        if (initialUrl?.includes('auth/callback')) {
-          await finishAuthFromUrl(initialUrl);
-        } else {
-          const { data } = await supabase.auth.getSession();
-          if (data.session) {
-            const cached = await loadProfileCache();
-            if (!cancelled && cached?.userId === data.session.user.id) {
-              sessionRef.current = cached;
-              hydratedUserId.current = cached.userId;
-              setSession(cached);
-              rememberPublicProfile(toPublicProfile(cached));
-              setIsReady(true);
-            }
-          }
-          if (sessionRef.current) {
-            void hydrateProfile({ force: true }).catch(() => undefined);
-          } else {
-            await hydrateProfile({ force: true });
-          }
-        }
-      } catch {
-        if (!cancelled && !sessionRef.current) {
-          const cached = await loadProfileCache();
-          if (cached) {
-            sessionRef.current = cached;
-            setSession(cached);
-          }
-        }
-      } finally {
-        if (!cancelled) setIsReady(true);
+      if (cached) {
+        sessionRef.current = cached;
+        hydratedUserId.current = cached.userId;
+        setSession(cached);
+        rememberPublicProfile(toPublicProfile(cached));
       }
+      clearTimeout(readyFailsafe);
+      setIsReady(true);
+
+      // Auth validation + profile refresh happen after the UI is up.
+      void (async () => {
+        try {
+          const initialUrl = await Linking.getInitialURL();
+          if (cancelled) return;
+          if (initialUrl?.includes('auth/callback')) {
+            await finishAuthFromUrl(initialUrl);
+            return;
+          }
+
+          const { data } = await supabase.auth.getSession();
+          if (cancelled) return;
+
+          if (!data.session) {
+            if (sessionRef.current) await applySession(null);
+            return;
+          }
+
+          if (cached?.userId === data.session.user.id) {
+            void hydrateProfile({ force: true }).catch(() => undefined);
+            return;
+          }
+
+          // Session for a different user than disk cache (or no cache).
+          await hydrateProfile({ force: true }).catch(() => undefined);
+        } catch {
+          // Keep optimistic cache; screens already rendered.
+        }
+      })();
     })();
 
     const { data: subscription } = supabase.auth.onAuthStateChange((event, authSession) => {
@@ -454,6 +464,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       cancelled = true;
+      clearTimeout(readyFailsafe);
       subscription.subscription.unsubscribe();
       linkingSub.remove();
     };

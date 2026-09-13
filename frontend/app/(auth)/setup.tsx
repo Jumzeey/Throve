@@ -1,34 +1,23 @@
-import { LocationField } from '@/components/ui/location-field';
+import { LocationField, placeDisplayLabel } from '@/components/ui/location-field';
 import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
-import { CheckIcon, UserIcon } from '@/components/ui/icons';
+import { CheckIcon } from '@/components/ui/icons';
+import { KeyboardSafeScreen } from '@/components/ui/keyboard-safe';
 import { ProgressBar } from '@/components/ui/loading-skeleton';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
 import { Palette, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
 import { useNetworkStatus } from '@/hooks/use-network-status';
-import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { ensureMediaLibraryPermission } from '@/lib/listing-photos';
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useRouter } from 'expo-router';
 import { useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 export default function SetupScreen() {
   const router = useRouter();
-  const { bottom } = useScreenInsets();
-  const keyboardScroll = useKeyboardAwareScroll();
   const { session, completeSetup, setProfilePhoto, logout } = useAuth();
   const { isConnected } = useNetworkStatus();
   const [username, setUsername] = useState(session?.username ?? '');
@@ -89,105 +78,88 @@ export default function SetupScreen() {
     router.replace('/(auth)/welcome');
   }
 
-  const bottomPad = Math.max(keyboardScroll.contentPaddingBottom, bottom + 40);
-
   return (
     <View style={styles.screen}>
       <ScreenHeader title="" onBack={onBack} />
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
-      >
-        {!saved ? (
-          <ScrollView
-            ref={keyboardScroll.scrollRef}
-            onScroll={keyboardScroll.onScroll}
-            scrollEventThrottle={16}
-            contentContainerStyle={[styles.form, { paddingBottom: bottomPad }]}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-            showsVerticalScrollIndicator={false}
-            automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
-          >
-            <Text style={styles.heading}>Set up your{'\n'}profile</Text>
-            <Text style={styles.lead}>Add a photo and a few details so buyers and sellers know who you are.</Text>
-            {!isConnected ? <OfflineBanner message="Reconnect to save your profile." /> : null}
-            <Pressable onPress={onPickPhoto} style={styles.avatarWrap}>
-              {photoUri ? (
+      {!saved ? (
+        <KeyboardSafeScreen contentContainerStyle={styles.form} keyboardVerticalOffset={8}>
+          {(keyboardScroll) => (
+            <>
+              <Text style={styles.heading}>Set up your{'\n'}profile</Text>
+              <Text style={styles.lead}>Add a photo and a few details so buyers and sellers know who you are.</Text>
+              {!isConnected ? <OfflineBanner message="Reconnect to save your profile." /> : null}
+              <Pressable onPress={onPickPhoto} style={styles.avatarWrap}>
                 <ProfileAvatar uri={photoUri} username={username} style={styles.avatar} allowLocal />
-              ) : (
-                <View style={styles.avatarEmpty}>
-                  <UserIcon size={30} />
+              </Pressable>
+              {uploading ? (
+                <View style={styles.uploadRow}>
+                  <Text style={styles.uploadText}>Uploading photo…</Text>
+                  <ProgressBar progress={0.74} width={120} />
                 </View>
-              )}
-            </Pressable>
-            {uploading ? (
-              <View style={styles.uploadRow}>
-                <Text style={styles.uploadText}>Uploading photo…</Text>
-                <ProgressBar progress={0.74} width={120} />
+              ) : null}
+              <View style={styles.fields}>
+                <View ref={keyboardScroll.setAnchor('username')} collapsable={false}>
+                  <TextField
+                    label="Username"
+                    autoCapitalize="none"
+                    value={username}
+                    onChangeText={setUsername}
+                    onFocus={() => keyboardScroll.onFieldFocus('username')}
+                  />
+                </View>
+                <View ref={keyboardScroll.setAnchor('bio')} collapsable={false}>
+                  <TextField
+                    label="Bio"
+                    placeholder="A line about your style"
+                    value={bio}
+                    onChangeText={setBio}
+                    multiline
+                    style={styles.bio}
+                    onFocus={() => keyboardScroll.onFieldFocus('bio', { multiline: true })}
+                  />
+                </View>
+                <View ref={keyboardScroll.setAnchor('location')} collapsable={false}>
+                  <LocationField
+                    label="Location"
+                    placeholder="Search for a place"
+                    value={location}
+                    hint="Search or type your city or area."
+                    onFocus={() => keyboardScroll.onFieldFocus('location')}
+                    onSelect={(place) => {
+                      const next = placeDisplayLabel(place, 'profile');
+                      if (next) setLocation(next);
+                    }}
+                  />
+                </View>
               </View>
-            ) : null}
-            <View style={styles.fields}>
-              <View ref={keyboardScroll.setAnchor('username')} collapsable={false}>
-                <TextField
-                  label="Username"
-                  autoCapitalize="none"
-                  value={username}
-                  onChangeText={setUsername}
-                  onFocus={() => keyboardScroll.onFieldFocus('username')}
-                />
-              </View>
-              <View ref={keyboardScroll.setAnchor('bio')} collapsable={false}>
-                <TextField
-                  label="Bio"
-                  placeholder="A line about your style"
-                  value={bio}
-                  onChangeText={setBio}
-                  multiline
-                  style={styles.bio}
-                  onFocus={() => keyboardScroll.onFieldFocus('bio')}
-                />
-              </View>
-              <View ref={keyboardScroll.setAnchor('location')} collapsable={false}>
-                <LocationField
-                  label="Location"
-                  placeholder="Search for a place"
-                  value={location}
-                  hint="Search or type your city or area."
-                  onFocus={() => keyboardScroll.onFieldFocus('location')}
-                  onSelect={(place) => setLocation(place.label || place.formattedAddress)}
-                />
-              </View>
-            </View>
-            {error ? <AlertBanner variant="error" title="We couldn't save that" message={error} style={styles.banner} /> : null}
-            <Button
-              label="Continue"
-              loading={loading}
-              onPress={onSubmit}
-              disabled={!isConnected || uploading}
-              style={styles.submit}
-            />
-          </ScrollView>
-        ) : (
-          <View style={styles.done}>
-            <View style={styles.check}>
-              <CheckIcon size={20} color={Palette.ivory} />
-            </View>
-            <Text style={styles.doneTitle}>Profile saved</Text>
-            <Text style={styles.doneCopy}>Taking you to Home.</Text>
-            <Button label="Continue" onPress={() => router.replace('/(tabs)')} style={styles.doneButton} />
+              {error ? <AlertBanner variant="error" title="We couldn't save that" message={error} style={styles.banner} /> : null}
+              <Button
+                label="Continue"
+                loading={loading}
+                onPress={onSubmit}
+                disabled={!isConnected || uploading}
+                style={styles.submit}
+              />
+            </>
+          )}
+        </KeyboardSafeScreen>
+      ) : (
+        <View style={styles.done}>
+          <View style={styles.check}>
+            <CheckIcon size={20} color={Palette.ivory} />
           </View>
-        )}
-      </KeyboardAvoidingView>
+          <Text style={styles.doneTitle}>Profile saved</Text>
+          <Text style={styles.doneCopy}>Taking you to Home.</Text>
+          <Button label="Continue" onPress={() => router.replace('/(tabs)')} style={styles.doneButton} />
+        </View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Palette.ivory },
-  flex: { flex: 1 },
-  form: { paddingHorizontal: 24, flexGrow: 1 },
+  form: { paddingHorizontal: 24 },
   heading: {
     fontFamily: Typography.display,
     fontSize: 32,
@@ -205,16 +177,6 @@ const styles = StyleSheet.create({
   },
   avatarWrap: { alignItems: 'center', marginBottom: 12 },
   avatar: { width: 84, height: 84, borderRadius: 42, borderWidth: 1, borderColor: Palette.border },
-  avatarEmpty: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    backgroundColor: Palette.skeleton,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: Palette.border,
-  },
   uploadRow: { alignItems: 'center', gap: 8, marginBottom: 16 },
   uploadText: { fontSize: 12.5, fontFamily: Typography.bodySemiBold, color: Palette.espresso },
   fields: { gap: 18 },

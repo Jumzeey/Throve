@@ -5,10 +5,12 @@ import { getProductImageSource } from '@/data/images';
 import type { LiveStreamProduct } from '@/data/types';
 import type { PinnedProductVariant } from '@/components/live/pinned-product-card';
 import { formatNaira } from '@/lib/format';
+import { useKeyboardDockPadding } from '@/hooks/use-keyboard-bottom-inset';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import {
   Dimensions,
+  Keyboard,
   Modal,
   Pressable,
   ScrollView,
@@ -16,6 +18,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaFrame } from 'react-native-safe-area-context';
 
 export function liveProductVariant(product: LiveStreamProduct, claimedByMe: boolean): PinnedProductVariant {
   const stock = product.stock ?? 0;
@@ -47,7 +50,13 @@ export function LiveCatalogSheet({
   onSelect,
 }: Props) {
   const { sheetBottom } = useScreenInsets();
-  const maxHeight = Dimensions.get('window').height * 0.76;
+  const frame = useSafeAreaFrame();
+  const padBottom = useKeyboardDockPadding(16, Math.max(sheetBottom, 16));
+  const maxHeight = Math.min(frame.height * 0.76, Dimensions.get('window').height * 0.76);
+
+  useEffect(() => {
+    if (visible) Keyboard.dismiss();
+  }, [visible]);
 
   const availableCount = useMemo(
     () =>
@@ -70,7 +79,7 @@ export function LiveCatalogSheet({
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close catalog" />
-        <View style={[styles.sheet, { maxHeight, paddingBottom: Math.max(sheetBottom, 16) }]}>
+        <View style={[styles.sheet, { maxHeight, paddingBottom: padBottom }]}>
           <View style={styles.handleRow}>
             <View style={styles.handleSpacer} />
             <View style={styles.handle} />

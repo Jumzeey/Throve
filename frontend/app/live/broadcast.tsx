@@ -22,8 +22,9 @@ import { getListingImageSource } from '@/data/images';
 import { apiFetch, ApiError } from '@/lib/api';
 import { formatNaira } from '@/lib/format';
 import { stopLiveKitAudioSession } from '@/lib/livekit-native';
+import { openLiveShare } from '@/lib/share-live';
 import { KeyboardSafeDock } from '@/components/ui/keyboard-safe';
-import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
+import { useKeyboardDockPadding, useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { Redirect, useRouter } from 'expo-router';
@@ -46,10 +47,11 @@ export default function LiveBroadcastScreen() {
   const { top, sheetBottom } = useScreenInsets();
   const keyboard = useKeyboardInset();
   const keyboardOpen = keyboard.height > 0;
-  const dockClearance = COMPOSER_INPUT + sheetBottom;
+  const dockPad = useKeyboardDockPadding(16, sheetBottom);
+  const dockClearance = COMPOSER_INPUT + dockPad;
   const now = useLiveClock();
-  const { session } = useAuth();
-  const { getListing } = useListings();
+  const { session, publicProfiles, ensurePublicProfile } = useAuth();
+  const { getListing, listingsForSeller } = useListings();
   const inbox = useInbox();
   const live = useLive();
   const [credentials, setCredentials] = useState<LiveMediaCredentials | null>(null);
@@ -59,6 +61,7 @@ export default function LiveBroadcastScreen() {
   const [ending, setEnding] = useState(false);
   const [modsOpen, setModsOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerBusy, setPickerBusy] = useState(false);
   const [commentDraft, setCommentDraft] = useState('');
   const [actionComment, setActionComment] = useState<LiveComment | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -252,6 +255,14 @@ export default function LiveBroadcastScreen() {
     return () => sub.remove();
   }, [leaveStudio]);
 
+  const sessionIdForComments = liveSession?.id;
+  const commentsForProfiles = sessionIdForComments ? live.getComments(sessionIdForComments) : [];
+  useEffect(() => {
+    for (const comment of commentsForProfiles) {
+      if (comment.user) void ensurePublicProfile(comment.user).catch(() => undefined);
+    }
+  }, [commentsForProfiles, ensurePublicProfile]);
+
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
   }
@@ -263,10 +274,22 @@ export default function LiveBroadcastScreen() {
   }
 
   const connection = live.getConnection(liveSession.id);
-  const comments = live.getComments(liveSession.id);
+  const comments = commentsForProfiles;
   const products = live.getProducts(liveSession.id);
   const moderators = live.getModerators(liveSession.id);
   const sessionId = liveSession.id;
+  const attachedListingIds = new Set(products.map((product) => product.listingId));
+  const addableListings = listingsForSeller(session.username).filter(
+    (listing) => listing.status === 'available' && !attachedListingIds.has(listing.id),
+  );
+  const nextAvailableProduct = products
+    .filter((product) => {
+      const sold =
+        product.soldCount >= product.stock ||
+        (product.available <= 0 && product.reservedCount <= 0);
+      return !sold && !product.isPinned;
+    })
+    .sort((a, b) => a.sortOrder - b.sortOrder)[0];
   const suggestedMods = inbox
     .conversationsFor(session.username)
     .map((conv) => inbox.otherParticipant(conv, session.username))
@@ -276,10 +299,17 @@ export default function LiveBroadcastScreen() {
   const duration = formatLiveDuration(now - startedAt);
   const categoryLine = [liveSession.department, liveSession.category].filter(Boolean).join(' · ');
 
-  function sendHostComment() {
-    if (!commentDraft.trim() || !session) return;
-    void live.sendComment(sessionId, session.username, commentDraft);
+  async function sendHostComment() {
+    const text = commentDraft.trim();
+    if (!text || !session) return;
     setCommentDraft('');
+    try {
+      await live.sendComment(sessionId, session.username, text);
+    } catch {
+      setCommentDraft(text);
+      setNotice("Couldn't send that comment. Try again.");
+      setTimeout(() => setNotice(null), 2200);
+    }
   }
 
   async function reportComment(comment: LiveComment) {
@@ -293,6 +323,20 @@ export default function LiveBroadcastScreen() {
       setNotice("We couldn't send that report.");
     }
     setTimeout(() => setNotice(null), 2200);
+  }
+
+  async function shareLive() {
+    if (!liveSession || !session) return;
+    try {
+      await openLiveShare({
+        id: liveSession.id,
+        title: liveSession.title,
+        host: session.username,
+      });
+    } catch {
+      setNotice("Couldn't open share. Try again.");
+      setTimeout(() => setNotice(null), 2200);
+    }
   }
 
   return (
@@ -313,6 +357,7 @@ export default function LiveBroadcastScreen() {
             onLeave={leaveStudio}
             onEnd={() => setEndOpen(true)}
             onModeration={() => setModsOpen(true)}
+            onShare={() => void shareLive()}
           />
           <View style={styles.sessionMeta}>
             <Text style={styles.sessionTitle}>{liveSession.title}</Text>
@@ -330,7 +375,7 @@ export default function LiveBroadcastScreen() {
           {!goingLive && (liveSession.viewers ?? 0) <= 1 ? (
             <View style={styles.statusBanner}>
               <Text style={styles.statusBannerText}>
-                No viewers yet — your live will appear in Live discovery.
+                No viewers yet — share your live so friends can join.
               </Text>
             </View>
           ) : null}
@@ -342,7 +387,7 @@ export default function LiveBroadcastScreen() {
           style={[
             styles.commentsArea,
             keyboardOpen ? styles.commentsAreaKeyboard : null,
-            keyboardOpen ? { marginBottom: dockClearance } : null,
+            { marginBottom: dockClearance },
           ]}
         >
           {comments.length === 0 ? (
@@ -357,6 +402,11 @@ export default function LiveBroadcastScreen() {
                 <LiveCommentRow
                   key={comment.id}
                   comment={comment}
+                  photoUrl={
+                    comment.photoUrl ??
+                    publicProfiles[comment.user]?.photoUri ??
+                    (session?.username === comment.user ? session.photoUri : undefined)
+                  }
                   isModerator={live.isModerator(sessionId, comment.user)}
                   showActions
                   onLongPress={() => setActionComment(comment)}
@@ -380,7 +430,15 @@ export default function LiveBroadcastScreen() {
               imageUri={pinnedProduct?.photoUrls?.[0]}
               variant={pinnedProduct ? productVariant : 'none'}
               itemCount={products.length}
-              actionLabel="Change"
+              actionLabel={
+                productVariant === 'sold'
+                  ? nextAvailableProduct || addableListings.length
+                    ? 'Switch product'
+                    : 'Add product'
+                  : products.length || addableListings.length
+                    ? 'Change'
+                    : 'Add product'
+              }
               onPress={() => setPickerOpen(true)}
               onBrowseCatalog={() => setPickerOpen(true)}
             />
@@ -432,12 +490,42 @@ export default function LiveBroadcastScreen() {
 
       <ProductPickerSheet
         visible={pickerOpen}
+        busy={pickerBusy}
         products={products}
+        addableListings={addableListings}
         getListing={getListing}
-        onClose={() => setPickerOpen(false)}
+        onClose={() => {
+          if (pickerBusy) return;
+          setPickerOpen(false);
+        }}
         onPin={(productId) => {
           void live.pinProduct(sessionId, productId);
           setPickerOpen(false);
+          setNotice('Product pinned for viewers');
+          setTimeout(() => setNotice(null), 2200);
+        }}
+        onAdd={(listing) => {
+          void (async () => {
+            setPickerBusy(true);
+            try {
+              await live.addProduct(sessionId, {
+                listingId: listing.id,
+                livePrice: listing.price,
+                stock: 1,
+                isPinned: true,
+              });
+              setPickerOpen(false);
+              setNotice('Product added and pinned');
+              setTimeout(() => setNotice(null), 2200);
+            } catch (err) {
+              const message =
+                err instanceof ApiError ? err.message : "Couldn't add that product. Try again.";
+              setNotice(message);
+              setTimeout(() => setNotice(null), 2800);
+            } finally {
+              setPickerBusy(false);
+            }
+          })();
         }}
       />
 
@@ -459,54 +547,99 @@ export default function LiveBroadcastScreen() {
 
 function ProductPickerSheet({
   visible,
+  busy,
   products,
+  addableListings,
   getListing,
   onClose,
   onPin,
+  onAdd,
 }: {
   visible: boolean;
+  busy: boolean;
   products: LiveStreamProduct[];
+  addableListings: { id: string; title: string; price: number; photoUrls?: string[] }[];
   getListing: (id: string) => { title?: string; photoUrls?: string[] } | undefined;
   onClose: () => void;
   onPin: (productId: string) => void;
+  onAdd: (listing: { id: string; title: string; price: number; photoUrls?: string[] }) => void;
 }) {
   const { sheetBottom } = useScreenInsets();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.sheetOverlay} onPress={onClose}>
         <View style={[styles.sheetCard, { paddingBottom: sheetBottom }]} onStartShouldSetResponder={() => true}>
-          <Text style={styles.sheetTitle}>Products in this live</Text>
-          {products.map((product) => {
-            const listing = getListing(product.listingId);
-            const sold =
-              product.soldCount >= product.stock ||
-              (product.available <= 0 && product.reservedCount <= 0);
-            const image = product.photoUrls?.[0] ?? listing?.photoUrls?.[0];
-            return (
-              <Pressable
-                key={product.id}
-                disabled={sold}
-                onPress={() => onPin(product.id)}
-                style={[styles.pickerRow, product.isPinned && styles.pickerRowOn, sold && styles.pickerRowSold]}
-              >
-                <AppImage
-                  source={image ?? getListingImageSource({ id: product.listingId, photoUrls: listing?.photoUrls })}
-                  style={styles.pickerThumb}
-                />
-                <View style={styles.pickerMeta}>
-                  <Text style={[styles.pickerName, sold && styles.pickerNameSold]}>
-                    {product.title ?? listing?.title ?? 'Item'}
-                  </Text>
-                  <Text style={styles.pickerSub}>
-                    {sold
-                      ? 'Sold in this live'
-                      : `${formatNaira(product.livePrice)} · ${product.isPinned ? 'pinned now' : 'available'}`}
-                  </Text>
-                </View>
-                {!sold && !product.isPinned ? <Text style={styles.pickerPin}>Pin</Text> : null}
-              </Pressable>
-            );
-          })}
+          <Text style={styles.sheetTitle}>Manage live products</Text>
+          <Text style={styles.sheetCopy}>
+            Pin an item already in this live, or add another available listing if something sells out.
+          </Text>
+          <ScrollView
+            style={styles.sheetScroll}
+            contentContainerStyle={styles.sheetScrollBody}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}>
+            <Text style={styles.sheetSection}>In this live</Text>
+            {products.length === 0 ? (
+              <Text style={styles.sheetEmpty}>No products attached yet. Add one from your listings below.</Text>
+            ) : (
+              products.map((product) => {
+                const listing = getListing(product.listingId);
+                const sold =
+                  product.soldCount >= product.stock ||
+                  (product.available <= 0 && product.reservedCount <= 0);
+                const image = product.photoUrls?.[0] ?? listing?.photoUrls?.[0];
+                return (
+                  <Pressable
+                    key={product.id}
+                    disabled={sold || busy}
+                    onPress={() => onPin(product.id)}
+                    style={[styles.pickerRow, product.isPinned && styles.pickerRowOn, sold && styles.pickerRowSold]}>
+                    <AppImage
+                      source={image ?? getListingImageSource({ id: product.listingId, photoUrls: listing?.photoUrls })}
+                      style={styles.pickerThumb}
+                    />
+                    <View style={styles.pickerMeta}>
+                      <Text style={[styles.pickerName, sold && styles.pickerNameSold]}>
+                        {product.title ?? listing?.title ?? 'Item'}
+                      </Text>
+                      <Text style={styles.pickerSub}>
+                        {sold
+                          ? 'Sold in this live'
+                          : `${formatNaira(product.livePrice)} · ${product.isPinned ? 'pinned now' : 'tap to pin'}`}
+                      </Text>
+                    </View>
+                    {!sold && !product.isPinned ? <Text style={styles.pickerPin}>Pin</Text> : null}
+                    {product.isPinned && !sold ? <Text style={styles.pickerPinned}>Pinned</Text> : null}
+                  </Pressable>
+                );
+              })
+            )}
+
+            <Text style={[styles.sheetSection, styles.sheetSectionSpaced]}>Add from your listings</Text>
+            {addableListings.length === 0 ? (
+              <Text style={styles.sheetEmpty}>
+                No other available listings. Create or publish a listing, then you can add it here.
+              </Text>
+            ) : (
+              addableListings.map((listing) => (
+                <Pressable
+                  key={listing.id}
+                  disabled={busy}
+                  onPress={() => onAdd(listing)}
+                  style={[styles.pickerRow, busy && styles.pickerRowSold]}>
+                  <AppImage
+                    source={getListingImageSource({ id: listing.id, photoUrls: listing.photoUrls })}
+                    style={styles.pickerThumb}
+                  />
+                  <View style={styles.pickerMeta}>
+                    <Text style={styles.pickerName}>{listing.title}</Text>
+                    <Text style={styles.pickerSub}>{formatNaira(listing.price)} · available</Text>
+                  </View>
+                  <Text style={styles.pickerPin}>{busy ? 'Adding…' : 'Add & pin'}</Text>
+                </Pressable>
+              ))
+            )}
+          </ScrollView>
         </View>
       </Pressable>
     </Modal>
@@ -595,7 +728,38 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontFamily: Typography.display,
     color: Palette.espresso,
-    marginBottom: 11,
+    marginBottom: 6,
+  },
+  sheetCopy: {
+    fontSize: 12.5,
+    lineHeight: 18,
+    fontFamily: Typography.body,
+    color: Palette.muted,
+    marginBottom: 12,
+  },
+  sheetScroll: {
+    maxHeight: 420,
+  },
+  sheetScrollBody: {
+    paddingBottom: 8,
+  },
+  sheetSection: {
+    fontSize: 10.5,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.label,
+    marginBottom: 8,
+  },
+  sheetSectionSpaced: {
+    marginTop: 14,
+  },
+  sheetEmpty: {
+    fontSize: 12.5,
+    lineHeight: 18,
+    fontFamily: Typography.body,
+    color: Palette.muted,
+    marginBottom: 8,
   },
   pickerRow: {
     flexDirection: 'row',
@@ -644,5 +808,10 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     fontFamily: Typography.bodySemiBold,
     color: Palette.plum,
+  },
+  pickerPinned: {
+    fontSize: 11,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.espresso,
   },
 });

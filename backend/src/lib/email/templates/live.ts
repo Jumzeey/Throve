@@ -131,7 +131,7 @@ export function liveClaimReservedEmail(input: {
 }): EmailContent {
   const link = deepLinks.live(input.sessionId);
   return buildEmail({
-    subject: truncateSubject('Item reserved for 5 minutes'),
+    subject: truncateSubject(`Item reserved for ${input.expiresInMinutes} minutes`),
     title: 'Item reserved',
     bodyHtml: `<strong style="color:#2B211F;">${escapeHtml(input.listingTitle)}</strong> is reserved for you for about ${input.expiresInMinutes} minutes. Complete checkout before it expires.`,
     bodyText: `${input.listingTitle} is reserved for about ${input.expiresInMinutes} minutes. Complete checkout soon.`,

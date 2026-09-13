@@ -1,17 +1,14 @@
 import { SearchIcon, UserIcon, WifiOffIcon } from '@/components/ui/icons';
+import { KeyboardSafeSheet } from '@/components/ui/keyboard-safe';
 import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { MAX_LIVE_MODERATORS } from '@/context/live-context';
-import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
-import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { searchProfiles, type ProfileSearchHit } from '@/lib/profile-search';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -78,9 +75,7 @@ export function ModeratorsSheet({
   onAdd,
   onRemove,
 }: Props) {
-  const { sheetBottom } = useScreenInsets();
-  const keyboard = useKeyboardInset();
-  const { session } = useAuth();
+  const { session, publicProfiles, ensurePublicProfile } = useAuth();
   const [draft, setDraft] = useState('');
   const [formError, setFormError] = useState('');
   const [adding, setAdding] = useState(false);
@@ -94,6 +89,13 @@ export function ModeratorsSheet({
   const slotsLeft = Math.max(0, MAX_LIVE_MODERATORS - moderators.length);
   const remainingSlots = Math.max(0, slotsLeft - picked.length);
   const query = normalizeUsername(draft);
+
+  useEffect(() => {
+    if (!visible) return;
+    for (const mod of moderators) {
+      void ensurePublicProfile(mod).catch(() => undefined);
+    }
+  }, [ensurePublicProfile, moderators, visible]);
 
   function isHostUser(username: string) {
     return username.toLowerCase() === hostUsername.toLowerCase();
@@ -133,8 +135,11 @@ export function ModeratorsSheet({
             !moderators.some((mod) => mod.toLowerCase() === name.toLowerCase()) &&
             !picked.some((item) => item.username.toLowerCase() === name.toLowerCase()),
         )
-        .map((username) => ({ username })),
-    [moderators, picked, suggestions],
+        .map((username) => ({
+          username,
+          photoUri: publicProfiles[username]?.photoUri,
+        })),
+    [moderators, picked, publicProfiles, suggestions],
   );
 
   const list = (query.length > 0 ? hits : suggestionHits).filter(
@@ -242,15 +247,8 @@ export function ModeratorsSheet({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <Pressable style={styles.overlay} onPress={onClose}>
-          <Pressable
-            style={[
-              styles.card,
-              { paddingBottom: keyboard.height > 0 ? keyboard.height + 12 : sheetBottom },
-            ]}
-            onPress={() => undefined}
-          >
+      <View style={styles.overlay}>
+        <KeyboardSafeSheet onDismiss={onClose} style={styles.card} gap={12}>
             <View style={styles.grabber} />
             <View style={styles.header}>
               <Text style={styles.title}>{title}</Text>
@@ -262,7 +260,14 @@ export function ModeratorsSheet({
 
             {moderators.map((mod, index) => (
               <View key={mod} style={styles.modRow}>
-                <ProfileAvatar username={mod} style={styles.avatar} />
+                <ProfileAvatar
+                  uri={
+                    publicProfiles[mod]?.photoUri ??
+                    (session?.username === mod ? session.photoUri : undefined)
+                  }
+                  username={mod}
+                  style={styles.avatar}
+                />
                 <View style={styles.meta}>
                   <Text style={styles.modName}>@{mod}</Text>
                   <Text style={styles.modSub}>
@@ -283,7 +288,11 @@ export function ModeratorsSheet({
                   <View style={styles.composer}>
                     {picked.map((hit) => (
                       <View key={hit.username} style={styles.chip}>
-                        <ProfileAvatar uri={hit.photoUri} username={hit.username} style={styles.chipAvatar} />
+                        <ProfileAvatar
+                          uri={hit.photoUri ?? publicProfiles[hit.username]?.photoUri}
+                          username={hit.username}
+                          style={styles.chipAvatar}
+                        />
                         <Text style={styles.chipLabel} numberOfLines={1}>
                           @{hit.username}
                         </Text>
@@ -376,7 +385,11 @@ export function ModeratorsSheet({
                           onPress={() => pickPerson(hit)}
                           style={[styles.hitRow, isHost && styles.hitRowHost]}
                         >
-                          <ProfileAvatar uri={hit.photoUri} username={hit.username} style={styles.avatar} />
+                          <ProfileAvatar
+                            uri={hit.photoUri ?? publicProfiles[hit.username]?.photoUri}
+                            username={hit.username}
+                            style={styles.avatar}
+                          />
                           <View style={styles.meta}>
                             <Text style={[styles.hitName, isHost && styles.hitNameHost]}>
                               {hit.name || hit.username}
@@ -400,19 +413,16 @@ export function ModeratorsSheet({
               A moderator is not a co-host: no video, no product control, no orders, no finance, and they can't end the
               live.
             </Text>
-          </Pressable>
-        </Pressable>
-      </KeyboardAvoidingView>
+        </KeyboardSafeSheet>
+      </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(27,17,19,0.45)',
-    justifyContent: 'flex-end',
   },
   card: {
     backgroundColor: Palette.ivory,
@@ -420,7 +430,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: Radius.xl,
     paddingHorizontal: 20,
     paddingTop: 10,
-    paddingBottom: 28,
     maxHeight: '88%',
   },
   grabber: {

@@ -59,6 +59,7 @@ export type LiveComment = {
   user: string;
   text: string;
   clientId?: string;
+  photoUrl?: string;
 };
 
 export type LiveClaimStatus = 'active' | 'converted' | 'expired' | 'released';
@@ -198,6 +199,8 @@ export type Order = {
   listingTitle: string;
   buyer: string;
   seller: string;
+  buyerId?: string;
+  sellerId?: string;
   name: string;
   address: string;
   city: string;

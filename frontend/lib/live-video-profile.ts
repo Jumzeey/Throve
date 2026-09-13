@@ -11,6 +11,11 @@ export type LiveCameraFacing = 'user' | 'environment';
 type LiveKitRoomOptionsLite = {
   adaptiveStream?: boolean | { pixelDensity?: 'screen' | number };
   dynacast?: boolean;
+  /**
+   * livekit-client 2.19+ defaults this to true; on React Native remote video often
+   * never attaches (viewers stuck on “Waiting for host…” while host sees local preview).
+   */
+  singlePeerConnection?: boolean;
   videoCaptureDefaults?: {
     facingMode?: LiveCameraFacing;
     resolution?: { width: number; height: number; frameRate?: number };
@@ -186,6 +191,7 @@ function testRoomOptions(facing: LiveCameraFacing, lowEnd: boolean): LiveKitRoom
   return {
     adaptiveStream: ADAPTIVE_STREAM,
     dynacast: true,
+    singlePeerConnection: false,
     videoCaptureDefaults: {
       facingMode: capture.facingMode,
       resolution: capture.resolution,
@@ -204,6 +210,7 @@ function testRoomOptions(facing: LiveCameraFacing, lowEnd: boolean): LiveKitRoom
 function legacyRoomOptions(): LiveKitRoomOptionsLite {
   return {
     adaptiveStream: ADAPTIVE_STREAM,
+    singlePeerConnection: false,
   };
 }
 

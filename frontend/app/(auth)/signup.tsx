@@ -9,10 +9,10 @@ import { MailIcon } from '@/components/ui/icons';
 import { PhoneField } from '@/components/ui/phone-field';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
+import { KeyboardSafeScreen } from '@/components/ui/keyboard-safe';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { DEFAULT_COUNTRY_ISO } from '@/data/country-codes';
-import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { validatePassword } from '@/lib/password';
 import { formatPhoneE164, isValidPhone } from '@/lib/phone';
@@ -21,7 +21,7 @@ import { remainingCooldownSec } from '@/lib/session-persistence';
 import { isValidDob, isValidEmail } from '@/lib/validation';
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 const RESEND_COOLDOWN_SEC = 30;
 
@@ -30,7 +30,6 @@ export default function SignupScreen() {
   const { session, signup, verifySignupOtp, completeVerification, sendPasswordOtp, authResume, persistAuthResume, clearAuthResumeFlow } =
     useAuth();
   const { isConnected } = useNetworkStatus();
-  const keyboardScroll = useKeyboardAwareScroll();
   const restored = authResume?.kind === 'signup-verify' ? authResume : null;
   const [email, setEmail] = useState(restored?.email ?? '');
   const [name, setName] = useState(restored?.name ?? '');
@@ -191,148 +190,146 @@ export default function SignupScreen() {
   return (
     <View style={styles.screen}>
       <ScreenHeader title="" onBack={onBack} />
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        {stage === 'form' ? (
-          <ScrollView
-            ref={keyboardScroll.scrollRef}
-            contentContainerStyle={[styles.form, { paddingBottom: keyboardScroll.contentPaddingBottom }]}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-            showsVerticalScrollIndicator={false}
-            automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
-            onScroll={keyboardScroll.onScroll}
-            scrollEventThrottle={16}
-          >
-            <Text style={styles.heading}>Create your{'\n'}account</Text>
-            <Text style={styles.lead}>Sign up with email and password. We’ll send a code to verify your email.</Text>
-            {!isConnected ? (
-              <OfflineBanner message="You'll need an internet connection to create your account. Reconnect and try again." />
-            ) : null}
-            <View style={styles.fields}>
-              <View ref={keyboardScroll.setAnchor('email')} collapsable={false}>
-                <TextField
-                  label="Email address"
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  value={email}
-                  onChangeText={setEmail}
-                  error={fieldErrors.email}
-                  onFocus={() => keyboardScroll.onFieldFocus('email')}
-                />
-              </View>
-              <View ref={keyboardScroll.setAnchor('name')} collapsable={false}>
-                <TextField
-                  label="Name"
-                  value={name}
-                  onChangeText={setName}
-                  error={fieldErrors.name}
-                  placeholder="Your name"
-                  onFocus={() => keyboardScroll.onFieldFocus('name')}
-                />
-              </View>
-              <View ref={keyboardScroll.setAnchor('username')} collapsable={false}>
-                <TextField
-                  label="Username"
-                  autoCapitalize="none"
-                  value={username}
-                  onChangeText={setUsername}
-                  error={fieldErrors.username}
-                  onFocus={() => keyboardScroll.onFieldFocus('username')}
-                />
-              </View>
-              <DateField label="Date of birth" value={dob} onChange={setDob} error={fieldErrors.dob} />
-              <View ref={keyboardScroll.setAnchor('phone')} collapsable={false}>
-                <PhoneField
-                  countryIso={countryIso}
-                  nationalNumber={nationalNumber}
-                  onCountryChange={setCountryIso}
-                  onNumberChange={setNationalNumber}
-                  error={fieldErrors.phone}
-                  onFocus={() => keyboardScroll.onFieldFocus('phone')}
-                />
-              </View>
-              <View ref={keyboardScroll.setAnchor('password')} collapsable={false}>
-                <PasswordField
-                  label="Password"
-                  value={password}
-                  onChangeText={setPassword}
-                  error={fieldErrors.password}
-                  onFocus={() => keyboardScroll.onFieldFocus('password')}
-                />
-              </View>
-              <PasswordStrengthMeter password={password} />
-              <PasswordRequirements password={password} />
-              <View ref={keyboardScroll.setAnchor('confirm')} collapsable={false}>
-                <PasswordField
-                  label="Confirm password"
-                  value={confirm}
-                  onChangeText={setConfirm}
-                  error={fieldErrors.confirm}
-                  onFocus={() => keyboardScroll.onFieldFocus('confirm')}
-                />
-              </View>
-            </View>
-            <View style={styles.notice}>
-              <MailIcon size={18} />
-              <View style={styles.noticeText}>
-                <Text style={styles.noticeTitle}>Email verification is required</Text>
-                <Text style={styles.noticeBody}>
-                  We’ll send a one-time code to your email. Your account is ready once you enter it.
-                </Text>
-              </View>
-            </View>
-            {error ? <AlertBanner variant="error" title="We couldn't complete that" message={error} style={styles.banner} /> : null}
-            <Button label="Create account" loading={loading} onPress={onSubmit} disabled={!isConnected} style={styles.submit} />
-            <Text style={styles.footer}>
-              Already have an account?{' '}
-              <Text style={styles.link} onPress={() => router.replace('/(auth)/login')}>
-                Log in
-              </Text>
-            </Text>
-          </ScrollView>
-        ) : (
-          <ScrollView
-            contentContainerStyle={[styles.verify, { paddingBottom: keyboardScroll.contentPaddingBottom }]}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-            automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
-          >
-            <View style={styles.verifyCard}>
-              <MailIcon size={26} />
-              <Text style={styles.verifyTitle}>Check your email</Text>
-              <Text style={styles.verifyCopy}>
-                We sent a verification code to {email.trim()}. Enter it below to finish creating your account.
-              </Text>
-              <OtpInput value={otp} onChange={setOtp} error={Boolean(error)} />
-              <Button
-                label="Verify email"
-                loading={loading}
-                onPress={onVerify}
-                disabled={!isConnected || otp.trim().length < OTP_LENGTH}
-                style={styles.verifyBtn}
-              />
-              <Button
-                label={cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend code'}
-                variant="secondary"
-                onPress={onResend}
-                disabled={!isConnected || loading || cooldown > 0}
-                style={styles.resend}
-              />
-              {__DEV__ ? (
-                <Button label="Simulate: I verified" loading={loading} onPress={onDevSimulate} style={styles.simulate} />
+      {stage === 'form' ? (
+        <KeyboardSafeScreen contentContainerStyle={styles.form}>
+          {(keyboardScroll) => (
+            <>
+              <Text style={styles.heading}>Create your{'\n'}account</Text>
+              <Text style={styles.lead}>Sign up with email and password. We’ll send a code to verify your email.</Text>
+              {!isConnected ? (
+                <OfflineBanner message="You'll need an internet connection to create your account. Reconnect and try again." />
               ) : null}
-            </View>
-            {error ? <AlertBanner variant="error" title="We couldn't complete that" message={error} /> : null}
-          </ScrollView>
-        )}
-      </KeyboardAvoidingView>
+              <View style={styles.fields}>
+                <View ref={keyboardScroll.setAnchor('email')} collapsable={false}>
+                  <TextField
+                    label="Email address"
+                    autoCapitalize="none"
+                    keyboardType="email-address"
+                    value={email}
+                    onChangeText={setEmail}
+                    error={fieldErrors.email}
+                    onFocus={() => keyboardScroll.onFieldFocus('email')}
+                  />
+                </View>
+                <View ref={keyboardScroll.setAnchor('name')} collapsable={false}>
+                  <TextField
+                    label="Name"
+                    value={name}
+                    onChangeText={setName}
+                    error={fieldErrors.name}
+                    placeholder="Your name"
+                    onFocus={() => keyboardScroll.onFieldFocus('name')}
+                  />
+                </View>
+                <View ref={keyboardScroll.setAnchor('username')} collapsable={false}>
+                  <TextField
+                    label="Username"
+                    autoCapitalize="none"
+                    value={username}
+                    onChangeText={setUsername}
+                    error={fieldErrors.username}
+                    onFocus={() => keyboardScroll.onFieldFocus('username')}
+                  />
+                </View>
+                <DateField label="Date of birth" value={dob} onChange={setDob} error={fieldErrors.dob} />
+                <View ref={keyboardScroll.setAnchor('phone')} collapsable={false}>
+                  <PhoneField
+                    countryIso={countryIso}
+                    nationalNumber={nationalNumber}
+                    onCountryChange={setCountryIso}
+                    onNumberChange={setNationalNumber}
+                    error={fieldErrors.phone}
+                    onFocus={() => keyboardScroll.onFieldFocus('phone')}
+                  />
+                </View>
+                <View ref={keyboardScroll.setAnchor('password')} collapsable={false}>
+                  <PasswordField
+                    label="Password"
+                    value={password}
+                    onChangeText={setPassword}
+                    error={fieldErrors.password}
+                    onFocus={() => keyboardScroll.onFieldFocus('password')}
+                  />
+                </View>
+                <PasswordStrengthMeter password={password} />
+                <PasswordRequirements password={password} />
+                <View ref={keyboardScroll.setAnchor('confirm')} collapsable={false}>
+                  <PasswordField
+                    label="Confirm password"
+                    value={confirm}
+                    onChangeText={setConfirm}
+                    error={fieldErrors.confirm}
+                    onFocus={() => keyboardScroll.onFieldFocus('confirm')}
+                  />
+                </View>
+              </View>
+              <View style={styles.notice}>
+                <MailIcon size={18} />
+                <View style={styles.noticeText}>
+                  <Text style={styles.noticeTitle}>Email verification is required</Text>
+                  <Text style={styles.noticeBody}>
+                    We’ll send a one-time code to your email. Your account is ready once you enter it.
+                  </Text>
+                </View>
+              </View>
+              {error ? <AlertBanner variant="error" title="We couldn't complete that" message={error} style={styles.banner} /> : null}
+              <Button label="Create account" loading={loading} onPress={onSubmit} disabled={!isConnected} style={styles.submit} />
+              <Text style={styles.footer}>
+                Already have an account?{' '}
+                <Text style={styles.link} onPress={() => router.replace('/(auth)/login')}>
+                  Log in
+                </Text>
+              </Text>
+            </>
+          )}
+        </KeyboardSafeScreen>
+      ) : (
+        <KeyboardSafeScreen contentContainerStyle={styles.verify}>
+          {(keyboardScroll) => (
+            <>
+              <View style={styles.verifyCard}>
+                <MailIcon size={26} />
+                <Text style={styles.verifyTitle}>Check your email</Text>
+                <Text style={styles.verifyCopy}>
+                  We sent a verification code to {email.trim()}. Enter it below to finish creating your account.
+                </Text>
+                <View ref={keyboardScroll.setAnchor('otp')} collapsable={false}>
+                  <OtpInput
+                    value={otp}
+                    onChange={setOtp}
+                    error={Boolean(error)}
+                    onFocus={() => keyboardScroll.onFieldFocus('otp')}
+                  />
+                </View>
+                <Button
+                  label="Verify email"
+                  loading={loading}
+                  onPress={onVerify}
+                  disabled={!isConnected || otp.trim().length < OTP_LENGTH}
+                  style={styles.verifyBtn}
+                />
+                <Button
+                  label={cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend code'}
+                  variant="secondary"
+                  onPress={onResend}
+                  disabled={!isConnected || loading || cooldown > 0}
+                  style={styles.resend}
+                />
+                {__DEV__ ? (
+                  <Button label="Simulate: I verified" loading={loading} onPress={onDevSimulate} style={styles.simulate} />
+                ) : null}
+              </View>
+              {error ? <AlertBanner variant="error" title="We couldn't complete that" message={error} /> : null}
+            </>
+          )}
+        </KeyboardSafeScreen>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Palette.ivory },
-  flex: { flex: 1 },
   form: { paddingHorizontal: 24, paddingBottom: 30 },
   heading: {
     fontFamily: Typography.display,

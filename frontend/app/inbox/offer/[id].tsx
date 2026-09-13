@@ -15,8 +15,8 @@ import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatNaira } from '@/lib/format';
 import { effectiveOfferStatus, formatOfferCountdown, offerChipVariant } from '@/lib/offer-display';
-import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export default function OfferDetailsScreen() {
@@ -37,6 +37,30 @@ export default function OfferDetailsScreen() {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void inbox.refresh({ silent: true }).catch(() => undefined);
+    }, [inbox]),
+  );
+
+  const pendingOfferId =
+    id && session
+      ? (() => {
+          const offer = inbox.getOffer(id);
+          if (!offer) return null;
+          if (offer.buyer !== session.username && offer.seller !== session.username) return null;
+          return effectiveOfferStatus(offer) === 'pending' ? offer.id : null;
+        })()
+      : null;
+
+  useEffect(() => {
+    if (!pendingOfferId) return;
+    const timer = setInterval(() => {
+      void inbox.refresh({ silent: true }).catch(() => undefined);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [inbox, pendingOfferId]);
 
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
@@ -78,6 +102,7 @@ export default function OfferDetailsScreen() {
   async function openChat() {
     const counterpart = isBuyer ? offer.seller : offer.buyer;
     const conv = await inbox.openOrCreateConversation(counterpart, offer.listingId, me);
+    await inbox.refresh({ silent: true }).catch(() => undefined);
     router.push(`/inbox/chat/${conv.id}`);
   }
 

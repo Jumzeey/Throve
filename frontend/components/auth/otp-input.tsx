@@ -8,9 +8,10 @@ type Props = {
   onChange: (value: string) => void;
   length?: number;
   error?: boolean;
+  onFocus?: () => void;
 };
 
-export function OtpInput({ value, onChange, length = OTP_LENGTH, error }: Props) {
+export function OtpInput({ value, onChange, length = OTP_LENGTH, error, onFocus }: Props) {
   const inputs = useRef<(TextInput | null)[]>([]);
   const digits = value.replace(/\D/g, '').slice(0, length).split('');
 
@@ -55,6 +56,7 @@ export function OtpInput({ value, onChange, length = OTP_LENGTH, error }: Props)
               value={digits[index] ?? ''}
               onChangeText={(text) => setDigit(index, text)}
               onKeyPress={({ nativeEvent }) => onKeyPress(index, nativeEvent.key)}
+              onFocus={onFocus}
               keyboardType="number-pad"
               textContentType="oneTimeCode"
               autoComplete="sms-otp"

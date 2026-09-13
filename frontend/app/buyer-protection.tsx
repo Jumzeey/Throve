@@ -4,17 +4,19 @@ import { ScreenHeader } from '@/components/ui/screen-header';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { useRouter } from 'expo-router';
+import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export default function BuyerProtectionScreen() {
   const router = useRouter();
   const { sheetBottom } = useScreenInsets();
+  const [footerHeight, setFooterHeight] = useState(72);
 
   return (
     <View style={styles.screen}>
       <ScreenHeader title="Buyer Protection" onBack={() => router.back()} />
       <ScrollView
-        contentContainerStyle={[styles.body, { paddingBottom: Math.max(sheetBottom, 24) + 80 }]}
+        contentContainerStyle={[styles.body, { paddingBottom: footerHeight + 16 }]}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.heroIcon}>
@@ -25,8 +27,9 @@ export default function BuyerProtectionScreen() {
 
         <Text style={styles.sectionTitle}>How we calculate the fee</Text>
         <Text style={styles.sectionBody}>
-          The Buyer Protection fee is 5% of the item price, capped at ₦2,500. It’s shown separately at checkout and
-          helps fund refunds, secure payments, and support.
+          The Buyer Protection fee is 5% of the item price, with a ₦300 minimum and a ₦2,500 maximum. It’s shown
+          separately at checkout and helps fund refunds, secure payments, and support. Delivery fees are never included
+          in this calculation.
         </Text>
 
         <View style={styles.card}>
@@ -66,7 +69,10 @@ export default function BuyerProtectionScreen() {
         </View>
       </ScrollView>
 
-      <View style={[styles.footer, { paddingBottom: Math.max(sheetBottom, 16) }]}>
+      <View
+        style={[styles.footer, { paddingBottom: Math.max(sheetBottom, 16) }]}
+        onLayout={(event) => setFooterHeight(event.nativeEvent.layout.height)}
+      >
         <Button label="Got it" onPress={() => router.back()} />
       </View>
     </View>

@@ -1,29 +1,32 @@
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
-import { UserIcon } from '@/components/ui/icons';
+import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useInbox } from '@/context/inbox-context';
-import { getSellerAvatar } from '@/data/images';
 import { useNetworkStatus } from '@/hooks/use-network-status';
-import { AppImage } from '@/components/ui/app-image';
 import { Redirect, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 export default function BlockedUsersScreen() {
   const router = useRouter();
-  const { session } = useAuth();
+  const { session, publicProfiles, ensurePublicProfile } = useAuth();
   const inbox = useInbox();
   const { isConnected } = useNetworkStatus();
   const [busyUser, setBusyUser] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const blocked = inbox.blockedUsers;
+
+  useEffect(() => {
+    for (const username of blocked) {
+      void ensurePublicProfile(username).catch(() => undefined);
+    }
+  }, [blocked, ensurePublicProfile]);
 
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
   }
-
-  const blocked = inbox.blockedUsers;
 
   async function onUnblock(username: string) {
     if (!isConnected || busyUser) return;
@@ -53,17 +56,14 @@ export default function BlockedUsersScreen() {
         ) : (
           <View style={styles.list}>
             {blocked.map((username) => {
-              const avatar = getSellerAvatar(username);
               const busy = busyUser === username;
               return (
                 <View key={username} style={styles.row}>
-                  <View style={styles.avatar}>
-                    {avatar ? (
-                      <AppImage source={avatar} style={styles.avatarImage} />
-                    ) : (
-                      <UserIcon size={16} color={Palette.muted3} />
-                    )}
-                  </View>
+                  <ProfileAvatar
+                    uri={publicProfiles[username]?.photoUri}
+                    username={username}
+                    style={styles.avatar}
+                  />
                   <Text style={styles.username} numberOfLines={1}>
                     {username}
                   </Text>
@@ -142,16 +142,8 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: Palette.skeleton,
     borderWidth: 1,
     borderColor: Palette.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  avatarImage: {
-    width: 34,
-    height: 34,
   },
   username: {
     flex: 1,

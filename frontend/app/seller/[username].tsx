@@ -116,6 +116,12 @@ export default function SellerProfileScreen() {
   }, [checkout, username]);
 
   useEffect(() => {
+    for (const review of reviews) {
+      void ensurePublicProfile(review.buyer).catch(() => undefined);
+    }
+  }, [ensurePublicProfile, reviews]);
+
+  useEffect(() => {
     if (!banner) return;
     const timer = setTimeout(() => setBanner(null), 2000);
     return () => clearTimeout(timer);
@@ -342,7 +348,15 @@ export default function SellerProfileScreen() {
               </Text>
             </View>
             {previewReviews.map((review, index) => (
-              <ReviewRow key={`${review.buyer}-${index}`} review={review} last={index === previewReviews.length - 1} />
+              <ReviewRow
+                key={`${review.buyer}-${index}`}
+                review={review}
+                photoUri={
+                  publicProfiles[review.buyer]?.photoUri ??
+                  (session?.username === review.buyer ? session.photoUri : undefined)
+                }
+                last={index === previewReviews.length - 1}
+              />
             ))}
             <Text style={styles.disclaimer}>
               Only buyers from completed Throve orders can leave a review — one per order.
@@ -351,7 +365,7 @@ export default function SellerProfileScreen() {
         )}
       </View>
     ),
-    [previewReviews, reviews.length, shown.length, stats.avg, stats.count],
+    [previewReviews, publicProfiles, reviews.length, session?.photoUri, session?.username, shown.length, stats.avg, stats.count],
   );
 
   const renderItem = useCallback(
@@ -412,7 +426,15 @@ export default function SellerProfileScreen() {
             <Text style={styles.sheetTitle}>Seller reviews</Text>
             <ScrollView style={styles.sheetList}>
               {reviews.map((review, index) => (
-                <ReviewRow key={`${review.buyer}-${index}`} review={review} last={index === reviews.length - 1} />
+                <ReviewRow
+                  key={`${review.buyer}-${index}`}
+                  review={review}
+                  photoUri={
+                    publicProfiles[review.buyer]?.photoUri ??
+                    (session?.username === review.buyer ? session.photoUri : undefined)
+                  }
+                  last={index === reviews.length - 1}
+                />
               ))}
               <Text style={styles.disclaimer}>
                 Only buyers from completed Throve orders can leave a review — one per order.
@@ -563,12 +585,20 @@ function SellerListingCard({ listing, onPress }: { listing: Listing; onPress: ()
   );
 }
 
-function ReviewRow({ review, last }: { review: Review; last?: boolean }) {
+function ReviewRow({
+  review,
+  last,
+  photoUri,
+}: {
+  review: Review;
+  last?: boolean;
+  photoUri?: string;
+}) {
   const comment = review.comment?.trim();
   return (
     <View style={[styles.reviewRow, last && styles.reviewRowLast]}>
       <View style={styles.reviewTop}>
-        <ProfileAvatar uri={undefined} username={review.buyer} style={styles.reviewAvatar} />
+        <ProfileAvatar uri={photoUri} username={review.buyer} style={styles.reviewAvatar} />
         <View style={styles.reviewCopy}>
           <Text style={styles.reviewBuyer}>{review.buyer}</Text>
           <Text style={styles.reviewMeta}>{review.date} · Completed order</Text>

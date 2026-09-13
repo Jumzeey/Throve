@@ -9,8 +9,8 @@ import {
   SendIcon,
   CameraSwitchIcon,
   ShieldIcon,
+  ShareIcon,
   SpinnerArcIcon,
-  UserIcon,
   VideoIcon,
   WifiOffIcon,
 } from '@/components/ui/icons';
@@ -33,7 +33,7 @@ import {
 } from '@/lib/live-video-profile';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { createContext, memo, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Keyboard, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { AppState, Keyboard, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View, type AppStateStatus } from 'react-native';
 import { useKeyboardInset } from '@/hooks/use-keyboard-bottom-inset';
 import * as Device from 'expo-device';
 
@@ -440,8 +440,9 @@ const LiveKitVideoLayer = memo(function LiveKitVideoLayer({
         token={credentials.token!}
         serverUrl={credentials.url!}
         connect
-        audio={isHost}
-        video={isHost}
+        // CameraLayer owns host publish — avoid Room auto-publish + CameraLayer restart racing.
+        audio={false}
+        video={false}
         options={videoProfile.resolution.roomOptions}
         onConnected={onConnected}
         onDisconnected={onDisconnected}
@@ -477,51 +478,48 @@ function CameraLayer({
   const [publishError, setPublishError] = useState<string | null>(null);
   const [facing, setFacing] = useState<CameraFacing>('user');
   const [switching, setSwitching] = useState(false);
+  const facingRef = useRef<CameraFacing>('user');
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const resumingRef = useRef(false);
 
   useEffect(() => {
-    if (!isHost || !localParticipant) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const capture =
-          videoTier === 'legacy'
-            ? { facingMode: 'user' as LiveCameraFacing }
-            : getLiveCaptureOptions('user', videoTier);
-        await localParticipant.setCameraEnabled(true, capture);
-        await localParticipant.setMicrophoneEnabled(true);
-        if (!cancelled) setPublishError(null);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Camera or microphone permission denied';
-        console.warn('[livekit] publish failed', err);
-        if (!cancelled) setPublishError(message);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // Publish once when the participant is ready; facing changes go through switchCamera.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isHost, localParticipant]);
+    facingRef.current = facing;
+  }, [facing]);
 
-  const switchCamera = useCallback(() => {
-    if (!isHost || !localParticipant || switching) return;
-    const next: CameraFacing = facing === 'user' ? 'environment' : 'user';
-    setSwitching(true);
-    void (async () => {
-      const capture =
-        videoTier === 'legacy'
-          ? { facingMode: next }
-          : getLiveCaptureOptions(next, videoTier);
-      const encoding = getLivePublishEncoding(next, videoTier);
-      try {
-        const publication = localParticipant.getTrackPublication(client.Track.Source.Camera);
-        const track = publication?.track as
-          | {
-              restartTrack?: (opts: {
-                facingMode: LiveCameraFacing;
-                resolution?: { width: number; height: number; frameRate?: number };
+  const captureFor = useCallback(
+    (mode: CameraFacing) =>
+      videoTier === 'legacy'
+        ? { facingMode: mode as LiveCameraFacing }
+        : getLiveCaptureOptions(mode, videoTier),
+    [videoTier],
+  );
+
+  /** Restart camera (+ mic) for the current facing — used after background and for flips. */
+  const republishHostMedia = useCallback(
+    async (mode: CameraFacing) => {
+      if (!isHost || !localParticipant) return;
+      const capture = captureFor(mode);
+      const encoding = getLivePublishEncoding(mode, videoTier);
+      const publication = localParticipant.getTrackPublication(client.Track.Source.Camera);
+      const track = publication?.track as
+        | {
+            restartTrack?: (opts: {
+              facingMode: LiveCameraFacing;
+              resolution?: { width: number; height: number; frameRate?: number };
+            }) => Promise<void>;
+            mediaStreamTrack?: { _switchCamera?: () => void };
+            sender?: {
+              getParameters: () => { encodings?: Array<{ maxBitrate?: number; maxFramerate?: number }> };
+              setParameters: (params: {
+                encodings?: Array<{ maxBitrate?: number; maxFramerate?: number }>;
               }) => Promise<void>;
-              mediaStreamTrack?: { _switchCamera?: () => void };
+            };
+          }
+        | undefined;
+
+      const applyEncodingTo = async (
+        t:
+          | {
               sender?: {
                 getParameters: () => { encodings?: Array<{ maxBitrate?: number; maxFramerate?: number }> };
                 setParameters: (params: {
@@ -529,13 +527,18 @@ function CameraLayer({
                 }) => Promise<void>;
               };
             }
-          | undefined;
-        if (typeof track?.restartTrack === 'function') {
+          | undefined,
+      ) => {
+        await applyLivePublishEncoding(t, encoding);
+      };
+
+      // Prefer restartTrack (same path as manual camera flip, which recovers after background).
+      if (typeof track?.restartTrack === 'function') {
+        try {
           await track.restartTrack(capture);
-          await applyLivePublishEncoding(track, encoding);
-        } else if (videoTier === 'legacy' && typeof track?.mediaStreamTrack?._switchCamera === 'function') {
-          track.mediaStreamTrack._switchCamera();
-        } else {
+          await applyEncodingTo(track);
+        } catch (restartErr) {
+          console.warn('[livekit] restartTrack failed, republishing', restartErr);
           await localParticipant.setCameraEnabled(false);
           await localParticipant.setCameraEnabled(true, capture);
           const republished = localParticipant.getTrackPublication(client.Track.Source.Camera)?.track as
@@ -548,22 +551,135 @@ function CameraLayer({
                 };
               }
             | undefined;
-          await applyLivePublishEncoding(republished, encoding);
+          await applyEncodingTo(republished);
         }
+      } else if (videoTier === 'legacy' && typeof track?.mediaStreamTrack?._switchCamera === 'function') {
+        track.mediaStreamTrack._switchCamera();
+      } else {
+        await localParticipant.setCameraEnabled(false);
+        await localParticipant.setCameraEnabled(true, capture);
+        const republished = localParticipant.getTrackPublication(client.Track.Source.Camera)?.track as
+          | {
+              sender?: {
+                getParameters: () => { encodings?: Array<{ maxBitrate?: number; maxFramerate?: number }> };
+                setParameters: (params: {
+                  encodings?: Array<{ maxBitrate?: number; maxFramerate?: number }>;
+                }) => Promise<void>;
+              };
+            }
+          | undefined;
+        await applyEncodingTo(republished);
+      }
+
+      try {
+        await localParticipant.setMicrophoneEnabled(true);
+      } catch (micErr) {
+        console.warn('[livekit] mic resume failed', micErr);
+      }
+    },
+    [captureFor, client.Track.Source.Camera, isHost, localParticipant, videoTier],
+  );
+
+  useEffect(() => {
+    if (!isHost || !localParticipant) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        // First join: enable once (no disable/enable cycle that drops the SFU publication).
+        const capture = captureFor('user');
+        const encoding = getLivePublishEncoding('user', videoTier);
+        await localParticipant.setCameraEnabled(true, capture);
+        await localParticipant.setMicrophoneEnabled(true);
+        const published = localParticipant.getTrackPublication(client.Track.Source.Camera)?.track as
+          | {
+              sender?: {
+                getParameters: () => { encodings?: Array<{ maxBitrate?: number; maxFramerate?: number }> };
+                setParameters: (params: {
+                  encodings?: Array<{ maxBitrate?: number; maxFramerate?: number }>;
+                }) => Promise<void>;
+              };
+            }
+          | undefined;
+        await applyLivePublishEncoding(published, encoding);
+        if (!cancelled) {
+          setFacing('user');
+          setPublishError(null);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Camera or microphone permission denied';
+        console.warn('[livekit] publish failed', err);
+        if (!cancelled) setPublishError(message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Publish once when the participant is ready; facing changes go through switchCamera / AppState.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHost, localParticipant]);
+
+  // Android (and sometimes iOS) release the camera while backgrounded. Flipping cameras
+  // already recovered the stream via restartTrack — auto-do that on foreground.
+  useEffect(() => {
+    if (!isHost || !localParticipant) return;
+
+    const onChange = (next: AppStateStatus) => {
+      const prev = appStateRef.current;
+      appStateRef.current = next;
+      const wasBackground = prev === 'background' || prev === 'inactive';
+      if (next !== 'active' || !wasBackground || resumingRef.current || switching) return;
+
+      resumingRef.current = true;
+      void (async () => {
+        try {
+          console.log('[livekit] app foreground — restarting host camera', {
+            facing: facingRef.current,
+          });
+          await republishHostMedia(facingRef.current);
+          setPublishError(null);
+        } catch (err) {
+          console.warn('[livekit] foreground camera resume failed', err);
+          try {
+            await localParticipant.setCameraEnabled(false);
+            await localParticipant.setCameraEnabled(true, captureFor(facingRef.current));
+            await localParticipant.setMicrophoneEnabled(true);
+            setPublishError(null);
+          } catch (fallbackErr) {
+            const message =
+              fallbackErr instanceof Error ? fallbackErr.message : 'Camera stopped while away';
+            setPublishError(message);
+          }
+        } finally {
+          resumingRef.current = false;
+        }
+      })();
+    };
+
+    const sub = AppState.addEventListener('change', onChange);
+    return () => sub.remove();
+  }, [captureFor, isHost, localParticipant, republishHostMedia, switching]);
+
+  const switchCamera = useCallback(() => {
+    if (!isHost || !localParticipant || switching || resumingRef.current) return;
+    const next: CameraFacing = facing === 'user' ? 'environment' : 'user';
+    setSwitching(true);
+    void (async () => {
+      try {
+        await republishHostMedia(next);
         setFacing(next);
         if (videoTier !== 'legacy') {
           console.log('[live-video-profile] camera switch', {
             facing: next,
             tier: videoTier,
-            capture,
-            encoding,
+            capture: captureFor(next),
+            encoding: getLivePublishEncoding(next, videoTier),
           });
         }
       } catch (err) {
         console.warn('[livekit] switch camera failed', err);
         try {
           await localParticipant.setCameraEnabled(false);
-          await localParticipant.setCameraEnabled(true, capture);
+          await localParticipant.setCameraEnabled(true, captureFor(next));
           setFacing(next);
         } catch (fallbackErr) {
           console.warn('[livekit] switch camera fallback failed', fallbackErr);
@@ -572,10 +688,13 @@ function CameraLayer({
         setSwitching(false);
       }
     })();
-  }, [client.Track.Source.Camera, facing, isHost, localParticipant, switching, videoTier]);
+  }, [captureFor, facing, isHost, localParticipant, republishHostMedia, switching, videoTier]);
 
-  const tracks = useTracks([client.Track.Source.Camera], { onlySubscribed: !isHost });
-  const track = tracks[0];
+  const tracks = useTracks([client.Track.Source.Camera], { onlySubscribed: false });
+  const track = isHost
+    ? tracks.find((item) => item.participant.isLocal) ?? tracks[0]
+    : tracks.find((item) => !item.participant.isLocal && Boolean(item.publication?.track));
+  const remoteSeen = !isHost && tracks.some((item) => !item.participant.isLocal);
   const cameraReady = Boolean(isHost && localParticipant && track);
 
   useEffect(() => {
@@ -601,7 +720,9 @@ function CameraLayer({
             ? publishError
               ? publishError
               : 'Opening camera…'
-            : 'Waiting for host…'}
+            : remoteSeen
+              ? 'Connecting to host…'
+              : 'Waiting for host…'}
         </Text>
       </View>
     );
@@ -696,18 +817,22 @@ export function LiveCommentRow({
   onLongPress,
   showActions,
   onRemove,
+  photoUrl,
 }: {
   comment: LiveComment;
   isModerator?: boolean;
   onLongPress?: () => void;
   showActions?: boolean;
   onRemove?: () => void;
+  photoUrl?: string | null;
 }) {
   return (
     <View style={styles.commentRow}>
-      <View style={styles.commentAvatar}>
-        <UserIcon size={12} color={Palette.muted3} />
-      </View>
+      <ProfileAvatar
+        uri={photoUrl ?? comment.photoUrl}
+        username={comment.user}
+        style={styles.commentAvatar}
+      />
       <Pressable style={styles.commentBody} onLongPress={onLongPress}>
         <View style={styles.commentLine}>
           <Text style={styles.commentUser}>{comment.user}</Text>
@@ -961,6 +1086,7 @@ export function LiveHostTopBar({
   onEnd,
   onLeave,
   onModeration,
+  onShare,
 }: {
   viewers?: number;
   duration?: string;
@@ -969,6 +1095,7 @@ export function LiveHostTopBar({
   /** Leave the studio UI without ending the live session. */
   onLeave?: () => void;
   onModeration?: () => void;
+  onShare?: () => void;
 }) {
   const [watchersOpen, setWatchersOpen] = useState(false);
   return (
@@ -990,6 +1117,11 @@ export function LiveHostTopBar({
           onPressViewers={sessionId ? () => setWatchersOpen(true) : undefined}
         />
         <View style={styles.hostTopSpacer} />
+        {onShare ? (
+          <LiveIconButton onPress={onShare} accessibilityLabel="Share live">
+            <ShareIcon size={16} color={Palette.ivory} />
+          </LiveIconButton>
+        ) : null}
         {onModeration ? (
           <LiveIconButton onPress={onModeration}>
             <ShieldIcon size={16} />
@@ -1282,11 +1414,6 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: Palette.border,
-    borderWidth: 1,
-    borderColor: Palette.borderSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   commentBody: {
     flex: 1,

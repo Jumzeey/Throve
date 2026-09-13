@@ -12,12 +12,13 @@ import {
 } from '@/components/ui/icons';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
-import { useCheckout } from '@/context/checkout-context';
+import { useCheckout, type PaymentInitResult } from '@/context/checkout-context';
 import { useListings } from '@/context/listings-context';
 import { useLive } from '@/context/live-context';
 import { checkoutTotals } from '@/data/checkout';
 import { getListingImageSource } from '@/data/images';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { apiFetch, ApiError } from '@/lib/api';
 import { formatNaira } from '@/lib/format';
 import { Redirect, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -46,8 +47,12 @@ export default function PaymentScreen() {
   const draft = checkout.draft;
   const [ui, setUi] = useState<PayUiState>('ready');
   const [txRef, setTxRef] = useState<string | null>(null);
+  const [statusDetail, setStatusDetail] = useState<string | null>(null);
+  const [paymentModeLabel, setPaymentModeLabel] = useState<'simulate' | 'flutterwave' | null>(null);
+  const [charged, setCharged] = useState<PaymentInitResult['breakdown'] | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const successNavRef = useRef(false);
+  const simulateRef = useRef(false);
 
   const clearPoll = useCallback(() => {
     if (pollRef.current) {
@@ -57,6 +62,21 @@ export default function PaymentScreen() {
   }, []);
 
   useEffect(() => () => clearPoll(), [clearPoll]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const config = await apiFetch<{ mode: 'simulate' | 'flutterwave' }>('/checkout/payments/config');
+        if (!cancelled) setPaymentModeLabel(config.mode);
+      } catch {
+        /* ignore — copy falls back */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!isConnected && ui !== 'success' && ui !== 'processing' && ui !== 'opening') {
@@ -99,12 +119,19 @@ export default function PaymentScreen() {
     deliveryMethod: draft.deliveryMethod,
     listedPrice: draft.listedPrice,
   });
+  const shown = {
+    itemPrice: charged?.itemPrice ?? totals.itemPrice,
+    deliveryFee: charged?.deliveryFee ?? totals.delivery.fee,
+    protectionFee: charged?.protectionFee ?? totals.protectionFee,
+    total: charged?.total ?? totals.total,
+  };
   const deliveryLabelText =
     totals.delivery.value === 'Express' ? 'Express delivery' : 'Standard delivery';
   const actionLocked = ui === 'opening' || ui === 'processing' || ui === 'success' || ui === 'uncertain';
 
   async function finishVerify(ref: string, simulateOutcome?: 'success' | 'failed' | 'cancelled') {
     setUi('processing');
+    setStatusDetail(null);
     try {
       const result = await checkout.verifyPayment(ref, simulateOutcome);
       if (result.status === 'successful') {
@@ -113,15 +140,33 @@ export default function PaymentScreen() {
       }
       if (result.status === 'failed') {
         setUi('failed');
+        setStatusDetail('Payment was not completed. You can try again.');
         return;
       }
       if (result.status === 'cancelled') {
         setUi('cancelled');
         return;
       }
+      if (simulateRef.current) {
+        setUi('failed');
+        setStatusDetail('Simulated payment did not confirm. Please try again.');
+        return;
+      }
       setUi('uncertain');
       startPolling(ref);
-    } catch {
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Could not confirm payment.';
+      if (simulateRef.current) {
+        setUi('failed');
+        setStatusDetail(message);
+        return;
+      }
+      setStatusDetail(message);
       setUi('uncertain');
       startPolling(ref);
     }
@@ -139,7 +184,10 @@ export default function PaymentScreen() {
             clearPoll();
             const verified = await checkout.verifyPayment(ref);
             if (verified.status === 'successful') setUi('success');
-            else setUi('uncertain');
+            else {
+              setUi('uncertain');
+              setStatusDetail('Payment recorded, but order confirmation is still pending.');
+            }
             return;
           }
           if (status.status === 'failed') {
@@ -155,6 +203,7 @@ export default function PaymentScreen() {
           if (ticks >= 12) {
             clearPoll();
             setUi('uncertain');
+            setStatusDetail('Still waiting on the payment provider. You can check again or go back.');
           }
         } catch {
           /* keep polling */
@@ -166,10 +215,14 @@ export default function PaymentScreen() {
   async function startPay() {
     if (!isConnected || actionLocked) return;
     successNavRef.current = false;
+    simulateRef.current = false;
+    setStatusDetail(null);
     setUi('opening');
     try {
       const init = await checkout.initPayment();
       setTxRef(init.txRef);
+      setCharged(init.breakdown);
+      simulateRef.current = init.mode === 'simulate';
 
       if (init.mode === 'simulate') {
         setUi('processing');
@@ -180,6 +233,7 @@ export default function PaymentScreen() {
 
       if (!init.checkoutUrl) {
         setUi('failed');
+        setStatusDetail('Payment provider did not return a checkout URL.');
         return;
       }
 
@@ -189,15 +243,19 @@ export default function PaymentScreen() {
         return;
       }
       await finishVerify(init.txRef);
-    } catch {
+    } catch (err) {
       if (!isConnected) setUi('offline');
-      else setUi('failed');
+      else {
+        setUi('failed');
+        setStatusDetail(err instanceof Error ? err.message : 'Could not start payment.');
+      }
     }
   }
 
   async function retryPay() {
     clearPoll();
     setTxRef(null);
+    setStatusDetail(null);
     setUi('ready');
     await startPay();
   }
@@ -210,7 +268,7 @@ export default function PaymentScreen() {
       <ScrollView contentContainerStyle={[styles.body, { paddingBottom: Spacing.xxxl }]}>
         <View style={styles.amountBlock}>
           <Text style={styles.amountLabel}>Total to pay</Text>
-          <Text style={styles.amount}>{formatNaira(totals.total)}</Text>
+          <Text style={styles.amount}>{formatNaira(shown.total)}</Text>
         </View>
 
         <View style={styles.card}>
@@ -224,15 +282,15 @@ export default function PaymentScreen() {
             </View>
           </View>
           <View style={styles.divider} />
-          <Row label="Item price" value={formatNaira(totals.itemPrice)} />
-          <Row label="Delivery" value={formatNaira(totals.delivery.fee)} />
+          <Row label="Item price" value={formatNaira(shown.itemPrice)} />
+          <Row label="Delivery" value={formatNaira(shown.deliveryFee)} />
           <Row
             label="Buyer Protection fee"
-            value={formatNaira(totals.protectionFee)}
+            value={formatNaira(shown.protectionFee)}
             onInfoPress={() => router.push('/buyer-protection')}
           />
           <View style={styles.divider} />
-          <Row label="Total" value={formatNaira(totals.total)} bold />
+          <Row label="Total" value={formatNaira(shown.total)} bold />
         </View>
 
         {ui === 'opening' ? (
@@ -258,7 +316,10 @@ export default function PaymentScreen() {
             tone="error"
             icon={<AlertCircleIcon color={Palette.error} />}
             title="Payment wasn't completed"
-            body="Your order has not been confirmed. Your checkout details are still here."
+            body={
+              statusDetail ??
+              'Your order has not been confirmed. Your checkout details are still here.'
+            }
           />
         ) : null}
 
@@ -276,7 +337,10 @@ export default function PaymentScreen() {
             tone="warning"
             icon={<ClockIcon color={Palette.warning} />}
             title="We're confirming your payment"
-            body="This can take a short while. Please don't pay again — we'll update your order as soon as it's confirmed."
+            body={
+              statusDetail ??
+              "This can take a short while. Please don't pay again — we'll update your order as soon as it's confirmed."
+            }
           />
         ) : null}
 
@@ -293,8 +357,16 @@ export default function PaymentScreen() {
           <View style={styles.secureBox}>
             <LockIcon size={15} color={Palette.plum} />
             <View style={styles.secureCopy}>
-              <Text style={styles.secureTitle}>Secure payment with Flutterwave</Text>
-              <Text style={styles.secureBody}>You'll continue to Flutterwave's secure payment experience.</Text>
+              <Text style={styles.secureTitle}>
+                {paymentModeLabel === 'flutterwave' && !simulateRef.current
+                  ? 'Secure payment with Flutterwave'
+                  : 'Secure checkout (test mode)'}
+              </Text>
+              <Text style={styles.secureBody}>
+                {paymentModeLabel === 'flutterwave' && !simulateRef.current
+                  ? "You'll continue to Flutterwave's secure payment experience."
+                  : 'Test mode confirms payment automatically — no card charge.'}
+              </Text>
             </View>
           </View>
         ) : null}
@@ -316,7 +388,28 @@ export default function PaymentScreen() {
         ) : null}
 
         {ui === 'uncertain' ? (
-          <Button label="Continue to secure payment · unavailable" disabled />
+          <View style={styles.rowActions}>
+            <Button
+              label="Check status"
+              variant="secondary"
+              style={styles.halfBtn}
+              disabled={!isConnected || !txRef}
+              onPress={() => {
+                if (!txRef) return;
+                setUi('uncertain');
+                startPolling(txRef);
+              }}
+            />
+            <Button
+              label="Back to review"
+              variant="secondary"
+              style={styles.halfBtn}
+              onPress={() => {
+                clearPoll();
+                router.replace('/checkout/summary');
+              }}
+            />
+          </View>
         ) : null}
 
         {ui === 'offline' && txRef ? (

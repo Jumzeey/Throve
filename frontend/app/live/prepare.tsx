@@ -5,13 +5,15 @@ import { Button } from '@/components/ui/button';
 import {
   AlertCircleIcon,
   CalendarIcon,
+  CheckIcon,
   ImagePlaceholderIcon,
   MicIcon,
   PlusIcon,
-  UserIcon,
   VideoIcon,
 } from '@/components/ui/icons';
+import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { ScreenHeader } from '@/components/ui/screen-header';
+import { KeyboardSafeScreen } from '@/components/ui/keyboard-safe';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useInbox } from '@/context/inbox-context';
@@ -28,15 +30,12 @@ import {
   setLiveVideoProfileOverride,
   type LiveVideoProfileId,
 } from '@/lib/live-video-profile';
-import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
 import { useNetworkStatus } from '@/hooks/use-network-status';
-import { useScreenInsets } from '@/hooks/use-screen-insets';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  KeyboardAvoidingView,
   Linking,
   Platform,
   Pressable,
@@ -89,10 +88,8 @@ function applyTimePart(base: Date, timePart: Date) {
 
 export default function PrepareLiveScreen() {
   const router = useRouter();
-  const { sheetBottom } = useScreenInsets();
-  const keyboardScroll = useKeyboardAwareScroll();
   const { isConnected } = useNetworkStatus();
-  const { session } = useAuth();
+  const { session, publicProfiles, ensurePublicProfile } = useAuth();
   const { listingsForSeller } = useListings();
   const inbox = useInbox();
   const live = useLive();
@@ -192,6 +189,12 @@ export default function PrepareLiveScreen() {
   useEffect(() => {
     if (!isConnected) setError(null);
   }, [isConnected]);
+
+  useEffect(() => {
+    for (const mod of live.prepareModerators) {
+      void ensurePublicProfile(mod).catch(() => undefined);
+    }
+  }, [ensurePublicProfile, live.prepareModerators]);
 
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
@@ -312,21 +315,9 @@ export default function PrepareLiveScreen() {
           </Pressable>
         }
       />
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView
-          ref={keyboardScroll.scrollRef}
-          onScroll={keyboardScroll.onScroll}
-          scrollEventThrottle={16}
-          contentContainerStyle={[
-            styles.body,
-            {
-              paddingBottom: Math.max(keyboardScroll.contentPaddingBottom, sheetBottom + 24),
-            },
-          ]}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
-        >
+      <KeyboardSafeScreen contentContainerStyle={[styles.body, { paddingBottom: 24 }]}>
+        {(keyboardScroll) => (
+          <>
           {!isConnected ? (
             <OfflineBanner
               title="No connection"
@@ -396,7 +387,7 @@ export default function PrepareLiveScreen() {
               onChangeText={setDescription}
               multiline
               textAlignVertical="top"
-              onFocus={() => keyboardScroll.onFieldFocus('description')}
+              onFocus={() => keyboardScroll.onFieldFocus('description', { multiline: true })}
               style={[styles.input, styles.textArea]}
             />
           </View>
@@ -420,11 +411,28 @@ export default function PrepareLiveScreen() {
             {products.map((listing) => {
               const on = selected.includes(listing.id);
               return (
-                <Pressable key={listing.id} onPress={() => toggleProduct(listing.id)} style={styles.productTile}>
+                <Pressable
+                  key={listing.id}
+                  onPress={() => toggleProduct(listing.id)}
+                  style={styles.productTile}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ selected: on }}
+                  accessibilityLabel={`${listing.title}, ${on ? 'selected' : 'not selected'}`}
+                >
                   <View style={[styles.productThumb, on && styles.productThumbOn]}>
                     <AppImage source={getListingImageSource(listing)} style={styles.productImage} />
+                    {on ? <View style={styles.productSelectedScrim} pointerEvents="none" /> : null}
+                    {on ? (
+                      <View style={styles.productCheck}>
+                        <CheckIcon size={14} color={Palette.espresso} />
+                      </View>
+                    ) : (
+                      <View style={styles.productCheckEmpty} />
+                    )}
                   </View>
-                  <Text style={styles.productPrice}>{formatNaira(listing.price)}</Text>
+                  <Text style={[styles.productPrice, on && styles.productPriceOn]}>
+                    {formatNaira(listing.price)}
+                  </Text>
                 </Pressable>
               );
             })}
@@ -559,9 +567,11 @@ export default function PrepareLiveScreen() {
           ) : (
             moderators.map((mod) => (
               <View key={mod} style={styles.modRow}>
-                <View style={styles.modAvatar}>
-                  <UserIcon size={16} color={Palette.muted3} />
-                </View>
+                <ProfileAvatar
+                  uri={publicProfiles[mod]?.photoUri}
+                  username={mod}
+                  style={styles.modAvatar}
+                />
                 <View style={styles.modMeta}>
                   <Text style={styles.modName}>{mod}</Text>
                   <Text style={styles.modSub}>Can moderate comments and viewers</Text>
@@ -616,12 +626,13 @@ export default function PrepareLiveScreen() {
               </Text>
             ) : (
               <Text style={styles.footerHint}>
-                Viewers can claim a featured item for about 5 minutes while they check out.
+                Viewers can claim a featured item for about 3 minutes while they check out.
               </Text>
             )}
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+          </>
+        )}
+      </KeyboardSafeScreen>
 
       <ModeratorsSheet
         visible={modsOpen}
@@ -700,7 +711,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Palette.liveDark,
   },
-  flex: { flex: 1 },
   cancel: {
     fontSize: 13,
     fontFamily: Typography.bodySemiBold,
@@ -828,7 +838,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     backgroundColor: '#463038',
     borderWidth: 2,
-    borderColor: 'transparent',
+    borderColor: 'rgba(255,247,240,0.18)',
     overflow: 'hidden',
   },
   productThumbOn: {
@@ -838,12 +848,44 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  productSelectedScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(43, 33, 31, 0.28)',
+  },
+  productCheck: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    zIndex: 2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Palette.blush,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  productCheckEmpty: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    zIndex: 2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,247,240,0.7)',
+    backgroundColor: 'rgba(43, 33, 31, 0.25)',
+  },
   productPrice: {
     marginTop: 6,
     fontSize: 10.5,
     fontFamily: Typography.body,
     color: 'rgba(255,247,240,0.68)',
     fontVariant: ['tabular-nums'],
+  },
+  productPriceOn: {
+    color: Palette.blush,
+    fontFamily: Typography.bodySemiBold,
   },
   addTile: {
     width: 78,

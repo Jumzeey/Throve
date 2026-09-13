@@ -142,6 +142,114 @@ router.get('/product/:id', async (req, res) => {
 </html>`);
 });
 
+/**
+ * Public live share page — deep-links into the live viewer, not a product.
+ * Example: /share/live/:id
+ */
+router.get('/live/:id', async (req, res) => {
+  const id = String(req.params.id ?? '').trim();
+  if (!UUID_RE.test(id)) {
+    res.status(400).type('html').send(simplePage('This Throve live link is invalid.', null));
+    return;
+  }
+
+  const admin = createServiceClient();
+  const { data: session, error } = await admin
+    .from('live_sessions')
+    .select('id, title, status, thumbnail_url, host_id')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error || !session) {
+    res.status(404).type('html').send(simplePage('This live is no longer available on Throve.', null));
+    return;
+  }
+
+  let host = 'a Throve seller';
+  if (session.host_id) {
+    const { data: profile } = await admin
+      .from('profiles')
+      .select('username')
+      .eq('id', session.host_id)
+      .maybeSingle();
+    if (profile?.username) host = `@${profile.username}`;
+  }
+
+  const title = String(session.title ?? 'Live on Throve').trim() || 'Live on Throve';
+  const status = String(session.status ?? '');
+  const liveNow = status === 'live';
+  const description = liveNow
+    ? `${host} is live on Throve — tap to watch.`
+    : `${host} on Throve — ${title}`;
+  const image =
+    absoluteHttpUrl(session.thumbnail_url) ?? `${publicApiBase()}/share/static/og-default.jpg`;
+
+  const shareUrl = `${publicApiBase()}/share/live/${id}`;
+  const deepLink = `throveapp://live/${id}`;
+  const pageTitle = liveNow ? `${title} · LIVE` : title;
+  const ogTitle = liveNow ? `${title} · LIVE on Throve` : `${title} on Throve`;
+
+  const imageMeta = `
+  <meta property="og:image" content="${escapeHtml(image)}" />
+  <meta property="og:image:alt" content="${escapeHtml(title)}" />
+  <meta name="twitter:image" content="${escapeHtml(image)}" />`;
+
+  res
+    .status(200)
+    .type('html')
+    .set('Cache-Control', 'public, max-age=60')
+    .send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(pageTitle)}</title>
+  <meta name="description" content="${escapeHtml(description)}" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Throve" />
+  <meta property="og:title" content="${escapeHtml(ogTitle)}" />
+  <meta property="og:description" content="${escapeHtml(description)}" />
+  <meta property="og:url" content="${escapeHtml(shareUrl)}" />${imageMeta}
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="${escapeHtml(ogTitle)}" />
+  <meta name="twitter:description" content="${escapeHtml(description)}" />
+
+  <meta http-equiv="refresh" content="0;url=${escapeHtml(deepLink)}" />
+  <link rel="canonical" href="${escapeHtml(shareUrl)}" />
+  <style>
+    body{margin:0;padding:32px 16px;background:#1B1113;font-family:Inter,Helvetica,Arial,sans-serif;color:#FFF7F0;text-align:center}
+    .brand{font-family:Georgia,'Times New Roman',serif;font-size:28px;color:#F6C77E;margin-bottom:16px}
+    .card{max-width:420px;margin:0 auto;background:#2A1C1F;border:1px solid rgba(255,247,240,0.12);border-radius:14px;overflow:hidden;text-align:left}
+    .card img{display:block;width:100%;aspect-ratio:16/10;object-fit:cover;background:#3A2A2E}
+    .pad{padding:16px}
+    h1{margin:0 0 8px;font-size:18px;line-height:1.3}
+    .live{display:inline-block;margin:0 0 10px;padding:4px 10px;border-radius:999px;background:#E8503C;font-size:11px;font-weight:700;letter-spacing:0.8px}
+    .meta{margin:0;font-size:13px;color:#F0E2DA;line-height:1.45}
+    .cta{display:inline-block;margin-top:20px;padding:14px 28px;background:#5A1F45;color:#FFF7F0;text-decoration:none;border-radius:26px;font-weight:600}
+    .hint{margin-top:14px;font-size:12px;color:#C4B0A6}
+  </style>
+</head>
+<body>
+  <div class="brand">throve</div>
+  <div class="card">
+    <img src="${escapeHtml(image)}" alt="${escapeHtml(title)}" />
+    <div class="pad">
+      ${liveNow ? '<div class="live">LIVE</div>' : ''}
+      <h1>${escapeHtml(title)}</h1>
+      <p class="meta">${escapeHtml(description)}</p>
+    </div>
+  </div>
+  <p>
+    <a class="cta" href="${escapeHtml(deepLink)}">Open live in Throve</a>
+  </p>
+  <p class="hint">If the app doesn’t open, install Throve and tap the button again.</p>
+  <script>window.location.href = ${JSON.stringify(deepLink)};</script>
+</body>
+</html>`);
+});
+
 function simplePage(message: string, deepLink: string | null) {
   const link = deepLink
     ? `<p><a href="${escapeHtml(deepLink)}" style="color:#5A1F45;">Open Throve</a></p>`

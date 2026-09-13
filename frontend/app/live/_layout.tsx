@@ -22,7 +22,7 @@ export default function LiveStackLayout() {
   return (
     <>
       <StatusBar style="light" />
-      <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }} />
+      <Stack screenOptions={{ headerShown: false, animation: 'fade' }} />
     </>
   );
 }

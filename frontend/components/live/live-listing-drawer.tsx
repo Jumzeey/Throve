@@ -14,11 +14,13 @@ import {
   shippingRows,
 } from '@/lib/listing-display';
 import { useLiveClock } from '@/context/live-context';
+import { useKeyboardDockPadding } from '@/hooks/use-keyboard-bottom-inset';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Dimensions,
+  Keyboard,
   Modal,
   Pressable,
   ScrollView,
@@ -26,6 +28,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaFrame } from 'react-native-safe-area-context';
 
 const HERO_RATIO = 390 / 420;
 
@@ -41,7 +44,7 @@ type Props = {
   removed?: boolean;
   remainingCatalogCount?: number;
   onClose: () => void;
-  onAddToCart?: () => void;
+  onClaim?: () => void;
   onBuyNow?: () => void;
   onCheckout?: () => void;
   onBrowseCatalog?: () => void;
@@ -61,7 +64,7 @@ export function LiveListingDrawer({
   removed = false,
   remainingCatalogCount = 0,
   onClose,
-  onAddToCart,
+  onClaim,
   onBuyNow,
   onCheckout,
   onBrowseCatalog,
@@ -70,13 +73,16 @@ export function LiveListingDrawer({
 }: Props) {
   const router = useRouter();
   const { sheetBottom } = useScreenInsets();
+  const frame = useSafeAreaFrame();
+  const footerPad = useKeyboardDockPadding(16, Math.max(sheetBottom, 16));
   const now = useLiveClock();
   const [photoIndex, setPhotoIndex] = useState(0);
   const [descOpen, setDescOpen] = useState(false);
-  const maxHeight = Dimensions.get('window').height * 0.92;
+  const maxHeight = Math.min(frame.height * 0.92, Dimensions.get('window').height * 0.92);
 
   useEffect(() => {
     if (!visible) return;
+    Keyboard.dismiss();
     setPhotoIndex(0);
     setDescOpen(false);
   }, [visible, product?.id]);
@@ -132,7 +138,7 @@ export function LiveListingDrawer({
           </View>
 
           {removed || !product ? (
-            <View style={[styles.removedBox, { paddingBottom: Math.max(sheetBottom, 24) }]}>
+            <View style={[styles.removedBox, { paddingBottom: Math.max(footerPad, 24) }]}>
               <Text style={styles.removedTitle}>This item is no longer available</Text>
               <Text style={styles.removedBody}>
                 The seller removed it from this Live
@@ -217,11 +223,14 @@ export function LiveListingDrawer({
                       <View style={styles.protectRow}>
                         <ShieldCheckIcon size={16} color={Palette.plum} />
                         <Text style={styles.protectTotal}>{formatNaira(protectedTotal)}</Text>
-                        <Text style={styles.protectLabel}>incl. Buyer Protection</Text>
+                        <Text style={styles.protectLabel}>
+                          incl. Buyer Protection ({formatNaira(protection)})
+                        </Text>
                       </View>
                       <Text style={styles.protectCopy}>
-                        Covers your payment until the order completes — automatically 48 hours after delivery, or as
-                        soon as you confirm receipt.{' '}
+                        Buyer Protection is 5% of the item price (₦300 minimum, ₦2,500 maximum). It covers your payment
+                        until the order completes — automatically 48 hours after delivery, or as soon as you confirm
+                        receipt.{' '}
                         <Text
                           style={styles.learnMore}
                           onPress={() => {
@@ -278,12 +287,12 @@ export function LiveListingDrawer({
                 </View>
               </ScrollView>
 
-              <View style={[styles.footer, { paddingBottom: Math.max(sheetBottom, 16) }]}>
+              <View style={[styles.footer, { paddingBottom: footerPad }]}>
                 <DrawerFooter
                   variant={variant}
                   signedIn={signedIn}
                   claiming={claiming}
-                  onAddToCart={onAddToCart}
+                  onClaim={onClaim}
                   onBuyNow={onBuyNow}
                   onCheckout={onCheckout}
                   onSignIn={onSignIn}
@@ -308,7 +317,7 @@ function DrawerFooter({
   variant,
   signedIn,
   claiming,
-  onAddToCart,
+  onClaim,
   onBuyNow,
   onCheckout,
   onSignIn,
@@ -316,7 +325,7 @@ function DrawerFooter({
   variant: PinnedProductVariant;
   signedIn: boolean;
   claiming?: boolean;
-  onAddToCart?: () => void;
+  onClaim?: () => void;
   onBuyNow?: () => void;
   onCheckout?: () => void;
   onSignIn?: () => void;
@@ -335,20 +344,15 @@ function DrawerFooter({
     return <Button label="Complete checkout" onPress={onCheckout} style={styles.fullBtn} />;
   }
   if (variant === 'reserved') {
-    return (
-      <View style={styles.footerRow}>
-        <Button label="Add to cart" variant="secondary" disabled style={styles.halfBtn} />
-        <Button label="Reserved" disabled style={styles.buyBtn} />
-      </View>
-    );
+    return <Button label="Reserved" disabled style={styles.fullBtn} />;
   }
   return (
     <View style={styles.footerRow}>
       <Button
-        label={claiming ? 'Reserving…' : 'Add to cart'}
+        label={claiming ? 'Claiming…' : 'Claim'}
         variant="secondary"
         disabled={claiming}
-        onPress={onAddToCart}
+        onPress={onClaim}
         style={styles.halfBtn}
       />
       <Button
@@ -508,6 +512,7 @@ const styles = StyleSheet.create({
   protectRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 6,
     marginTop: 10,
   },
@@ -517,6 +522,7 @@ const styles = StyleSheet.create({
     color: Palette.espresso,
   },
   protectLabel: {
+    flexShrink: 1,
     fontSize: 12,
     fontFamily: Typography.body,
     color: Palette.muted,

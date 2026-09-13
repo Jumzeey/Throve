@@ -7,6 +7,7 @@ import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { StarRating } from '@/components/ui/star-rating';
 import { TextField } from '@/components/ui/text-field';
+import { KeyboardSafeScreen } from '@/components/ui/keyboard-safe';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
@@ -16,23 +17,13 @@ import { useLive } from '@/context/live-context';
 import { getListingImage } from '@/data/images';
 import { CANCEL_REASONS } from '@/data/seed';
 import type { Order, OrderStatus, PayoutStatus } from '@/data/types';
-import { useKeyboardAwareScroll } from '@/hooks/use-keyboard-aware-scroll';
 import { useNetworkStatus } from '@/hooks/use-network-status';
-import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { apiFetch } from '@/lib/api';
 import { formatNaira } from '@/lib/format';
 import * as Clipboard from 'expo-clipboard';
 import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 const DISPUTE_REASONS = [
   'Item not as described',
@@ -151,10 +142,8 @@ function withinDisputeWindow(deliveredAt?: string | null) {
 
 export default function CheckoutOrderScreen() {
   const router = useRouter();
-  const { bottom } = useScreenInsets();
-  const keyboardScroll = useKeyboardAwareScroll();
   const { id } = useLocalSearchParams<{ id?: string }>();
-  const { session } = useAuth();
+  const { session, publicProfiles, ensurePublicProfile } = useAuth();
   const checkout = useCheckout();
   const inbox = useInbox();
   const listings = useListings();
@@ -205,6 +194,16 @@ export default function CheckoutOrderScreen() {
     if (order?.trackingNumber) setTrackingInput(order.trackingNumber);
   }, [order?.trackingNumber]);
 
+  useEffect(() => {
+    if (!order || !session) return;
+    const other =
+      (session.userId && order.buyerId === session.userId) ||
+      order.buyer.trim().toLowerCase() === session.username.trim().toLowerCase()
+        ? order.seller
+        : order.buyer;
+    if (other) void ensurePublicProfile(other).catch(() => undefined);
+  }, [ensurePublicProfile, order, session]);
+
   const listing = order ? listings.getListing(order.listingId) : undefined;
   const listingMeta = useMemo(() => {
     if (!listing) return null;
@@ -239,8 +238,12 @@ export default function CheckoutOrderScreen() {
   }
 
   const me = session.username;
-  const isBuyer = order.buyer === me;
-  const isSeller = order.seller === me;
+  const isBuyer =
+    (session.userId && order.buyerId === session.userId) ||
+    order.buyer.trim().toLowerCase() === me.trim().toLowerCase();
+  const isSeller =
+    (session.userId && order.sellerId === session.userId) ||
+    order.seller.trim().toLowerCase() === me.trim().toLowerCase();
   const role: 'purchase' | 'sale' = isSeller && !isBuyer ? 'sale' : 'purchase';
   const chip = headerChip(order.status, role);
   const timeline = buildTimeline(order);
@@ -296,22 +299,9 @@ export default function CheckoutOrderScreen() {
   return (
     <View style={styles.screen}>
       <ScreenHeader title={isSeller && !isBuyer ? 'Sale details' : 'Order details'} onBack={() => router.back()} />
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView
-          ref={keyboardScroll.scrollRef}
-          onScroll={keyboardScroll.onScroll}
-          scrollEventThrottle={16}
-          contentContainerStyle={[
-            styles.body,
-            {
-              paddingBottom: Spacing.xxxl + Math.max(keyboardScroll.contentPaddingBottom, bottom),
-            },
-          ]}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          showsVerticalScrollIndicator={false}
-          automaticallyAdjustKeyboardInsets={keyboardScroll.automaticallyAdjustKeyboardInsets}
-        >
+      <KeyboardSafeScreen contentContainerStyle={styles.body}>
+        {(keyboardScroll) => (
+          <>
           {!isConnected ? (
             <OfflineBanner title="No connection" message="Reconnect to update this order." />
           ) : null}
@@ -335,7 +325,11 @@ export default function CheckoutOrderScreen() {
           </View>
 
           <View style={styles.personRow}>
-            <ProfileAvatar username={counterpart} style={styles.avatar} />
+            <ProfileAvatar
+              uri={publicProfiles[counterpart]?.photoUri}
+              username={counterpart}
+              style={styles.avatar}
+            />
             <View style={styles.personCopy}>
               <Text style={styles.personName}>{counterpart}</Text>
               <Text style={styles.personRole}>{isBuyer ? 'Seller' : 'Buyer'}</Text>
@@ -726,8 +720,9 @@ export default function CheckoutOrderScreen() {
           {liveSession?.status === 'live' && order.fromLiveId ? (
             <Button label="Return to live" variant="live" onPress={() => router.replace(`/live/${order.fromLiveId}`)} />
           ) : null}
-        </ScrollView>
-      </KeyboardAvoidingView>
+          </>
+        )}
+      </KeyboardSafeScreen>
     </View>
   );
 }

@@ -36,7 +36,9 @@ export function FeaturedLiveCard({
         <Text style={styles.emptyBody}>
           {itemCount > 0
             ? `Browse the ${itemCount} item${itemCount === 1 ? '' : 's'} in this Live.`
-            : 'Browse the items in this Live.'}
+            : actionLabel === 'Add product'
+              ? 'Add a listing from your shop to feature it live.'
+              : 'Browse the items in this Live.'}
         </Text>
       </Pressable>
     );

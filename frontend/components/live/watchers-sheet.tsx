@@ -4,6 +4,7 @@ import { useAuth } from '@/context/auth-context';
 import { useLive, type LiveWatcher } from '@/context/live-context';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { useRouter } from 'expo-router';
+import { useEffect } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 type Props = {
@@ -21,7 +22,7 @@ function roleLabel(role: LiveWatcher['role']) {
 export function LiveWatchersSheet({ visible, sessionId, onClose }: Props) {
   const router = useRouter();
   const { sheetBottom } = useScreenInsets();
-  const { session } = useAuth();
+  const { session, publicProfiles, ensurePublicProfile } = useAuth();
   const live = useLive();
   const watchers = live.getWatchers(sessionId);
   const guestCount = watchers.filter((watcher) => watcher.role !== 'host').length;
@@ -33,6 +34,15 @@ export function LiveWatchersSheet({ visible, sessionId, onClose }: Props) {
         : guestCount === 1
           ? '1 viewer in this live.'
           : `${guestCount} viewers in this live.`;
+
+  useEffect(() => {
+    if (!visible) return;
+    for (const watcher of watchers) {
+      if (watcher.username && watcher.username !== 'Viewer') {
+        void ensurePublicProfile(watcher.username).catch(() => undefined);
+      }
+    }
+  }, [ensurePublicProfile, visible, watchers]);
 
   function openProfile(username: string) {
     if (!username || username === 'Viewer') {
@@ -74,6 +84,10 @@ export function LiveWatchersSheet({ visible, sessionId, onClose }: Props) {
                   Boolean(session?.username) &&
                   watcher.username.toLowerCase() === session?.username.toLowerCase();
                 const chip = roleLabel(watcher.role);
+                const photoUri =
+                  watcher.photoUrl ||
+                  publicProfiles[watcher.username]?.photoUri ||
+                  (isYou ? session?.photoUri : undefined);
                 return (
                   <Pressable
                     key={watcher.key}
@@ -82,7 +96,7 @@ export function LiveWatchersSheet({ visible, sessionId, onClose }: Props) {
                     accessibilityRole="button"
                     accessibilityLabel={`@${watcher.username}`}
                   >
-                    <ProfileAvatar uri={watcher.photoUrl} username={watcher.username} style={styles.avatar} />
+                    <ProfileAvatar uri={photoUri} username={watcher.username} style={styles.avatar} />
                     <View style={styles.meta}>
                       <Text style={styles.name} numberOfLines={1}>
                         @{watcher.username}

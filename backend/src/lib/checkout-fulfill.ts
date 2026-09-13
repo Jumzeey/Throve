@@ -24,9 +24,17 @@ export type CheckoutPayload = {
 };
 
 export function paymentMode(): 'flutterwave' | 'simulate' {
-  if (process.env.PAYMENT_MODE === 'simulate') return 'simulate';
-  if (process.env.PAYMENT_MODE === 'flutterwave') return 'flutterwave';
-  return process.env.FLW_SECRET_KEY ? 'flutterwave' : 'simulate';
+  // Explicit flutterwave only — presence of FLW_* keys alone must not flip test builds
+  // into a live provider path that leaves buyers stuck on "confirming payment".
+  if (process.env.PAYMENT_MODE === 'flutterwave' && process.env.FLW_SECRET_KEY?.trim()) {
+    return 'flutterwave';
+  }
+  return 'simulate';
+}
+
+export function newOrderId() {
+  // Full UUID entropy — never derive from buyer-visible order counts (RLS collisions).
+  return `ORD${randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}`;
 }
 
 export function computeCheckoutAmounts(itemPrice: number, deliveryMethod: 'Standard' | 'Express') {
@@ -102,27 +110,37 @@ export async function fulfillPaidCheckout(
   const resolved = await resolveItemPrice(supabase, userId, payload, listing.price);
   let { itemPrice, listedPrice, offerId, claimId, liveStreamProductId } = resolved;
 
+  const { deliveryFee, protectionFee, total } = computeCheckoutAmounts(itemPrice, payload.deliveryMethod);
+  // Always write via service role: buyer-scoped RLS count made every buyer mint ORD1001
+  // and collide, which left verify failing into the permanent "confirming payment" UI.
+  const service = createServiceClient();
+  const orderId = newOrderId();
+
   if (!claimId) {
     if (listing.status === 'sold') throw Object.assign(new Error('Listing unavailable'), { status: 400 });
-    await supabase.from('listings').update({ status: 'sold' }).eq('id', listing.id);
+    const { data: soldRow, error: soldError } = await service
+      .from('listings')
+      .update({ status: 'sold' })
+      .eq('id', listing.id)
+      .neq('status', 'sold')
+      .select('id')
+      .maybeSingle();
+    if (soldError) throw soldError;
+    if (!soldRow) throw Object.assign(new Error('Listing unavailable'), { status: 400 });
   }
 
   if (liveStreamProductId) {
-    const { data: product } = await supabase
+    const { data: product } = await service
       .from('live_stream_products')
       .select('*')
       .eq('id', liveStreamProductId)
       .maybeSingle();
     if (product && product.sold_count + product.reserved_count >= product.stock && product.sold_count >= product.stock) {
-      await supabase.from('listings').update({ status: 'sold' }).eq('id', listing.id);
+      await service.from('listings').update({ status: 'sold' }).eq('id', listing.id);
     }
   }
 
-  const { deliveryFee, protectionFee, total } = computeCheckoutAmounts(itemPrice, payload.deliveryMethod);
-  const { count } = await supabase.from('orders').select('*', { count: 'exact', head: true });
-  const orderId = `ORD${1001 + (count ?? 0)}`;
-
-  const { data, error } = await supabase
+  const { data, error } = await service
     .from('orders')
     .insert({
       id: orderId,

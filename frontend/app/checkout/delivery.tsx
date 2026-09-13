@@ -9,6 +9,7 @@ import { useListings } from '@/context/listings-context';
 import { DELIVERY_OPTIONS, getDeliveryOption } from '@/data/checkout';
 import type { DeliveryMethod } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
+import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatNaira } from '@/lib/format';
 import { Redirect, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -21,8 +22,10 @@ export default function DeliveryMethodScreen() {
   const { getListing } = useListings();
   const checkout = useCheckout();
   const { isConnected } = useNetworkStatus();
+  const { sheetBottom } = useScreenInsets();
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [footerHeight, setFooterHeight] = useState(120);
   const draft = checkout.draft;
 
   useEffect(() => {
@@ -78,7 +81,7 @@ export default function DeliveryMethodScreen() {
       <ScreenHeader title="Checkout" onBack={() => router.back()} />
       <CheckoutProgress step={2} />
 
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: 140 }]}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: footerHeight + 16 }]}>
         {!isConnected ? (
           <OfflineBanner title="No connection" message="Reconnect to continue checkout." />
         ) : null}
@@ -126,7 +129,10 @@ export default function DeliveryMethodScreen() {
         <Text style={styles.note}>One delivery method applies to the order.</Text>
       </ScrollView>
 
-      <View style={[styles.footer, styles.footerPad]}>
+      <View
+        style={[styles.footer, { paddingBottom: Math.max(sheetBottom, 16) }]}
+        onLayout={(event) => setFooterHeight(event.nativeEvent.layout.height)}
+      >
         <View style={styles.footerRow}>
           <Text style={styles.footerLabel}>Delivery</Text>
           <Text style={styles.footerValue}>{deliveryFee != null ? formatNaira(deliveryFee) : '—'}</Text>
@@ -251,9 +257,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xl,
     paddingTop: 12,
     gap: 10,
-  },
-  footerPad: {
-    paddingBottom: 16,
   },
   footerRow: {
     flexDirection: 'row',
