@@ -19,7 +19,7 @@ import {
 import { mapLiveClaim, mapLiveSession, mapLiveStreamProduct } from '../lib/live-mappers.js';
 import { createSessionMediaCredentials, configuredMediaProvider } from '../lib/live-media.js';
 import { ensureIvsChannelForSession, isIvsConfigured } from '../lib/ivs.js';
-import { getProfileById, mapListing } from '../lib/mappers.js';
+import { getProfileById, mapListing, publicPhotoUrl } from '../lib/mappers.js';
 import { notifyUser } from '../lib/notify.js';
 import { createServiceClient, createSupabaseClient } from '../lib/supabase.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
@@ -1049,7 +1049,7 @@ router.get('/sessions/:id/comments', optionalAuth, async (req, res) => {
         user: user?.username ?? 'unknown',
         text: row.text,
         clientId: row.client_id ?? undefined,
-        photoUrl: user?.photoUri ?? undefined,
+        photoUrl: publicPhotoUrl(user?.photo_url) ?? undefined,
       };
     }),
   );
@@ -1081,7 +1081,7 @@ router.post('/sessions/:id/comments', requireAuth, async (req, res) => {
     user: user?.username ?? 'unknown',
     text: data.text,
     clientId: data.client_id ?? undefined,
-    photoUrl: user?.photoUri ?? undefined,
+    photoUrl: publicPhotoUrl(user?.photo_url) ?? undefined,
   });
 });
 
