@@ -167,7 +167,15 @@ export default function ProfileScreen() {
           <MenuRow
             icon={<ListingsIcon />}
             label="My listings"
-            hint={String(mine.filter((i) => i.status !== 'draft' && i.status !== 'removed').length)}
+            hint={(() => {
+              const pending = mine.filter((i) => i.status === 'pending_review').length;
+              const needsChanges = mine.filter((i) => i.status === 'rejected').length;
+              const active = mine.filter((i) => i.status === 'available' || i.status === 'reserved').length;
+              const parts = [`${active} live`];
+              if (pending) parts.push(`${pending} review`);
+              if (needsChanges) parts.push(`${needsChanges} changes`);
+              return parts.join(' · ');
+            })()}
             onPress={() => router.push('/(tabs)/sell')}
           />
           <MenuRow

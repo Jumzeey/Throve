@@ -134,7 +134,7 @@ export function Sidebar() {
         <div className="mt-0.5 text-[10.5px] text-gold">{roleLabel(session.role)}</div>
         <button
           type="button"
-          onClick={signOut}
+          onClick={() => void signOut()}
           className="mt-3 text-[11.5px] font-semibold text-gold hover:text-[#c99545]"
         >
           Sign out

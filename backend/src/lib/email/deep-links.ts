@@ -30,6 +30,7 @@ export const deepLinks = {
   order: (id: string) => emailOpenLink(`checkout/order?id=${encodeURIComponent(id)}`),
   ordersList: () => emailOpenLink('profile/orders'),
   product: (id: string) => emailOpenLink(`product/${id}`),
+  sellManage: (id: string) => emailOpenLink(`sell/${id}`),
   live: (id: string) => emailOpenLink(`live/${id}`),
   liveList: () => emailOpenLink('live'),
   settings: () => emailOpenLink('profile/settings'),

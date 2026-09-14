@@ -37,6 +37,7 @@ type ListingsContextValue = {
   loadFormFromListing: (listing: Listing) => void;
   saveDraft: (seller: string) => Promise<Listing>;
   publish: (seller: string) => Promise<Listing | null>;
+  resubmit: (id: string) => Promise<Listing>;
   updateListing: (id: string, patch: Partial<Listing>) => Promise<void>;
   setStatus: (id: string, status: ListingStatus) => Promise<void>;
   clearReservation: (id: string) => Promise<void>;
@@ -250,6 +251,12 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
     [form, saveDraft],
   );
 
+  const resubmit = useCallback(async (id: string) => {
+    const listing = await apiFetch<Listing>(`/listings/${id}/resubmit`, { method: 'POST' });
+    setListings((current) => current.map((item) => (item.id === id ? listing : item)));
+    return listing;
+  }, []);
+
   const updateListing = useCallback(async (id: string, patch: Partial<Listing>) => {
     const listing = await apiFetch<Listing>(`/listings/${id}`, {
       method: 'PUT',
@@ -376,6 +383,7 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
       loadFormFromListing,
       saveDraft,
       publish,
+      resubmit,
       updateListing,
       setStatus,
       clearReservation,
@@ -402,6 +410,7 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
       refresh,
       removeListing,
       resetForm,
+      resubmit,
       saveDraft,
       savedListings,
       savedListingsFor,

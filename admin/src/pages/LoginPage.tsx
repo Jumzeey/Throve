@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/auth/AuthContext';
 import { FilterChips } from '@/components/admin/filter-chips';
@@ -19,64 +19,76 @@ const DEMO_ROLES: { role: AdminRole; name: string; email: string }[] = [
   { role: 'finance', name: 'A. Okoro', email: 'finance@throve.store' },
 ];
 
-type GateState = 'form' | 'verifying' | 'authorized' | 'unauthorized' | 'revoked' | 'expired' | 'offline';
+type GateState = 'form' | 'verifying' | 'unauthorized' | 'revoked' | 'expired' | 'offline' | 'demo';
 
 export function LoginPage() {
-  const { session, signIn } = useAuth();
-  const [email, setEmail] = useState('okafor@throve.store');
-  const [password, setPassword] = useState('••••••••');
-  const [role, setRole] = useState<AdminRole>('super_admin');
+  const { session, loading, signInWithPassword, signInDemo } = useAuth();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [demoRole, setDemoRole] = useState<AdminRole>('super_admin');
   const [error, setError] = useState<string | null>(null);
   const [gate, setGate] = useState<GateState>('form');
+  const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    if (gate !== 'verifying') return;
-    const id = window.setTimeout(() => {
-      setGate('authorized');
-      const demo = DEMO_ROLES.find((d) => d.role === role)!;
-      signIn({ email: email.trim() || demo.email, name: demo.name, role });
-    }, 900);
-    return () => window.clearTimeout(id);
-  }, [gate, role, email, signIn]);
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-ground text-[12.5px] text-muted">
+        <Loader2 className="mr-2 size-4 animate-spin text-plum" />
+        Checking staff session…
+      </div>
+    );
+  }
 
-  if (session && gate !== 'verifying') return <Navigate to="/" replace />;
+  if (session) return <Navigate to="/" replace />;
 
-  function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (gate === 'offline') {
       setError('Reconnect before signing in.');
       return;
     }
-    if (gate === 'unauthorized' || gate === 'revoked' || gate === 'expired') {
-      return;
-    }
+    if (gate === 'unauthorized' || gate === 'revoked') return;
     if (!email.trim() || !password.trim()) {
       setError('Enter your staff email and password.');
       return;
     }
     setError(null);
+    setSubmitting(true);
     setGate('verifying');
+    try {
+      await signInWithPassword({ email, password });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not sign in';
+      if (/not staff|admin_role|not provisioned/i.test(message)) {
+        setGate('unauthorized');
+      } else {
+        setGate('form');
+        setError(message);
+      }
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-ground px-4 py-10">
       <div className="mb-4 w-full max-w-[420px]">
         <div className="mb-2 text-[10px] font-semibold tracking-[0.14em] text-muted-2 uppercase">
-          A01 access-gate preview (mock)
+          A01 access gate
         </div>
         <FilterChips
-          value={gate === 'authorized' ? 'form' : gate}
+          value={gate === 'verifying' ? 'form' : gate}
           onChange={(id) => {
             setError(null);
             setGate(id as GateState);
           }}
           options={[
             { id: 'form', label: 'Ready' },
-            { id: 'verifying', label: 'Verifying' },
             { id: 'unauthorized', label: 'Unauthorized' },
             { id: 'revoked', label: 'Revoked' },
             { id: 'expired', label: 'Expired' },
             { id: 'offline', label: 'Offline' },
+            { id: 'demo', label: 'Demo UI' },
           ]}
         />
       </div>
@@ -89,13 +101,13 @@ export function LoginPage() {
             Sign in to continue
           </CardTitle>
           <CardDescription className="text-[13px] leading-relaxed text-body">
-            Protected staff access only. Navigation and actions follow least privilege for your role.
+            Staff accounts only. Navigation and actions follow least privilege for your role.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {gate === 'offline' ? <OfflineBanner onRetry={() => setGate('form')} /> : null}
 
-          {gate === 'verifying' ? (
+          {gate === 'verifying' || submitting ? (
             <div className="flex flex-col items-center gap-2 py-8 text-[12.5px] text-muted">
               <Loader2 className="size-5 animate-spin text-plum" />
               Verifying staff credentials…
@@ -123,44 +135,19 @@ export function LoginPage() {
             </Alert>
           ) : null}
 
-          {gate === 'form' || gate === 'expired' || gate === 'offline' ? (
-            <form className="flex flex-col gap-3" onSubmit={onSubmit}>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="email" className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-2">
-                  Staff email
-                </Label>
-                <Input
-                  id="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="bg-panel-elevated"
-                  disabled={gate === 'offline'}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="password" className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-2">
-                  Password
-                </Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="bg-panel-elevated"
-                  disabled={gate === 'offline'}
-                />
-              </div>
+          {gate === 'demo' ? (
+            <div className="flex flex-col gap-3">
+              <Alert className="border-border-soft bg-[#f3ede6]">
+                <AlertTitle className="text-[12px]">Demo mode</AlertTitle>
+                <AlertDescription className="text-[11.5px] text-muted">
+                  Offline UI only — no live approve/reject. Use Ready for real staff login.
+                </AlertDescription>
+              </Alert>
               <div className="flex flex-col gap-1.5">
                 <Label className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-2">Demo role</Label>
                 <Select
-                  value={role}
-                  onValueChange={(value) => {
-                    const next = value as AdminRole;
-                    setRole(next);
-                    const demo = DEMO_ROLES.find((d) => d.role === next)!;
-                    setEmail(demo.email);
-                  }}
-                  disabled={gate === 'offline'}
+                  value={demoRole}
+                  onValueChange={(value) => setDemoRole(value as AdminRole)}
                 >
                   <SelectTrigger className="w-full bg-panel-elevated">
                     <SelectValue />
@@ -174,13 +161,56 @@ export function LoginPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <Button
+                type="button"
+                className="w-full"
+                onClick={() => {
+                  const demo = DEMO_ROLES.find((d) => d.role === demoRole)!;
+                  signInDemo({ email: demo.email, name: demo.name, role: demo.role });
+                }}
+              >
+                Enter demo console
+              </Button>
+            </div>
+          ) : null}
+
+          {gate === 'form' || gate === 'expired' || gate === 'offline' ? (
+            <form className="flex flex-col gap-3" onSubmit={onSubmit}>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="email" className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-2">
+                  Staff email
+                </Label>
+                <Input
+                  id="email"
+                  type="email"
+                  autoComplete="username"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="bg-panel-elevated"
+                  disabled={gate === 'offline'}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="password" className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-2">
+                  Password
+                </Label>
+                <Input
+                  id="password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="bg-panel-elevated"
+                  disabled={gate === 'offline'}
+                />
+              </div>
               {error ? (
                 <Alert variant="destructive">
                   <AlertTitle>Could not sign in</AlertTitle>
                   <AlertDescription>{error}</AlertDescription>
                 </Alert>
               ) : null}
-              <Button type="submit" className="mt-1 w-full" disabled={gate === 'offline'}>
+              <Button type="submit" className="mt-1 w-full" disabled={gate === 'offline' || submitting}>
                 Sign in
               </Button>
             </form>
@@ -193,7 +223,8 @@ export function LoginPage() {
           )}
 
           <p className="mt-2 text-[11px] leading-relaxed text-muted">
-            Mock auth for UI prototype — no backend call. Use the gate chips above to preview A01 states.
+            Live auth via Supabase. Staff need a non-null <span className="font-mono">admin_role</span> on their
+            profile. Use Demo UI only for offline layout checks.
           </p>
         </CardContent>
       </Card>

@@ -2,15 +2,53 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { handleSupabaseError, sendError } from '../lib/errors.js';
 import type { DbRow } from '../lib/db-types.js';
-import { listingPublishedEmail, listingReservedEmail } from '../lib/email/templates/listings.js';
-import { notifyFollowersOfListing } from '../lib/follows.js';
+import { listingReservedEmail, listingSubmittedForReviewEmail } from '../lib/email/templates/listings.js';
 import { notifySavedListingWatchers } from '../lib/saved-listing-alerts.js';
 import { getProfileById, getSellerCards, getSellerMap, mapListing, escapeIlike } from '../lib/mappers.js';
 import { LISTING_CATALOG, categoriesForDepartment, shippingSummary, sizeIsRequiredForProductType } from '../lib/listing-catalog.js';
 import { notifyUser } from '../lib/notify.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
+import { createServiceClient } from '../lib/supabase.js';
 
 const router = Router();
+
+function validateListingForSubmit(existing: DbRow) {
+  if (!existing.title || !existing.category || !existing.condition || Number(existing.price) <= 0) {
+    return 'Listing is missing required fields';
+  }
+  const photos = (existing.photo_urls as string[] | null | undefined) ?? [];
+  if (photos.length < 1) {
+    return 'Add at least one photo before publishing';
+  }
+  const allowed = categoriesForDepartment(String(existing.department));
+  if (!allowed.includes(String(existing.category))) {
+    return 'Category is not valid for this department';
+  }
+  const size = String(existing.size ?? '').trim();
+  if (sizeIsRequiredForProductType(String(existing.category)) && (!size || size === '—')) {
+    return 'Size is required for this category';
+  }
+  return null;
+}
+
+async function recordReviewEvent(
+  listingId: string,
+  actorId: string | null,
+  action: 'submitted' | 'resubmitted' | 'approved' | 'rejected',
+  reason?: string | null,
+) {
+  try {
+    const service = createServiceClient();
+    await service.from('listing_review_events').insert({
+      listing_id: listingId,
+      actor_id: actorId,
+      action,
+      reason: reason ?? null,
+    });
+  } catch (err) {
+    console.warn('[listings] review event failed', err instanceof Error ? err.message : err);
+  }
+}
 
 async function enrichListings(supabase: ReturnType<typeof import('../lib/supabase.js').createSupabaseClient>, rows: any[], userId?: string) {
   const sellerMap = await getSellerMap(
@@ -40,7 +78,14 @@ router.get('/', optionalAuth, async (req, res) => {
   const supabase = (req as AuthedRequest).supabase ?? (await import('../lib/supabase.js')).createSupabaseClient();
   const userId = (req as AuthedRequest).userId;
 
-  let query = supabase.from('listings').select('*').neq('status', 'draft').neq('status', 'hidden').neq('status', 'removed');
+  let query = supabase
+    .from('listings')
+    .select('*')
+    .neq('status', 'draft')
+    .neq('status', 'hidden')
+    .neq('status', 'removed')
+    .neq('status', 'pending_review')
+    .neq('status', 'rejected');
 
   const { department, category, brand, condition, sort } = req.query;
   if (department) query = query.eq('department', String(department));
@@ -254,7 +299,10 @@ router.get('/seller/:username', optionalAuth, async (req, res) => {
     .select('*')
     .eq('seller_id', seller.id)
     .neq('status', 'draft')
-    .neq('status', 'removed');
+    .neq('status', 'removed')
+    .neq('status', 'pending_review')
+    .neq('status', 'rejected')
+    .neq('status', 'hidden');
   if (error) return handleSupabaseError(res, error);
 
   const listings = await enrichListings(supabase, data ?? [], userId);
@@ -272,6 +320,19 @@ router.get('/:id', optionalAuth, async (req, res) => {
   const { data, error } = await supabase.from('listings').select('*').eq('id', req.params.id).maybeSingle();
   if (error) return handleSupabaseError(res, error);
   if (!data) return sendError(res, 404, 'Listing not found');
+
+  const status = String(data.status);
+  const isOwner = Boolean(userId && data.seller_id === userId);
+  if (
+    !isOwner &&
+    (status === 'draft' ||
+      status === 'pending_review' ||
+      status === 'rejected' ||
+      status === 'hidden' ||
+      status === 'removed')
+  ) {
+    return sendError(res, 404, 'Listing not found');
+  }
 
   const [listing] = await enrichListings(supabase, [data], userId);
   return res.json(listing);
@@ -370,25 +431,25 @@ router.post('/:id/publish', requireAuth, async (req, res) => {
 
   if (existingError) return handleSupabaseError(res, existingError);
   if (!existing) return sendError(res, 404, 'Listing not found');
-  if (!existing.title || !existing.category || !existing.condition || existing.price <= 0) {
-    return sendError(res, 400, 'Listing is missing required fields');
-  }
-  if ((existing.photo_urls ?? []).length < 1) {
-    return sendError(res, 400, 'Add at least one photo before publishing');
-  }
-  const allowed = categoriesForDepartment(String(existing.department));
-  if (!allowed.includes(String(existing.category))) {
-    return sendError(res, 400, 'Category is not valid for this department');
-  }
-  const size = String(existing.size ?? '').trim();
-  if (sizeIsRequiredForProductType(String(existing.category)) && (!size || size === '—')) {
-    return sendError(res, 400, 'Size is required for this category');
+  if (!['draft', 'rejected'].includes(String(existing.status))) {
+    return sendError(res, 400, 'Only draft or rejected listings can be submitted for review');
   }
 
+  const validationError = validateListingForSubmit(existing);
+  if (validationError) return sendError(res, 400, validationError);
+
+  const now = new Date().toISOString();
   const { data, error } = await supabase
     .from('listings')
-    .update({ status: 'available' })
+    .update({
+      status: 'pending_review',
+      review_submitted_at: now,
+      review_reason: null,
+      reviewed_at: null,
+      reviewed_by: null,
+    })
     .eq('id', req.params.id)
+    .eq('seller_id', userId)
     .select('*')
     .single();
 
@@ -396,33 +457,79 @@ router.post('/:id/publish', requireAuth, async (req, res) => {
   const profile = await getProfileById(supabase, userId);
   const sellerUsername = profile?.username ?? 'unknown';
 
+  void recordReviewEvent(data.id, userId, existing.status === 'rejected' ? 'resubmitted' : 'submitted');
+
   void notifyUser({
     userId,
     category: 'account',
-    type: 'listing_published',
-    title: 'Listing published',
+    type: 'listing_submitted_for_review',
+    title: 'Listing under review',
     body: data.title,
-    deepLink: `product/${data.id}`,
+    deepLink: `sell/${data.id}`,
     data: { listingId: data.id },
-    email: listingPublishedEmail({
+    email: listingSubmittedForReviewEmail({
       listingId: data.id,
       title: data.title,
     }),
     skipPush: true,
   });
 
-  void notifyFollowersOfListing({
-    sellerId: userId,
-    sellerUsername,
-    listingId: data.id,
-    listingTitle: data.title,
-    price: Number(data.price) || 0,
-    brand: data.brand ? String(data.brand) : undefined,
-    size: data.size ? String(data.size) : undefined,
-    condition: data.condition ? String(data.condition) : undefined,
-    photoUrl: Array.isArray(data.photo_urls) ? data.photo_urls[0] : undefined,
-  }).catch((err) => {
-    console.warn('[listings] follower notify failed', err instanceof Error ? err.message : err);
+  return res.json(mapListing(data, sellerUsername));
+});
+
+router.post('/:id/resubmit', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+
+  const { data: existing, error: existingError } = await supabase
+    .from('listings')
+    .select('*')
+    .eq('id', req.params.id)
+    .eq('seller_id', userId)
+    .maybeSingle();
+
+  if (existingError) return handleSupabaseError(res, existingError);
+  if (!existing) return sendError(res, 404, 'Listing not found');
+  if (String(existing.status) !== 'rejected') {
+    return sendError(res, 400, 'Only rejected listings can be resubmitted');
+  }
+
+  const validationError = validateListingForSubmit(existing);
+  if (validationError) return sendError(res, 400, validationError);
+
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from('listings')
+    .update({
+      status: 'pending_review',
+      review_submitted_at: now,
+      review_reason: null,
+      reviewed_at: null,
+      reviewed_by: null,
+    })
+    .eq('id', req.params.id)
+    .eq('seller_id', userId)
+    .select('*')
+    .single();
+
+  if (error) return handleSupabaseError(res, error);
+  const profile = await getProfileById(supabase, userId);
+  const sellerUsername = profile?.username ?? 'unknown';
+
+  void recordReviewEvent(data.id, userId, 'resubmitted');
+
+  void notifyUser({
+    userId,
+    category: 'account',
+    type: 'listing_submitted_for_review',
+    title: 'Listing under review',
+    body: data.title,
+    deepLink: `sell/${data.id}`,
+    data: { listingId: data.id },
+    email: listingSubmittedForReviewEmail({
+      listingId: data.id,
+      title: data.title,
+    }),
+    skipPush: true,
   });
 
   return res.json(mapListing(data, sellerUsername));

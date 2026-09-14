@@ -16,7 +16,7 @@ export function Panel({
       {title ? (
         <CardHeader className="border-b border-divider px-4 py-3">
           <CardTitle className="font-display text-[18px] font-normal text-espresso">{title}</CardTitle>
-          {subtitle ? <CardDescription className="text-[11.5px] text-muted">{subtitle}</CardDescription> : null}
+          {subtitle ? <CardDescription className="text-[12px] leading-snug text-body">{subtitle}</CardDescription> : null}
         </CardHeader>
       ) : null}
       <CardContent className={title ? 'p-4' : 'p-4 pt-4'}>{children}</CardContent>

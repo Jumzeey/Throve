@@ -5,10 +5,34 @@ export function listingPublishedEmail(input: { listingId: string; title: string 
   const link = deepLinks.product(input.listingId);
   return buildEmail({
     subject: truncateSubject('Listing is live'),
-    title: 'Listing published',
+    title: 'Listing approved',
     bodyHtml: `<strong style="color:#2B211F;">${escapeHtml(input.title)}</strong> is now live on Throve. Shoppers can find and buy it.`,
     bodyText: `${input.title} is now live on Throve.`,
     ctaLabel: 'View listing',
+    actionLink: link,
+  });
+}
+
+export function listingSubmittedForReviewEmail(input: { listingId: string; title: string }): EmailContent {
+  const link = deepLinks.sellManage(input.listingId);
+  return buildEmail({
+    subject: truncateSubject('Listing submitted for review'),
+    title: 'Under review',
+    bodyHtml: `<strong style="color:#2B211F;">${escapeHtml(input.title)}</strong> was submitted and is awaiting Trust &amp; Safety review before it goes live.`,
+    bodyText: `${input.title} was submitted and is awaiting review before it goes live.`,
+    ctaLabel: 'Track status',
+    actionLink: link,
+  });
+}
+
+export function listingRejectedEmail(input: { listingId: string; title: string; reason: string }): EmailContent {
+  const link = deepLinks.sellManage(input.listingId);
+  return buildEmail({
+    subject: truncateSubject('Listing needs changes'),
+    title: 'Needs changes',
+    bodyHtml: `<strong style="color:#2B211F;">${escapeHtml(input.title)}</strong> was not approved.<br /><br /><strong style="color:#2B211F;">Reason:</strong> ${escapeHtml(input.reason)}<br /><br />Edit the listing and resubmit for review.`,
+    bodyText: `${input.title} was not approved. Reason: ${input.reason}. Edit and resubmit for review.`,
+    ctaLabel: 'Edit listing',
     actionLink: link,
   });
 }

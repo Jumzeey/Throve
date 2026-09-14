@@ -27,6 +27,12 @@ export function listingStatusStyle(status: ListingStatus) {
   if (status === 'hidden') {
     return { backgroundColor: Palette.chipBg, color: Palette.muted3, label: 'Hidden' };
   }
+  if (status === 'pending_review') {
+    return { backgroundColor: Palette.warningBg, color: Palette.warningText, label: 'Under review' };
+  }
+  if (status === 'rejected') {
+    return { backgroundColor: Palette.errorBg, color: Palette.errorText, label: 'Needs changes' };
+  }
   return { backgroundColor: Palette.accent100, color: Palette.accent700, label: 'Available' };
 }
 

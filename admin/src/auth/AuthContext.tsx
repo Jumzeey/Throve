@@ -1,47 +1,121 @@
 import type { AdminRole } from '../lib/roles';
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { apiFetch } from '../lib/api';
 import { ROLE_LABELS } from '../lib/roles';
+import { supabase } from '../lib/supabase';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 export type StaffSession = {
+  userId: string;
   email: string;
   name: string;
   role: AdminRole;
+  accessToken: string;
 };
 
 type AuthContextValue = {
   session: StaffSession | null;
-  signIn: (input: { email: string; name: string; role: AdminRole }) => void;
-  signOut: () => void;
+  loading: boolean;
+  signInWithPassword: (input: { email: string; password: string }) => Promise<void>;
+  /** Prototype fallback when Supabase env is missing. */
+  signInDemo: (input: { email: string; name: string; role: AdminRole }) => void;
+  signOut: () => Promise<void>;
 };
 
-const STORAGE_KEY = 'throve-admin-session';
+type ProfileMe = {
+  userId: string;
+  email: string;
+  name: string;
+  adminRole?: AdminRole | null;
+};
+
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function readSession(): StaffSession | null {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as StaffSession;
-  } catch {
-    return null;
+async function loadStaffSession(): Promise<StaffSession | null> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  const user = data.session?.user;
+  if (!token || !user) return null;
+
+  const profile = await apiFetch<ProfileMe>('/profiles/me');
+  if (!profile.adminRole) {
+    await supabase.auth.signOut();
+    throw new Error('This account is not staff. Ask a Super Admin to grant admin_role.');
   }
+
+  return {
+    userId: profile.userId,
+    email: profile.email,
+    name: profile.name || profile.email,
+    role: profile.adminRole,
+    accessToken: token,
+  };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<StaffSession | null>(() => readSession());
+  const [session, setSession] = useState<StaffSession | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const signIn = useCallback((input: { email: string; name: string; role: AdminRole }) => {
-    const next = { email: input.email.trim().toLowerCase(), name: input.name.trim(), role: input.role };
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const next = await loadStaffSession();
+        if (!cancelled) setSession(next);
+      } catch {
+        if (!cancelled) setSession(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT' && event !== 'TOKEN_REFRESHED') return;
+      if (event === 'SIGNED_OUT') {
+        setSession(null);
+        return;
+      }
+      void loadStaffSession()
+        .then((next) => setSession(next))
+        .catch(() => setSession(null));
+    });
+
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
+  }, []);
+
+  const signInWithPassword = useCallback(async (input: { email: string; password: string }) => {
+    const { error } = await supabase.auth.signInWithPassword({
+      email: input.email.trim().toLowerCase(),
+      password: input.password,
+    });
+    if (error) throw error;
+    const next = await loadStaffSession();
+    if (!next) throw new Error('Could not load staff profile.');
     setSession(next);
   }, []);
 
-  const signOut = useCallback(() => {
-    sessionStorage.removeItem(STORAGE_KEY);
+  const signInDemo = useCallback((input: { email: string; name: string; role: AdminRole }) => {
+    setSession({
+      userId: 'demo',
+      email: input.email.trim().toLowerCase(),
+      name: input.name.trim(),
+      role: input.role,
+      accessToken: '',
+    });
+  }, []);
+
+  const signOut = useCallback(async () => {
+    await supabase.auth.signOut();
     setSession(null);
   }, []);
 
-  const value = useMemo(() => ({ session, signIn, signOut }), [session, signIn, signOut]);
+  const value = useMemo(
+    () => ({ session, loading, signInWithPassword, signInDemo, signOut }),
+    [session, loading, signInWithPassword, signInDemo, signOut],
+  );
+
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

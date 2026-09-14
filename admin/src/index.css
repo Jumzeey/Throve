@@ -12,8 +12,9 @@
   --color-sidebar: #241c1a;
   --color-espresso: #2b211f;
   --color-body: #5c4b45;
-  --color-muted: #7a6a64;
-  --color-muted-2: #8c7a73;
+  --color-muted: #5c4b45;
+  --color-muted-2: #6e5c55;
+  --color-muted-surface: #f4ecf1;
   --color-border-soft: #e7dcd2;
   --color-divider: #f0e7de;
   --color-plum: #5a1f45;
@@ -58,7 +59,8 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
+  /* Throve text muted — do not map to shadcn --muted (a light surface). */
+  --color-muted: #5c4b45;
   --color-secondary-foreground: var(--secondary-foreground);
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
@@ -90,7 +92,7 @@
   --secondary: #fffcf8;
   --secondary-foreground: #2b211f;
   --muted: #f4ecf1;
-  --muted-foreground: #7a6a64;
+  --muted-foreground: #5c4b45;
   --accent: #f4ecf1;
   --accent-foreground: #5a1f45;
   --destructive: #8a2323;

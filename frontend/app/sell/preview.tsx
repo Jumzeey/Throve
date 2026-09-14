@@ -69,7 +69,7 @@ export default function ListingPreviewScreen() {
         setPublishError('This listing is missing required details. Go back and finish the form.');
         return;
       }
-      router.replace({ pathname: '/sell/[id]', params: { id: listing.id, notice: 'published' } });
+      router.replace({ pathname: '/sell/[id]', params: { id: listing.id, notice: 'submitted' } });
     } catch (err) {
       const message =
         err instanceof ApiError
@@ -108,7 +108,7 @@ export default function ListingPreviewScreen() {
       <View style={[styles.previewBanner, { paddingTop: top + 10 }]}>
         <EyeIcon size={14} color={Palette.plum} />
         <Text style={styles.previewBannerText}>
-          Seller preview. Not published — this is how buyers will see it.
+          Seller preview. Submitting sends this to Trust & Safety for review before it goes live.
         </Text>
       </View>
 
@@ -204,7 +204,7 @@ export default function ListingPreviewScreen() {
 
       <View style={[styles.actions, { paddingBottom: sheetBottom }]}>
         <Button
-          label="Publish listing"
+          label="Submit for review"
           loading={publishing}
           disabled={saving}
           onPress={() => void goPublish()}

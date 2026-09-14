@@ -69,6 +69,8 @@ export type ActionKey =
   | 'approve_live_host'
   | 'hide_listing'
   | 'restore_listing'
+  | 'approve_listing'
+  | 'reject_listing'
   | 'end_live'
   | 'decide_dispute'
   | 'execute_refund'
@@ -85,6 +87,8 @@ const ACTION_ROLES: Record<ActionKey, AdminRole[]> = {
   approve_live_host: ['super_admin', 'trust_safety'],
   hide_listing: ['super_admin', 'trust_safety'],
   restore_listing: ['super_admin', 'trust_safety'],
+  approve_listing: ['super_admin', 'trust_safety'],
+  reject_listing: ['super_admin', 'trust_safety'],
   end_live: ['super_admin', 'trust_safety'],
   decide_dispute: ['super_admin', 'trust_safety'],
   execute_refund: ['super_admin', 'finance'],

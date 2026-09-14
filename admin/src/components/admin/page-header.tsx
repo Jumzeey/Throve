@@ -50,7 +50,7 @@ export function PageHeader({
       >
         <div className="min-w-0 shrink-0">
           <h1 className="font-display text-[27px] leading-tight text-espresso">{title}</h1>
-          <p className="mt-0.5 text-[11.5px] text-muted">{subtitle ?? stamp}</p>
+          <p className="mt-0.5 text-[12px] leading-snug text-body">{subtitle ?? stamp}</p>
         </div>
         <div className="flex min-w-0 flex-1 items-center justify-end gap-3">
           {onSearchChange ? (
@@ -93,7 +93,7 @@ export function PageHeader({
       <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-[27px] leading-tight text-espresso">{title}</h1>
-          {subtitle ? <p className="mt-1 text-[11.5px] text-muted">{subtitle}</p> : null}
+          {subtitle ? <p className="mt-1 text-[12px] leading-snug text-body">{subtitle}</p> : null}
         </div>
         <div className="flex flex-col items-end gap-1.5">
           <div className="flex items-center gap-2">

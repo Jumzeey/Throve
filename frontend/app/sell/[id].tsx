@@ -26,18 +26,20 @@ export default function SellerListingScreen() {
   const { sheetBottom } = useScreenInsets();
   const { id, notice } = useLocalSearchParams<{ id: string; notice?: string }>();
   const { session, publicProfiles, ensurePublicProfile } = useAuth();
-  const { getListing, loadFormFromListing, setStatus, removeListing, canDelete } = useListings();
+  const { getListing, loadFormFromListing, setStatus, removeListing, canDelete, resubmit } = useListings();
   const inbox = useInbox();
   const checkout = useCheckout();
   const { isConnected } = useNetworkStatus();
-  const [note, setNote] = useState<'published' | 'updated' | null>(notice === 'published' ? 'published' : null);
+  const [note, setNote] = useState<'published' | 'updated' | 'resubmitted' | null>(
+    notice === 'published' || notice === 'submitted' ? 'published' : null,
+  );
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [offerFor, setOfferFor] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState(false);
 
   useEffect(() => {
-    if (notice === 'published') setNote('published');
+    if (notice === 'published' || notice === 'submitted') setNote('published');
   }, [notice]);
 
   useEffect(() => {
@@ -152,7 +154,18 @@ export default function SellerListingScreen() {
           />
         ) : null}
         {note === 'published' ? (
-          <AlertBanner variant="success" title="Listing published" message="Your item is now live and visible to buyers." />
+          <AlertBanner
+            variant="success"
+            title="Submitted for review"
+            message="Trust & Safety will review this listing before it goes live. Track status here or in My listings."
+          />
+        ) : null}
+        {note === 'resubmitted' ? (
+          <AlertBanner
+            variant="success"
+            title="Resubmitted for review"
+            message="Your updates are with Trust & Safety again."
+          />
         ) : null}
         {note === 'updated' ? (
           <AlertBanner
@@ -172,6 +185,22 @@ export default function SellerListingScreen() {
             <StatusChip kind="listing" variant={item.status as ListingChipVariant} />
           </View>
         </View>
+
+        {item.status === 'pending_review' ? (
+          <AlertBanner
+            variant="info"
+            title="Under review"
+            message="This listing is not public yet. You can still edit details while it awaits approval."
+          />
+        ) : null}
+
+        {item.status === 'rejected' ? (
+          <AlertBanner
+            variant="error"
+            title="Needs changes"
+            message={item.reviewReason?.trim() || 'Update the listing and resubmit for review.'}
+          />
+        ) : null}
 
         {item.status === 'reserved' || reserved ? (
           <View style={styles.reservedBanner}>
@@ -231,6 +260,41 @@ export default function SellerListingScreen() {
                 Hide removes this from public browse until you make it available again. Mark as sold is for sales
                 completed outside Throve.
               </Text>
+            </>
+          ) : null}
+
+          {item.status === 'pending_review' ? (
+            <>
+              <Button label="Edit listing" onPress={edit} disabled={saving || !isConnected} />
+              <Text style={styles.help}>
+                Not public yet. Editing while under review is allowed; buyers cannot see this listing until it is
+                approved.
+              </Text>
+            </>
+          ) : null}
+
+          {item.status === 'rejected' ? (
+            <>
+              <Button label="Edit listing" onPress={edit} disabled={saving || !isConnected} />
+              <Button
+                label={saving ? 'Resubmitting…' : 'Resubmit for review'}
+                disabled={saving || !isConnected}
+                onPress={() => {
+                  void (async () => {
+                    setSaving(true);
+                    setActionError(false);
+                    try {
+                      await resubmit(item.id);
+                      setNote('resubmitted');
+                    } catch {
+                      setActionError(true);
+                    } finally {
+                      setSaving(false);
+                    }
+                  })();
+                }}
+              />
+              <Text style={styles.help}>Fix the issues in the review reason, then resubmit for Trust & Safety.</Text>
             </>
           ) : null}
 

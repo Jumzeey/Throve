@@ -22,6 +22,7 @@ type ProfileRow = {
   preferred_login_method?: 'password' | 'magic_link' | null;
   has_password?: boolean | null;
   payout_verified?: boolean | null;
+  admin_role?: 'super_admin' | 'trust_safety' | 'support' | 'finance' | null;
 };
 
 type ListingRow = {
@@ -40,6 +41,10 @@ type ListingRow = {
   colour: string | null;
   photo_urls: string[];
   created_at: string;
+  review_submitted_at?: string | null;
+  review_reason?: string | null;
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
 };
 
 export function publicPhotoUrl(value: string | null | undefined) {
@@ -68,6 +73,7 @@ export function mapProfile(row: ProfileRow, sellerUsername?: string) {
     phone: row.phone ?? undefined,
     setupComplete: row.setup_complete,
     canHostLive: row.can_host_live,
+    adminRole: row.admin_role ?? null,
     deactivated: row.deactivated,
     notifOffers: row.notif_offers,
     notifMessages: row.notif_messages,
@@ -109,6 +115,9 @@ export function mapListing(row: ListingRow, sellerUsername: string, savedBy: str
     createdAt: row.created_at.slice(0, 10),
     colour: row.colour ?? undefined,
     savedBy,
+    reviewSubmittedAt: row.review_submitted_at ?? undefined,
+    reviewReason: row.review_reason ?? undefined,
+    reviewedAt: row.reviewed_at ?? undefined,
   };
 }
 

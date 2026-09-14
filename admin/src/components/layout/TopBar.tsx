@@ -6,7 +6,7 @@ export function TopBar({ title, subtitle }: { title: string; subtitle?: string }
     <header className="flex items-end justify-between gap-4 border-b border-border-soft pb-4">
       <div>
         <h1 className="font-display text-[27px] leading-tight text-espresso">{title}</h1>
-        {subtitle ? <p className="mt-1 text-[11.5px] text-muted">{subtitle}</p> : null}
+        {subtitle ? <p className="mt-1 text-[12px] leading-snug text-body">{subtitle}</p> : null}
       </div>
       {session ? (
         <div className="text-right">

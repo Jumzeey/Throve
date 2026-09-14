@@ -6,7 +6,22 @@ import { useAuth } from '@/context/auth-context';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { Redirect, Tabs } from 'expo-router';
 import { useMemo } from 'react';
-import { Platform, StyleSheet } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
+
+function TabBarLabel({ color, children }: { color: string; children: string }) {
+  return (
+    <View style={styles.labelWrap}>
+      <Text
+        style={[styles.label, { color }]}
+        numberOfLines={1}
+        allowFontScaling={false}
+        android_hyphenationFrequency="none"
+      >
+        {children}
+      </Text>
+    </View>
+  );
+}
 
 export default function TabLayout() {
   const { isReady, isAuthenticatingLink, session } = useAuth();
@@ -17,7 +32,7 @@ export default function TabLayout() {
       borderTopColor: Palette.border,
       borderTopWidth: 1,
       backgroundColor: Palette.ivoryElevated,
-      paddingTop: 8,
+      paddingTop: 6,
       paddingBottom: bottom,
       height: tabBarHeight,
       ...(Platform.OS === 'android' ? { elevation: 8 } : {}),
@@ -31,7 +46,15 @@ export default function TabLayout() {
       tabBarButton: HapticTab,
       tabBarActiveTintColor: Palette.plum,
       tabBarInactiveTintColor: Palette.muted,
-      tabBarLabelStyle: styles.label,
+      // Force stacked labels — landscape / mis-reported frame size was
+      // putting labels beside icons and clipping them to "Ho…", "Li…", etc.
+      tabBarLabelPosition: 'below-icon' as const,
+      tabBarAllowFontScaling: false,
+      tabBarItemStyle: styles.item,
+      tabBarIconStyle: styles.icon,
+      tabBarLabel: ({ color, children }: { color: string; children: string }) => (
+        <TabBarLabel color={color}>{children}</TabBarLabel>
+      ),
       tabBarStyle,
       // Keep tab content above the bar; we apply bottom inset on the bar itself.
       safeAreaInsets: { top: 0, bottom: 0, left: 0, right: 0 },
@@ -92,9 +115,28 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
+  item: {
+    flex: 1,
+    minWidth: 0,
+    paddingHorizontal: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  icon: {
+    marginTop: 2,
+  },
+  labelWrap: {
+    alignSelf: 'stretch',
+    width: '100%',
+    paddingHorizontal: 1,
+    marginTop: 2,
+  },
   label: {
+    width: '100%',
     fontSize: 10,
+    lineHeight: 12,
     fontFamily: Typography.bodySemiBold,
-    marginBottom: Platform.OS === 'android' ? 2 : 0,
+    textAlign: 'center',
+    includeFontPadding: false,
   },
 });

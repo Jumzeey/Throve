@@ -1,5 +1,13 @@
 export type Department = 'Women' | 'Men' | 'Kids';
-export type ListingStatus = 'available' | 'reserved' | 'sold' | 'draft' | 'hidden' | 'removed';
+export type ListingStatus =
+  | 'available'
+  | 'reserved'
+  | 'sold'
+  | 'draft'
+  | 'hidden'
+  | 'removed'
+  | 'pending_review'
+  | 'rejected';
 export type LiveStatus = 'live' | 'upcoming' | 'ended';
 export type SortOption = 'Newest' | 'Lowest price' | 'Highest price';
 
@@ -21,6 +29,9 @@ export type Listing = {
   createdAt: string;
   colour?: string;
   savedBy: string[];
+  reviewSubmittedAt?: string;
+  reviewReason?: string;
+  reviewedAt?: string;
 };
 
 export type ListingForm = {
@@ -303,6 +314,7 @@ export type UserProfile = {
   phone?: string;
   setupComplete: boolean;
   canHostLive?: boolean;
+  adminRole?: 'super_admin' | 'trust_safety' | 'support' | 'finance' | null;
   deactivated?: boolean;
   notifOffers?: boolean;
   notifMessages?: boolean;

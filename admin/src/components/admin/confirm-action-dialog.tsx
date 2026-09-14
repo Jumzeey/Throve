@@ -25,6 +25,7 @@ export function ConfirmActionDialog({
   reasonLabel = 'Reason (required)',
   reasonPlaceholder = 'Document why this action is being taken…',
   defaultReason = '',
+  reasonOptional = false,
   metaRows,
   onConfirm,
 }: {
@@ -39,6 +40,7 @@ export function ConfirmActionDialog({
   reasonLabel?: string;
   reasonPlaceholder?: string;
   defaultReason?: string;
+  reasonOptional?: boolean;
   /** Extra audit rows shown under the acting-admin strip (e.g. Recommended by). */
   metaRows?: { label: string; value: string }[];
   onConfirm: (reason: string) => void;
@@ -54,7 +56,8 @@ export function ConfirmActionDialog({
     }
   }, [open, defaultReason]);
 
-  const canSubmit = reason.trim().length >= 3 && (!requireCheckbox || checked);
+  const canSubmit =
+    (reasonOptional || reason.trim().length >= 3) && (!requireCheckbox || checked);
 
   function submit() {
     if (!canSubmit) return;

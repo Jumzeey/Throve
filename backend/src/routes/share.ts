@@ -41,7 +41,15 @@ router.get('/product/:id', async (req, res) => {
     .eq('id', id)
     .maybeSingle();
 
-  if (error || !listing || listing.status === 'draft' || listing.status === 'removed') {
+  if (
+    error ||
+    !listing ||
+    listing.status === 'draft' ||
+    listing.status === 'removed' ||
+    listing.status === 'pending_review' ||
+    listing.status === 'rejected' ||
+    listing.status === 'hidden'
+  ) {
     res.status(404).type('html').send(simplePage('This listing is no longer available on Throve.', null));
     return;
   }

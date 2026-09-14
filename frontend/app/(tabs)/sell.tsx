@@ -15,11 +15,13 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-const TABS = ['draft', 'available', 'reserved', 'sold', 'hidden'] as const;
+const TABS = ['draft', 'pending_review', 'rejected', 'available', 'reserved', 'sold', 'hidden'] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_LABEL: Record<Tab, string> = {
   draft: 'Draft',
+  pending_review: 'Under review',
+  rejected: 'Needs changes',
   available: 'Available',
   reserved: 'Reserved',
   sold: 'Sold',
@@ -55,7 +57,15 @@ export default function SellScreen() {
   }, [listingsForSeller, session]);
 
   const counts = useMemo(() => {
-    const next = { draft: 0, available: 0, reserved: 0, sold: 0, hidden: 0 };
+    const next = {
+      draft: 0,
+      pending_review: 0,
+      rejected: 0,
+      available: 0,
+      reserved: 0,
+      sold: 0,
+      hidden: 0,
+    };
     for (const listing of mine) {
       if (listing.status in next) next[listing.status as Tab] += 1;
     }
@@ -82,7 +92,7 @@ export default function SellScreen() {
   }
 
   function openListing(listing: Listing) {
-    if (listing.status === 'draft') {
+    if (listing.status === 'draft' || listing.status === 'rejected') {
       loadFormFromListing(listing);
       router.push({ pathname: '/sell/create', params: { id: listing.id } });
       return;
@@ -93,7 +103,11 @@ export default function SellScreen() {
   const emptyMessage =
     tab === 'draft'
       ? 'Drafts you save while creating a listing will appear here.'
-      : `You don't have any ${TAB_LABEL[tab].toLowerCase()} listings right now.`;
+      : tab === 'pending_review'
+        ? 'Listings waiting for Trust & Safety review appear here.'
+        : tab === 'rejected'
+          ? 'Listings that need changes before they can go live appear here.'
+          : `You don't have any ${TAB_LABEL[tab].toLowerCase()} listings right now.`;
 
   const showListings = !(loading && mine.length === 0) && !(visible.length === 0 && !loadError);
 
