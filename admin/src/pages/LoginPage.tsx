@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ROLE_LABELS, type AdminRole } from '@/lib/roles';
+import { isSupabaseConfigured } from '@/lib/supabase';
 import { Loader2 } from 'lucide-react';
 
 const DEMO_ROLES: { role: AdminRole; name: string; email: string }[] = [
@@ -22,17 +23,17 @@ const DEMO_ROLES: { role: AdminRole; name: string; email: string }[] = [
 type GateState = 'form' | 'verifying' | 'unauthorized' | 'revoked' | 'expired' | 'offline' | 'demo';
 
 export function LoginPage() {
-  const { session, loading, signInWithPassword, signInDemo } = useAuth();
+  const { session, loading, supabaseReady, signInWithPassword, signInDemo } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [demoRole, setDemoRole] = useState<AdminRole>('super_admin');
   const [error, setError] = useState<string | null>(null);
-  const [gate, setGate] = useState<GateState>('form');
+  const [gate, setGate] = useState<GateState>(() => (isSupabaseConfigured ? 'form' : 'demo'));
   const [submitting, setSubmitting] = useState(false);
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-ground text-[12.5px] text-muted">
+      <div className="flex min-h-screen items-center justify-center bg-ground text-[12.5px] text-body">
         <Loader2 className="mr-2 size-4 animate-spin text-plum" />
         Checking staff session…
       </div>
@@ -48,6 +49,11 @@ export function LoginPage() {
       return;
     }
     if (gate === 'unauthorized' || gate === 'revoked') return;
+    if (!supabaseReady) {
+      setGate('demo');
+      setError('Live auth is not configured on this deploy. Use Demo UI, or set VITE_SUPABASE_* on Vercel.');
+      return;
+    }
     if (!email.trim() || !password.trim()) {
       setError('Enter your staff email and password.');
       return;
@@ -137,12 +143,24 @@ export function LoginPage() {
 
           {gate === 'demo' ? (
             <div className="flex flex-col gap-3">
-              <Alert className="border-border-soft bg-[#f3ede6]">
-                <AlertTitle className="text-[12px]">Demo mode</AlertTitle>
-                <AlertDescription className="text-[11.5px] text-muted">
-                  Offline UI only — no live approve/reject. Use Ready for real staff login.
-                </AlertDescription>
-              </Alert>
+              {!supabaseReady ? (
+                <Alert className="border-hold-border bg-hold-bg text-[#8a5a15]">
+                  <AlertTitle className="text-[12px]">Env not set on this deploy</AlertTitle>
+                  <AlertDescription className="text-[11.5px]">
+                    Add <span className="font-mono">VITE_SUPABASE_URL</span>,{' '}
+                    <span className="font-mono">VITE_SUPABASE_ANON_KEY</span>, and{' '}
+                    <span className="font-mono">VITE_API_URL</span> in Vercel → Settings → Environment Variables,
+                    then redeploy. Demo UI works without them.
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <Alert className="border-border-soft bg-[#f3ede6]">
+                  <AlertTitle className="text-[12px]">Demo mode</AlertTitle>
+                  <AlertDescription className="text-[11.5px] text-body">
+                    Offline UI only — no live approve/reject. Use Ready for real staff login.
+                  </AlertDescription>
+                </Alert>
+              )}
               <div className="flex flex-col gap-1.5">
                 <Label className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-2">Demo role</Label>
                 <Select
@@ -222,9 +240,10 @@ export function LoginPage() {
             </Button>
           )}
 
-          <p className="mt-2 text-[11px] leading-relaxed text-muted">
-            Live auth via Supabase. Staff need a non-null <span className="font-mono">admin_role</span> on their
-            profile. Use Demo UI only for offline layout checks.
+          <p className="mt-2 text-[11px] leading-relaxed text-body">
+            {supabaseReady
+              ? 'Live auth via Supabase. Staff need a non-null admin_role on their profile.'
+              : 'This deploy is missing Supabase env vars — Demo UI is available until they are set on Vercel.'}
           </p>
         </CardContent>
       </Card>

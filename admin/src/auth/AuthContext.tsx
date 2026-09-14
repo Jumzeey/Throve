@@ -1,7 +1,7 @@
 import type { AdminRole } from '../lib/roles';
 import { apiFetch } from '../lib/api';
 import { ROLE_LABELS } from '../lib/roles';
-import { supabase } from '../lib/supabase';
+import { isSupabaseConfigured, supabase } from '../lib/supabase';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 export type StaffSession = {
@@ -15,6 +15,7 @@ export type StaffSession = {
 type AuthContextValue = {
   session: StaffSession | null;
   loading: boolean;
+  supabaseReady: boolean;
   signInWithPassword: (input: { email: string; password: string }) => Promise<void>;
   /** Prototype fallback when Supabase env is missing. */
   signInDemo: (input: { email: string; name: string; role: AdminRole }) => void;
@@ -31,6 +32,8 @@ type ProfileMe = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 async function loadStaffSession(): Promise<StaffSession | null> {
+  if (!isSupabaseConfigured) return null;
+
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   const user = data.session?.user;
@@ -68,6 +71,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     })();
 
+    if (!isSupabaseConfigured) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT' && event !== 'TOKEN_REFRESHED') return;
       if (event === 'SIGNED_OUT') {
@@ -86,6 +95,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signInWithPassword = useCallback(async (input: { email: string; password: string }) => {
+    if (!isSupabaseConfigured) {
+      throw new Error('Supabase env vars are not configured on this deploy.');
+    }
     const { error } = await supabase.auth.signInWithPassword({
       email: input.email.trim().toLowerCase(),
       password: input.password,
@@ -107,12 +119,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    if (isSupabaseConfigured) await supabase.auth.signOut();
     setSession(null);
   }, []);
 
   const value = useMemo(
-    () => ({ session, loading, signInWithPassword, signInDemo, signOut }),
+    () => ({
+      session,
+      loading,
+      supabaseReady: isSupabaseConfigured,
+      signInWithPassword,
+      signInDemo,
+      signOut,
+    }),
     [session, loading, signInWithPassword, signInDemo, signOut],
   );
 

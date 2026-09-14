@@ -130,7 +130,7 @@
     overflow: hidden;
   }
   body {
-    @apply bg-sidebar text-foreground antialiased;
+    @apply bg-ground text-foreground antialiased;
     font-family: var(--font-sans);
   }
   button,
