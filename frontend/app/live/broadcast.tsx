@@ -6,6 +6,7 @@ import {
   LiveComposer,
   LiveConnectionOverlay,
   LiveHostTopBar,
+  LivePinnedCommentBanner,
   LiveStage,
 } from '@/components/live/live-stage';
 import { FeaturedLiveCard } from '@/components/live/featured-live-card';
@@ -275,6 +276,7 @@ export default function LiveBroadcastScreen() {
 
   const connection = live.getConnection(liveSession.id);
   const comments = commentsForProfiles;
+  const pinnedComment = live.getPinnedComment(liveSession.id);
   const products = live.getProducts(liveSession.id);
   const moderators = live.getModerators(liveSession.id);
   const sessionId = liveSession.id;
@@ -398,6 +400,12 @@ export default function LiveBroadcastScreen() {
             </View>
           ) : (
             <ScrollView style={styles.commentList} contentContainerStyle={styles.commentListBody}>
+              {pinnedComment ? (
+                <LivePinnedCommentBanner
+                  comment={pinnedComment}
+                  onPress={() => setActionComment(pinnedComment)}
+                />
+              ) : null}
               {comments.map((comment) => (
                 <LiveCommentRow
                   key={comment.id}
@@ -474,7 +482,20 @@ export default function LiveBroadcastScreen() {
             setActionComment(null);
           }
         }}
-        onPin={() => setNotice('Comment pinned for moderators')}
+        onPin={() => {
+          if (!actionComment) return;
+          void live.pinComment(sessionId, actionComment.id).then(() => {
+            setNotice('Comment pinned');
+            setTimeout(() => setNotice(null), 2200);
+          });
+        }}
+        onUnpin={() => {
+          if (!actionComment) return;
+          void live.unpinComment(sessionId, actionComment.id).then(() => {
+            setNotice('Comment unpinned');
+            setTimeout(() => setNotice(null), 2200);
+          });
+        }}
         onMute={() => {
           if (actionComment) setNotice(`Muted @${actionComment.user}`);
           setTimeout(() => setNotice(null), 2200);

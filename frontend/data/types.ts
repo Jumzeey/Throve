@@ -60,6 +60,7 @@ export type LiveComment = {
   text: string;
   clientId?: string;
   photoUrl?: string;
+  isPinned?: boolean;
 };
 
 export type LiveClaimStatus = 'active' | 'converted' | 'expired' | 'released';

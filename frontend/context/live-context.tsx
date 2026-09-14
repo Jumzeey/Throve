@@ -127,6 +127,7 @@ function mergeComments(existing: LiveComment[], incoming: LiveComment[]): LiveCo
       user,
       clientId: comment.clientId ?? prev?.clientId,
       photoUrl: comment.photoUrl || prev?.photoUrl,
+      isPinned: comment.isPinned ?? prev?.isPinned,
     });
     if (comment.clientId) byClient.set(comment.clientId, comment.id);
   }
@@ -165,6 +166,7 @@ type LiveContextValue = {
   getProducts: (sessionId: string) => LiveStreamProduct[];
   getPinnedProduct: (sessionId: string) => LiveStreamProduct | undefined;
   getComments: (sessionId: string) => LiveComment[];
+  getPinnedComment: (sessionId: string) => LiveComment | undefined;
   getConnection: (sessionId: string) => LiveConnection;
   setConnection: (sessionId: string, connection: LiveConnection) => void;
   getClaim: (sessionId: string) => LiveClaim | undefined;
@@ -172,6 +174,8 @@ type LiveContextValue = {
   listingStatus: (id?: string) => ListingStatus | undefined;
   sendComment: (sessionId: string, user: string, text: string) => Promise<void>;
   removeComment: (sessionId: string, commentId: string) => Promise<void>;
+  pinComment: (sessionId: string, commentId: string) => Promise<void>;
+  unpinComment: (sessionId: string, commentId: string) => Promise<void>;
   toggleConnection: (sessionId: string) => void;
   pinProduct: (sessionId: string, productId: string) => Promise<void>;
   pinListing: (sessionId: string, listingId: string) => Promise<void>;
@@ -484,6 +488,37 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         )
         .on(
           'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'live_comments', filter: `session_id=eq.${sessionId}` },
+          (payload) => {
+            const row = payload.new as {
+              id?: string;
+              text?: string;
+              client_id?: string;
+              is_pinned?: boolean;
+            };
+            if (!row?.id) return;
+            setCommentsBySession((current) => {
+              const list = current[sessionId] ?? [];
+              const pinnedNow = Boolean(row.is_pinned);
+              return {
+                ...current,
+                [sessionId]: list.map((comment) => {
+                  if (comment.id === row.id) {
+                    return {
+                      ...comment,
+                      text: row.text ?? comment.text,
+                      clientId: row.client_id ?? comment.clientId,
+                      isPinned: pinnedNow,
+                    };
+                  }
+                  return pinnedNow && comment.isPinned ? { ...comment, isPinned: false } : comment;
+                }),
+              };
+            });
+          },
+        )
+        .on(
+          'postgres_changes',
           { event: '*', schema: 'public', table: 'live_stream_products', filter: `live_session_id=eq.${sessionId}` },
           (payload) => {
             const row = payload.new as Record<string, unknown> | undefined;
@@ -571,6 +606,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   const getComments = useCallback((sessionId: string) => commentsBySession[sessionId] ?? [], [commentsBySession]);
 
+  const getPinnedComment = useCallback(
+    (sessionId: string) => (commentsBySession[sessionId] ?? []).find((comment) => comment.isPinned),
+    [commentsBySession],
+  );
+
   const getWatchers = useCallback(
     (sessionId: string) => watchersBySession[sessionId] ?? [],
     [watchersBySession],
@@ -653,6 +693,33 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     setCommentsBySession((current) => ({
       ...current,
       [sessionId]: (current[sessionId] ?? []).filter((comment) => comment.id !== commentId),
+    }));
+  }, []);
+
+  const pinComment = useCallback(async (sessionId: string, commentId: string) => {
+    const pinned = await apiFetch<LiveComment>(`/live/sessions/${sessionId}/comments/${commentId}/pin`, {
+      method: 'POST',
+    });
+    setCommentsBySession((current) => ({
+      ...current,
+      [sessionId]: (current[sessionId] ?? []).map((comment) => {
+        if (comment.id === pinned.id) {
+          return { ...comment, ...pinned, isPinned: true };
+        }
+        return comment.isPinned ? { ...comment, isPinned: false } : comment;
+      }),
+    }));
+    setRoomNotice('Comment pinned');
+    setTimeout(() => setRoomNotice(null), 2200);
+  }, []);
+
+  const unpinComment = useCallback(async (sessionId: string, commentId: string) => {
+    await apiFetch(`/live/sessions/${sessionId}/comments/${commentId}/pin`, { method: 'DELETE' });
+    setCommentsBySession((current) => ({
+      ...current,
+      [sessionId]: (current[sessionId] ?? []).map((comment) =>
+        comment.id === commentId ? { ...comment, isPinned: false } : comment,
+      ),
     }));
   }, []);
 
@@ -987,6 +1054,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       getProducts,
       getPinnedProduct,
       getComments,
+      getPinnedComment,
       getConnection,
       setConnection,
       getClaim,
@@ -994,6 +1062,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       listingStatus,
       sendComment,
       removeComment,
+      pinComment,
+      unpinComment,
       toggleConnection,
       pinProduct,
       pinListing,
@@ -1036,6 +1106,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       getClaim,
       getComments,
       getConnection,
+      getPinnedComment,
       getPinnedProduct,
       getProducts,
       getSession,
@@ -1045,6 +1116,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       liveNow,
       loadError,
       loading,
+      pinComment,
       pinListing,
       pinProduct,
       addProduct,
@@ -1062,6 +1134,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       startLive,
       subscribeSession,
       toggleConnection,
+      unpinComment,
       upcoming,
       prepareModerators,
       getModerators,

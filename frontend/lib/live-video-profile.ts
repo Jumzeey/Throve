@@ -148,27 +148,18 @@ function encodeFor(facing: LiveCameraFacing, lowEnd: boolean) {
 }
 
 /**
- * Capture constraints for host publish / camera switch under Test · H.264.
- * Legacy callers should not use this for quality changes (facingMode only is fine).
+ * Capture constraints for host publish / camera switch.
+ * Facing only — forcing width/height blacks out some MIUI / multi-camera Android devices
+ * (logical front/ultra-wide). Room publishDefaults still steer encode quality.
  */
 export function getLiveCaptureOptions(
   facing: LiveCameraFacing,
-  tier: LiveVideoTier,
+  _tier: LiveVideoTier,
 ): LiveCaptureOptions {
-  if (tier === 'legacy') {
-    return {
-      facingMode: facing,
-      resolution: { width: 1280, height: 720, frameRate: 30 },
-    };
-  }
-  const enc = encodeFor(facing, tier === 'test_low_end');
   return {
     facingMode: facing,
-    resolution: {
-      width: enc.width,
-      height: enc.height,
-      frameRate: enc.frameRate,
-    },
+    // Soft hint only; LiveKit treats these as ideal, not mandatory.
+    resolution: { width: 1280, height: 720, frameRate: 30 },
   };
 }
 
@@ -185,7 +176,6 @@ export function getLivePublishEncoding(
 }
 
 function testRoomOptions(facing: LiveCameraFacing, lowEnd: boolean): LiveKitRoomOptionsLite {
-  const capture = getLiveCaptureOptions(facing, lowEnd ? 'test_low_end' : 'test');
   const encoding = getLivePublishEncoding(facing, lowEnd ? 'test_low_end' : 'test')!;
 
   return {
@@ -193,11 +183,11 @@ function testRoomOptions(facing: LiveCameraFacing, lowEnd: boolean): LiveKitRoom
     dynacast: true,
     singlePeerConnection: false,
     videoCaptureDefaults: {
-      facingMode: capture.facingMode,
-      resolution: capture.resolution,
+      facingMode: facing,
     },
     publishDefaults: {
-      videoCodec: 'h264',
+      // Prefer VP8 for reliability on MIUI/Xiaomi; H.264 hardware often publishes black frames.
+      videoCodec: 'vp8',
       videoEncoding: {
         maxBitrate: encoding.maxBitrate,
         maxFramerate: encoding.maxFramerate,
@@ -233,8 +223,8 @@ function describeSummary(
   const enc = encodeFor(facing, tier === 'test_low_end');
   return {
     facing,
-    codec: 'h264',
-    capture: `${enc.width}x${enc.height}`,
+    codec: 'vp8',
+    capture: `${enc.width}x${enc.height} (ideal)`,
     maxBitrateMbps: enc.maxBitrate / 1_000_000,
     maxFramerate: enc.frameRate,
     simulcast: true,
@@ -294,13 +284,22 @@ export function getLiveKitRoomOptions(input: {
 /**
  * Best-effort update of RTCRtpSender maxBitrate / maxFramerate after a camera flip.
  * Safe no-op when the track has no sender or setParameters fails.
+ *
+ * Important: Android RN WebRTC throws if we round-trip kebab-case
+ * `degradationPreference` strings (e.g. "maintain-framerate") from getParameters().
  */
 export async function applyLivePublishEncoding(
   track: {
     sender?: {
-      getParameters: () => { encodings?: Array<{ maxBitrate?: number; maxFramerate?: number }> };
+      getParameters: () => {
+        encodings?: Array<{ maxBitrate?: number; maxFramerate?: number }>;
+        degradationPreference?: string;
+        transactionId?: string;
+      };
       setParameters: (params: {
         encodings?: Array<{ maxBitrate?: number; maxFramerate?: number }>;
+        degradationPreference?: string;
+        transactionId?: string;
       }) => Promise<void>;
     };
   } | null | undefined,
@@ -311,21 +310,27 @@ export async function applyLivePublishEncoding(
     const params = track.sender.getParameters();
     if (!params.encodings?.length) return;
     const peak = Math.max(...params.encodings.map((enc) => enc.maxBitrate ?? 0), 0);
-    const next = {
-      ...params,
-      encodings: params.encodings.map((enc) => {
-        const scaled =
-          peak > 0 && enc.maxBitrate != null
-            ? Math.max(80_000, Math.round((enc.maxBitrate / peak) * encoding.maxBitrate))
-            : encoding.maxBitrate;
-        return {
-          ...enc,
-          maxBitrate: scaled,
-          maxFramerate: encoding.maxFramerate,
-        };
-      }),
-    };
-    await track.sender.setParameters(next);
+    const encodings = params.encodings.map((enc) => {
+      const scaled =
+        peak > 0 && enc.maxBitrate != null
+          ? Math.max(80_000, Math.round((enc.maxBitrate / peak) * encoding.maxBitrate))
+          : encoding.maxBitrate;
+      return {
+        ...enc,
+        maxBitrate: scaled,
+        maxFramerate: encoding.maxFramerate,
+      };
+    });
+
+    // Encodings-only payload — avoids IllegalArgumentException on Android for
+    // degradationPreference values like "maintain-framerate".
+    const payload: {
+      encodings: typeof encodings;
+      transactionId?: string;
+    } = { encodings };
+    if (params.transactionId) payload.transactionId = params.transactionId;
+
+    await track.sender.setParameters(payload);
   } catch (err) {
     console.warn('[live-video-profile] applyLivePublishEncoding failed', err);
   }

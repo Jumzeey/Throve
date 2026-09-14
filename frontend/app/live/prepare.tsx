@@ -514,16 +514,16 @@ export default function PrepareLiveScreen() {
                   style={[styles.whenBtn, videoProfile === 'test' && styles.whenBtnOn]}
                   accessibilityRole="button"
                   accessibilityState={{ selected: videoProfile === 'test' }}
-                  accessibilityLabel="Use test H.264 video profile"
+                  accessibilityLabel="Use test higher-bitrate video profile"
                 >
                   <Text style={[styles.whenBtnLabel, videoProfile === 'test' && styles.whenBtnLabelOn]}>
-                    Test · H.264
+                    Test · higher bitrate
                   </Text>
                 </Pressable>
               </View>
               <Text style={styles.profileSub}>
                 {videoProfile === 'test'
-                  ? 'H.264 720p @ 2.5 Mbps + dynacast (~3 GB RAM phones auto-use a safer tier).'
+                  ? 'Higher bitrate VP8. If the camera stays black, switch back to Legacy · VP8.'
                   : 'Current defaults: ~720p / VP8 / ~1.7 Mbps.'}
               </Text>
             </>

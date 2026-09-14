@@ -1050,6 +1050,7 @@ router.get('/sessions/:id/comments', optionalAuth, async (req, res) => {
         text: row.text,
         clientId: row.client_id ?? undefined,
         photoUrl: publicPhotoUrl(user?.photo_url) ?? undefined,
+        isPinned: Boolean(row.is_pinned),
       };
     }),
   );
@@ -1082,7 +1083,81 @@ router.post('/sessions/:id/comments', requireAuth, async (req, res) => {
     text: data.text,
     clientId: data.client_id ?? undefined,
     photoUrl: publicPhotoUrl(user?.photo_url) ?? undefined,
+    isPinned: Boolean(data.is_pinned),
   });
+});
+
+router.post('/sessions/:id/comments/:commentId/pin', requireAuth, async (req, res) => {
+  const { userId } = req as AuthedRequest;
+  const sessionId = String(req.params.id);
+  const commentId = String(req.params.commentId);
+  const access = await canModerateSession(sessionId, userId);
+  if (!access.session) return sendError(res, 404, 'Session not found');
+  if (!access.ok) return sendError(res, 403, 'Only the host or moderators can pin comments', 'FORBIDDEN');
+
+  const service = createServiceClient();
+  const { data: comment, error: commentError } = await service
+    .from('live_comments')
+    .select('id, session_id, user_id, text, client_id, is_pinned')
+    .eq('id', commentId)
+    .eq('session_id', sessionId)
+    .maybeSingle();
+  if (commentError) return handleSupabaseError(res, commentError);
+  if (!comment) return sendError(res, 404, 'Comment not found');
+
+  const { error: clearError } = await service
+    .from('live_comments')
+    .update({ is_pinned: false })
+    .eq('session_id', sessionId)
+    .eq('is_pinned', true);
+  if (clearError) return handleSupabaseError(res, clearError);
+
+  const { data: pinned, error: pinError } = await service
+    .from('live_comments')
+    .update({ is_pinned: true })
+    .eq('id', commentId)
+    .eq('session_id', sessionId)
+    .select('*')
+    .single();
+  if (pinError) return handleSupabaseError(res, pinError);
+
+  const user = await getProfileById(service, String(pinned.user_id));
+  return res.json({
+    id: pinned.id,
+    user: user?.username ?? 'unknown',
+    text: pinned.text,
+    clientId: pinned.client_id ?? undefined,
+    photoUrl: publicPhotoUrl(user?.photo_url) ?? undefined,
+    isPinned: true,
+  });
+});
+
+router.delete('/sessions/:id/comments/:commentId/pin', requireAuth, async (req, res) => {
+  const { userId } = req as AuthedRequest;
+  const sessionId = String(req.params.id);
+  const commentId = String(req.params.commentId);
+  const access = await canModerateSession(sessionId, userId);
+  if (!access.session) return sendError(res, 404, 'Session not found');
+  if (!access.ok) return sendError(res, 403, 'Only the host or moderators can unpin comments', 'FORBIDDEN');
+
+  const service = createServiceClient();
+  const { data: comment, error: commentError } = await service
+    .from('live_comments')
+    .select('id')
+    .eq('id', commentId)
+    .eq('session_id', sessionId)
+    .maybeSingle();
+  if (commentError) return handleSupabaseError(res, commentError);
+  if (!comment) return sendError(res, 404, 'Comment not found');
+
+  const { error } = await service
+    .from('live_comments')
+    .update({ is_pinned: false })
+    .eq('id', commentId)
+    .eq('session_id', sessionId);
+  if (error) return handleSupabaseError(res, error);
+
+  return res.json({ ok: true, id: commentId });
 });
 
 router.delete('/sessions/:id/comments/:commentId', requireAuth, async (req, res) => {

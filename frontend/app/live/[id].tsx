@@ -1,6 +1,8 @@
 import {
+  LiveCommentActionsSheet,
   LiveComposer,
   LiveConnectionOverlay,
+  LivePinnedCommentBanner,
   LiveReportSheet,
   LiveStage,
 } from '@/components/live/live-stage';
@@ -19,7 +21,7 @@ import {
   ShareIcon,
 } from '@/components/ui/icons';
 import { Palette, Typography } from '@/constants/theme';
-import type { LiveConnection, LiveMediaCredentials, LiveStreamProduct } from '@/data/types';
+import type { LiveComment, LiveConnection, LiveMediaCredentials, LiveStreamProduct } from '@/data/types';
 import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
 import { useLive } from '@/context/live-context';
@@ -81,6 +83,7 @@ export default function LiveViewerScreen() {
   const [isFollowing, setIsFollowing] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
   const [swipeHintVisible, setSwipeHintVisible] = useState(true);
+  const [actionComment, setActionComment] = useState<LiveComment | null>(null);
   const claimingRef = useRef(false);
   const translateY = useSharedValue(0);
   const sheetsBlocking = useSharedValue(0);
@@ -97,7 +100,8 @@ export default function LiveViewerScreen() {
     () => buildLiveSwipeQueue(live.liveNow, sessionId),
     [live.liveNow, sessionId],
   );
-  const sheetsOpen = reportOpen || watchersOpen || catalogOpen || listingOpen || keyboardOpen;
+  const sheetsOpen =
+    reportOpen || watchersOpen || catalogOpen || listingOpen || keyboardOpen || Boolean(actionComment);
   useEffect(() => {
     sheetsBlocking.value = sheetsOpen ? 1 : 0;
   }, [sheetsBlocking, sheetsOpen]);
@@ -278,6 +282,7 @@ export default function LiveViewerScreen() {
 
   const drawerListing = drawerProduct ? live.resolveListing(drawerProduct.listingId) : null;
   const comments = viewSession ? live.getComments(viewSession.id) : [];
+  const pinnedComment = viewSession ? live.getPinnedComment(viewSession.id) : undefined;
   const visibleComments = comments.slice(-maxComments);
 
   useEffect(() => {
@@ -348,6 +353,21 @@ export default function LiveViewerScreen() {
   const connection = live.getConnection(activeSession.id);
   const username = session.username;
   const isOwnLive = username === activeSession.host;
+  const canModerateComments =
+    Boolean(username) &&
+    (isOwnLive || live.isModerator(activeSession.id, username));
+
+  async function reportComment(comment: LiveComment) {
+    try {
+      await apiFetch(`/live/sessions/${activeSession.id}/report`, {
+        method: 'POST',
+        body: JSON.stringify({ kind: 'user' }),
+      });
+      showEdgeToast(`Reported @${comment.user}`);
+    } catch {
+      showEdgeToast("We couldn't send that report.");
+    }
+  }
 
   function leave() {
     router.replace('/(tabs)/live');
@@ -607,6 +627,16 @@ export default function LiveViewerScreen() {
           pointerEvents="box-none"
         >
           <View style={styles.chatColumn} pointerEvents="box-none">
+            {pinnedComment ? (
+              <LivePinnedCommentBanner
+                comment={pinnedComment}
+                onPress={
+                  canModerateComments
+                    ? () => setActionComment(pinnedComment)
+                    : undefined
+                }
+              />
+            ) : null}
             {visibleComments.length === 0 ? (
               <View style={styles.emptyChat}>
                 <Text style={styles.emptyChatText}>Be the first to say something</Text>
@@ -616,7 +646,19 @@ export default function LiveViewerScreen() {
                 const age = visibleComments.length - 1 - index;
                 const opacity = age === 0 ? 1 : age === 1 ? 0.78 : 0.42;
                 return (
-                  <View key={comment.id} style={[styles.commentRow, { opacity }]}>
+                  <Pressable
+                    key={comment.id}
+                    style={[styles.commentRow, { opacity }]}
+                    onLongPress={
+                      canModerateComments
+                        ? () => {
+                            void Haptics.selectionAsync();
+                            setActionComment(comment);
+                          }
+                        : undefined
+                    }
+                    delayLongPress={280}
+                  >
                     <ProfileAvatar
                       uri={
                         comment.photoUrl ??
@@ -637,7 +679,7 @@ export default function LiveViewerScreen() {
                         </View>
                       ) : null}
                     </View>
-                  </View>
+                  </Pressable>
                 );
               })
             )}
@@ -683,6 +725,40 @@ export default function LiveViewerScreen() {
         onReportUser={() => void submitReport('user')}
         onReportListing={() => void submitReport('listing')}
         onLeave={leave}
+      />
+
+      <LiveCommentActionsSheet
+        visible={Boolean(actionComment)}
+        comment={actionComment}
+        onClose={() => setActionComment(null)}
+        onRemove={() => {
+          if (!actionComment) return;
+          void live.removeComment(activeSession.id, actionComment.id).then(() => {
+            showEdgeToast('Comment removed');
+          });
+          setActionComment(null);
+        }}
+        onPin={() => {
+          if (!actionComment) return;
+          void live.pinComment(activeSession.id, actionComment.id).then(() => {
+            showEdgeToast('Comment pinned');
+          });
+        }}
+        onUnpin={() => {
+          if (!actionComment) return;
+          void live.unpinComment(activeSession.id, actionComment.id).then(() => {
+            showEdgeToast('Comment unpinned');
+          });
+        }}
+        onMute={() => {
+          if (actionComment) showEdgeToast(`Muted @${actionComment.user}`);
+        }}
+        onRemoveViewer={() => {
+          if (actionComment) showEdgeToast(`Removed @${actionComment.user} from live`);
+        }}
+        onReport={() => {
+          if (actionComment) void reportComment(actionComment);
+        }}
       />
 
       <LiveWatchersSheet

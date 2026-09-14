@@ -21,7 +21,6 @@ import type { LiveConnection, LiveComment, LiveMediaCredentials } from '@/data/t
 import { loadLiveKitNative, resetLiveKitNativeLoad, getLiveKitLoadFailure, getLiveKitLoadFailureDetail, type LiveKitNative } from '@/lib/livekit-native';
 import {
   applyLivePublishEncoding,
-  getLiveCaptureOptions,
   getLiveKitRoomOptions,
   getLivePublishEncoding,
   loadLiveVideoProfileOverride,
@@ -488,10 +487,9 @@ function CameraLayer({
 
   const captureFor = useCallback(
     (mode: CameraFacing) =>
-      videoTier === 'legacy'
-        ? { facingMode: mode as LiveCameraFacing }
-        : getLiveCaptureOptions(mode, videoTier),
-    [videoTier],
+      // Facing only — forced resolution blacks out some MIUI multi-camera setups.
+      ({ facingMode: mode as LiveCameraFacing }),
+    [],
   );
 
   /** Restart camera (+ mic) for the current facing — used after background and for flips. */
@@ -592,6 +590,7 @@ function CameraLayer({
         await localParticipant.setMicrophoneEnabled(true);
         const published = localParticipant.getTrackPublication(client.Track.Source.Camera)?.track as
           | {
+              unmute?: () => Promise<void> | void;
               sender?: {
                 getParameters: () => { encodings?: Array<{ maxBitrate?: number; maxFramerate?: number }> };
                 setParameters: (params: {
@@ -600,6 +599,12 @@ function CameraLayer({
               };
             }
           | undefined;
+        // Some Android builds start the camera track muted after the first enable.
+        try {
+          await published?.unmute?.();
+        } catch {
+          /* best-effort */
+        }
         await applyLivePublishEncoding(published, encoding);
         if (!cancelled) {
           setFacing('user');
@@ -971,6 +976,7 @@ export function LiveCommentActionsSheet({
   onClose,
   onRemove,
   onPin,
+  onUnpin,
   onMute,
   onRemoveViewer,
   onReport,
@@ -980,6 +986,7 @@ export function LiveCommentActionsSheet({
   onClose: () => void;
   onRemove?: () => void;
   onPin?: () => void;
+  onUnpin?: () => void;
   onMute?: () => void;
   onRemoveViewer?: () => void;
   onReport?: () => void;
@@ -988,7 +995,9 @@ export function LiveCommentActionsSheet({
   if (!comment) return null;
 
   const actions = [
-    { label: 'Pin comment', destructive: false, onPress: () => { onPin?.(); onClose(); } },
+    comment.isPinned
+      ? { label: 'Unpin comment', destructive: false, onPress: () => { onUnpin?.(); onClose(); } }
+      : { label: 'Pin comment', destructive: false, onPress: () => { onPin?.(); onClose(); } },
     { label: 'Remove comment', destructive: true, onPress: () => { onRemove?.(); onClose(); } },
     { label: 'Mute viewer', destructive: true, onPress: () => { onMute?.(); onClose(); } },
     { label: 'Remove viewer from live', destructive: true, onPress: () => { onRemoveViewer?.(); onClose(); } },
@@ -1018,6 +1027,24 @@ export function LiveCommentActionsSheet({
         </View>
       </Pressable>
     </Modal>
+  );
+}
+
+export function LivePinnedCommentBanner({
+  comment,
+  onPress,
+}: {
+  comment: LiveComment;
+  onPress?: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} style={styles.pinnedBanner}>
+      <Text style={styles.pinnedEyebrow}>Pinned</Text>
+      <Text style={styles.pinnedText} numberOfLines={2}>
+        <Text style={styles.pinnedUser}>{comment.user} </Text>
+        {comment.text}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -1441,6 +1468,33 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: 'rgba(255,247,240,0.45)',
     fontFamily: Typography.body,
+  },
+  pinnedBanner: {
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(27,17,19,0.72)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,247,240,0.18)',
+  },
+  pinnedEyebrow: {
+    fontSize: 10,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.blush,
+    marginBottom: 4,
+  },
+  pinnedText: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: Typography.body,
+    color: Palette.ivory,
+  },
+  pinnedUser: {
+    fontFamily: Typography.bodySemiBold,
+    color: LIVE_IVORY_62,
   },
   composer: {
     flexDirection: 'row',
