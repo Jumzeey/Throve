@@ -10,7 +10,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ROLE_LABELS, type AdminRole } from '@/lib/roles';
-import { isSupabaseConfigured } from '@/lib/supabase';
 import { Loader2 } from 'lucide-react';
 
 const DEMO_ROLES: { role: AdminRole; name: string; email: string }[] = [
@@ -23,12 +22,12 @@ const DEMO_ROLES: { role: AdminRole; name: string; email: string }[] = [
 type GateState = 'form' | 'verifying' | 'unauthorized' | 'revoked' | 'expired' | 'offline' | 'demo';
 
 export function LoginPage() {
-  const { session, loading, supabaseReady, signInWithPassword, signInDemo } = useAuth();
+  const { session, loading, apiReady, signInWithPassword, signInDemo } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [demoRole, setDemoRole] = useState<AdminRole>('super_admin');
   const [error, setError] = useState<string | null>(null);
-  const [gate, setGate] = useState<GateState>(() => (isSupabaseConfigured ? 'form' : 'demo'));
+  const [gate, setGate] = useState<GateState>('form');
   const [submitting, setSubmitting] = useState(false);
 
   if (loading) {
@@ -49,11 +48,6 @@ export function LoginPage() {
       return;
     }
     if (gate === 'unauthorized' || gate === 'revoked') return;
-    if (!supabaseReady) {
-      setGate('demo');
-      setError('Live auth is not configured on this deploy. Use Demo UI, or set VITE_SUPABASE_* on Vercel.');
-      return;
-    }
     if (!email.trim() || !password.trim()) {
       setError('Enter your staff email and password.');
       return;
@@ -65,7 +59,7 @@ export function LoginPage() {
       await signInWithPassword({ email, password });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not sign in';
-      if (/not staff|admin_role|not provisioned/i.test(message)) {
+      if (/not provisioned|staff|FORBIDDEN|admin_role/i.test(message)) {
         setGate('unauthorized');
       } else {
         setGate('form');
@@ -107,14 +101,14 @@ export function LoginPage() {
             Sign in to continue
           </CardTitle>
           <CardDescription className="text-[13px] leading-relaxed text-body">
-            Staff accounts only. Navigation and actions follow least privilege for your role.
+            Staff accounts only. Sign-in goes through the Throve API — no Supabase client in this app.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {gate === 'offline' ? <OfflineBanner onRetry={() => setGate('form')} /> : null}
 
           {gate === 'verifying' || submitting ? (
-            <div className="flex flex-col items-center gap-2 py-8 text-[12.5px] text-muted">
+            <div className="flex flex-col items-center gap-2 py-8 text-[12.5px] text-body">
               <Loader2 className="size-5 animate-spin text-plum" />
               Verifying staff credentials…
             </div>
@@ -143,29 +137,15 @@ export function LoginPage() {
 
           {gate === 'demo' ? (
             <div className="flex flex-col gap-3">
-              {!supabaseReady ? (
-                <Alert className="border-hold-border bg-hold-bg text-[#8a5a15]">
-                  <AlertTitle className="text-[12px]">Env not set on this deploy</AlertTitle>
-                  <AlertDescription className="text-[11.5px]">
-                    Build needs <span className="font-mono">SUPABASE_URL</span> +{' '}
-                    <span className="font-mono">SUPABASE_ANON_KEY</span> (already on the project) available at build
-                    time. Redeploy after the latest fix, or use Demo UI.
-                  </AlertDescription>
-                </Alert>
-              ) : (
-                <Alert className="border-border-soft bg-[#f3ede6]">
-                  <AlertTitle className="text-[12px]">Demo mode</AlertTitle>
-                  <AlertDescription className="text-[11.5px] text-body">
-                    Offline UI only — no live approve/reject. Use Ready for real staff login.
-                  </AlertDescription>
-                </Alert>
-              )}
+              <Alert className="border-border-soft bg-[#f3ede6]">
+                <AlertTitle className="text-[12px]">Demo mode</AlertTitle>
+                <AlertDescription className="text-[11.5px] text-body">
+                  Offline UI only — no live approve/reject. Use Ready for real staff login.
+                </AlertDescription>
+              </Alert>
               <div className="flex flex-col gap-1.5">
                 <Label className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-2">Demo role</Label>
-                <Select
-                  value={demoRole}
-                  onValueChange={(value) => setDemoRole(value as AdminRole)}
-                >
+                <Select value={demoRole} onValueChange={(value) => setDemoRole(value as AdminRole)}>
                   <SelectTrigger className="w-full bg-panel-elevated">
                     <SelectValue />
                   </SelectTrigger>
@@ -227,7 +207,7 @@ export function LoginPage() {
                   <AlertDescription>{error}</AlertDescription>
                 </Alert>
               ) : null}
-              <Button type="submit" className="mt-1 w-full" disabled={gate === 'offline' || submitting}>
+              <Button type="submit" className="mt-1 w-full" disabled={gate === 'offline' || submitting || !apiReady}>
                 Sign in
               </Button>
             </form>
@@ -240,9 +220,7 @@ export function LoginPage() {
           )}
 
           <p className="mt-2 text-[11px] leading-relaxed text-body">
-            {supabaseReady
-              ? 'Live auth via Supabase. Staff need a non-null admin_role on their profile.'
-              : 'This deploy is missing Supabase env vars — Demo UI is available until they are set on Vercel.'}
+            Password check and staff role gate run on the API. Staff need a non-null admin_role on their profile.
           </p>
         </CardContent>
       </Card>

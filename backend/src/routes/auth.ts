@@ -7,6 +7,7 @@ import { sendMailjetEmail } from '../lib/mailjet.js';
 import { notifyUser } from '../lib/notify.js';
 import { validatePassword } from '../lib/password.js';
 import { createServiceClient, createSupabaseClient } from '../lib/supabase.js';
+import { getProfileById, mapProfile } from '../lib/mappers.js';
 import { type AuthedRequest, optionalAuth } from '../middleware/auth.js';
 
 const router = Router();
@@ -516,5 +517,74 @@ async function sendOtpEmail(
 
   return { ok: true };
 }
+
+/** Staff console login — password auth on the server; requires profiles.admin_role. */
+router.post('/staff/login', async (req, res) => {
+  const parsed = z
+    .object({
+      email: z.string().email(),
+      password: z.string().min(1),
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, 'Email and password are required');
+
+  const email = parsed.data.email.trim().toLowerCase();
+  const password = parsed.data.password;
+  const authClient = createSupabaseClient();
+  const signIn = await authClient.auth.signInWithPassword({ email, password });
+  if (signIn.error || !signIn.data.session || !signIn.data.user) {
+    return sendError(res, 401, 'Invalid email or password', 'UNAUTHORIZED');
+  }
+
+  const service = createServiceClient();
+  const profile = await getProfileById(service, signIn.data.user.id);
+  if (!profile?.admin_role) {
+    await authClient.auth.signOut();
+    return sendError(res, 403, 'This account is not provisioned for the admin console', 'FORBIDDEN');
+  }
+
+  const mapped = mapProfile(profile);
+  return res.json({
+    accessToken: signIn.data.session.access_token,
+    refreshToken: signIn.data.session.refresh_token,
+    expiresAt: signIn.data.session.expires_at ?? null,
+    user: {
+      userId: mapped.userId,
+      email: mapped.email,
+      name: mapped.name || mapped.email,
+      adminRole: mapped.adminRole,
+    },
+  });
+});
+
+router.post('/staff/refresh', async (req, res) => {
+  const parsed = z.object({ refreshToken: z.string().min(10) }).safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, 'refreshToken is required');
+
+  const authClient = createSupabaseClient();
+  const refreshed = await authClient.auth.refreshSession({ refresh_token: parsed.data.refreshToken });
+  if (refreshed.error || !refreshed.data.session || !refreshed.data.user) {
+    return sendError(res, 401, 'Session expired. Sign in again.', 'UNAUTHORIZED');
+  }
+
+  const service = createServiceClient();
+  const profile = await getProfileById(service, refreshed.data.user.id);
+  if (!profile?.admin_role) {
+    return sendError(res, 403, 'This account is not provisioned for the admin console', 'FORBIDDEN');
+  }
+
+  const mapped = mapProfile(profile);
+  return res.json({
+    accessToken: refreshed.data.session.access_token,
+    refreshToken: refreshed.data.session.refresh_token,
+    expiresAt: refreshed.data.session.expires_at ?? null,
+    user: {
+      userId: mapped.userId,
+      email: mapped.email,
+      name: mapped.name || mapped.email,
+      adminRole: mapped.adminRole,
+    },
+  });
+});
 
 export default router;

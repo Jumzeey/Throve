@@ -1,7 +1,13 @@
 import type { AdminRole } from '../lib/roles';
-import { apiFetch } from '../lib/api';
+import { apiFetch, API_URL } from '../lib/api';
 import { ROLE_LABELS } from '../lib/roles';
-import { isSupabaseConfigured, supabase } from '../lib/supabase';
+import {
+  clearStaffSession,
+  readStoredStaff,
+  readTokens,
+  writeStoredStaff,
+  writeTokens,
+} from '../lib/session';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 export type StaffSession = {
@@ -15,42 +21,34 @@ export type StaffSession = {
 type AuthContextValue = {
   session: StaffSession | null;
   loading: boolean;
-  supabaseReady: boolean;
+  /** True when the admin can call the Node API (always, unless misconfigured). */
+  apiReady: boolean;
   signInWithPassword: (input: { email: string; password: string }) => Promise<void>;
-  /** Prototype fallback when Supabase env is missing. */
   signInDemo: (input: { email: string; name: string; role: AdminRole }) => void;
   signOut: () => Promise<void>;
 };
 
-type ProfileMe = {
-  userId: string;
-  email: string;
-  name: string;
-  adminRole?: AdminRole | null;
+type StaffLoginResponse = {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt?: number | null;
+  user: {
+    userId: string;
+    email: string;
+    name: string;
+    adminRole: AdminRole;
+  };
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-async function loadStaffSession(): Promise<StaffSession | null> {
-  if (!isSupabaseConfigured) return null;
-
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  const user = data.session?.user;
-  if (!token || !user) return null;
-
-  const profile = await apiFetch<ProfileMe>('/profiles/me');
-  if (!profile.adminRole) {
-    await supabase.auth.signOut();
-    throw new Error('This account is not staff. Ask a Super Admin to grant admin_role.');
-  }
-
+function toSession(user: StaffLoginResponse['user'], accessToken: string): StaffSession {
   return {
-    userId: profile.userId,
-    email: profile.email,
-    name: profile.name || profile.email,
-    role: profile.adminRole,
-    accessToken: token,
+    userId: user.userId,
+    email: user.email,
+    name: user.name || user.email,
+    role: user.adminRole,
+    accessToken,
   };
 }
 
@@ -59,56 +57,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const next = await loadStaffSession();
-        if (!cancelled) setSession(next);
-      } catch {
-        if (!cancelled) setSession(null);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-
-    if (!isSupabaseConfigured) {
-      return () => {
-        cancelled = true;
-      };
+    const tokens = readTokens();
+    const staff = readStoredStaff();
+    if (tokens?.accessToken && staff?.role) {
+      setSession({
+        ...staff,
+        accessToken: tokens.accessToken,
+      });
     }
-
-    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      if (event !== 'SIGNED_IN' && event !== 'SIGNED_OUT' && event !== 'TOKEN_REFRESHED') return;
-      if (event === 'SIGNED_OUT') {
-        setSession(null);
-        return;
-      }
-      void loadStaffSession()
-        .then((next) => setSession(next))
-        .catch(() => setSession(null));
-    });
-
-    return () => {
-      cancelled = true;
-      sub.subscription.unsubscribe();
-    };
+    setLoading(false);
   }, []);
 
   const signInWithPassword = useCallback(async (input: { email: string; password: string }) => {
-    if (!isSupabaseConfigured) {
-      throw new Error('Supabase env vars are not configured on this deploy.');
-    }
-    const { error } = await supabase.auth.signInWithPassword({
-      email: input.email.trim().toLowerCase(),
-      password: input.password,
+    clearStaffSession();
+    const data = await apiFetch<StaffLoginResponse>('/auth/staff/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: input.email.trim().toLowerCase(),
+        password: input.password,
+      }),
     });
-    if (error) throw error;
-    const next = await loadStaffSession();
-    if (!next) throw new Error('Could not load staff profile.');
-    setSession(next);
+    writeTokens({
+      accessToken: data.accessToken,
+      refreshToken: data.refreshToken,
+      expiresAt: data.expiresAt,
+    });
+    writeStoredStaff({
+      userId: data.user.userId,
+      email: data.user.email,
+      name: data.user.name || data.user.email,
+      role: data.user.adminRole,
+    });
+    setSession(toSession(data.user, data.accessToken));
   }, []);
 
   const signInDemo = useCallback((input: { email: string; name: string; role: AdminRole }) => {
+    clearStaffSession();
     setSession({
       userId: 'demo',
       email: input.email.trim().toLowerCase(),
@@ -119,7 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    if (isSupabaseConfigured) await supabase.auth.signOut();
+    clearStaffSession();
     setSession(null);
   }, []);
 
@@ -127,7 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       session,
       loading,
-      supabaseReady: isSupabaseConfigured,
+      apiReady: Boolean(API_URL),
       signInWithPassword,
       signInDemo,
       signOut,
