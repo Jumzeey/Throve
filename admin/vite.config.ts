@@ -6,13 +6,44 @@ import tailwindcss from '@tailwindcss/vite';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 
-export default defineConfig(({ mode }) => {
-  // Read all env (Vercel injects SUPABASE_* / PUBLIC_* without VITE_ prefix).
-  const env = loadEnv(mode, dir, '');
+function pick(...values: Array<string | undefined>) {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) return trimmed;
+  }
+  return '';
+}
 
-  const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || '';
-  const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || env.SUPABASE_ANON_KEY || '';
-  const apiUrl = env.VITE_API_URL || env.PUBLIC_API_URL || '';
+export default defineConfig(({ mode }) => {
+  // Prefer process.env (what Vercel injects at build), then .env files.
+  const fileEnv = loadEnv(mode, dir, '');
+
+  const supabaseUrl = pick(
+    process.env.VITE_SUPABASE_URL,
+    process.env.SUPABASE_URL,
+    fileEnv.VITE_SUPABASE_URL,
+    fileEnv.SUPABASE_URL,
+  );
+  const supabaseAnonKey = pick(
+    process.env.VITE_SUPABASE_ANON_KEY,
+    process.env.SUPABASE_ANON_KEY,
+    fileEnv.VITE_SUPABASE_ANON_KEY,
+    fileEnv.SUPABASE_ANON_KEY,
+  );
+  const apiUrl = pick(
+    process.env.VITE_API_URL,
+    process.env.PUBLIC_API_URL,
+    fileEnv.VITE_API_URL,
+    fileEnv.PUBLIC_API_URL,
+  );
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.warn(
+      '[vite] Supabase URL/anon key empty at build. Expected SUPABASE_URL + SUPABASE_ANON_KEY (or VITE_*).',
+    );
+  } else {
+    console.info('[vite] Supabase env resolved for admin build.');
+  }
 
   return {
     plugins: [react(), tailwindcss()],
@@ -20,8 +51,6 @@ export default defineConfig(({ mode }) => {
       dedupe: ['react', 'react-dom'],
       alias: {
         '@': path.resolve(dir, 'src'),
-        // Force a single React instance — monorepo root also has React (Expo),
-        // which otherwise causes invalid hook calls with react-router.
         react: path.resolve(dir, 'node_modules/react'),
         'react-dom': path.resolve(dir, 'node_modules/react-dom'),
       },
@@ -29,12 +58,11 @@ export default defineConfig(({ mode }) => {
     optimizeDeps: {
       include: ['react', 'react-dom', 'react-router', 'react-router-dom'],
     },
-    // Map existing Vercel names into the VITE_* keys the app reads.
-    // Do not expose SERVICE_ROLE or other secrets here.
+    // Custom globals — Vite overwrites import.meta.env.VITE_* when those keys are unset.
     define: {
-      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),
-      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(supabaseAnonKey),
-      'import.meta.env.VITE_API_URL': JSON.stringify(apiUrl),
+      __THROVE_SUPABASE_URL__: JSON.stringify(supabaseUrl),
+      __THROVE_SUPABASE_ANON_KEY__: JSON.stringify(supabaseAnonKey),
+      __THROVE_API_URL__: JSON.stringify(apiUrl),
     },
     server: {
       port: 5180,

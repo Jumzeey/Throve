@@ -147,10 +147,9 @@ export function LoginPage() {
                 <Alert className="border-hold-border bg-hold-bg text-[#8a5a15]">
                   <AlertTitle className="text-[12px]">Env not set on this deploy</AlertTitle>
                   <AlertDescription className="text-[11.5px]">
-                    Add <span className="font-mono">VITE_SUPABASE_URL</span>,{' '}
-                    <span className="font-mono">VITE_SUPABASE_ANON_KEY</span>, and{' '}
-                    <span className="font-mono">VITE_API_URL</span> in Vercel → Settings → Environment Variables,
-                    then redeploy. Demo UI works without them.
+                    Build needs <span className="font-mono">SUPABASE_URL</span> +{' '}
+                    <span className="font-mono">SUPABASE_ANON_KEY</span> (already on the project) available at build
+                    time. Redeploy after the latest fix, or use Demo UI.
                   </AlertDescription>
                 </Alert>
               ) : (

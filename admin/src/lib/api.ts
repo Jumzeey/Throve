@@ -1,6 +1,12 @@
 import { supabase } from './supabase';
 
-const API_URL = (import.meta.env.VITE_API_URL ?? 'https://throve-production.up.railway.app').replace(/\/$/, '');
+declare const __THROVE_API_URL__: string;
+
+const API_URL = (
+  typeof __THROVE_API_URL__ !== 'undefined' && __THROVE_API_URL__
+    ? __THROVE_API_URL__
+    : 'https://throve-production.up.railway.app'
+).replace(/\/$/, '');
 
 export class ApiError extends Error {
   code?: string;

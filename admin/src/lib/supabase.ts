@@ -1,14 +1,19 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() ?? '';
-const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() ?? '';
+declare const __THROVE_SUPABASE_URL__: string;
+declare const __THROVE_SUPABASE_ANON_KEY__: string;
 
-/** False on Vercel until project env vars are set — app still boots in demo mode. */
+const supabaseUrl = (typeof __THROVE_SUPABASE_URL__ !== 'undefined' ? __THROVE_SUPABASE_URL__ : '').trim();
+const supabaseAnonKey = (
+  typeof __THROVE_SUPABASE_ANON_KEY__ !== 'undefined' ? __THROVE_SUPABASE_ANON_KEY__ : ''
+).trim();
+
+/** False until Supabase URL + anon key are present at build time. */
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
 if (!isSupabaseConfigured) {
   console.warn(
-    'Missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY. Staff password login is disabled; use Demo UI.',
+    'Missing Supabase URL / anon key at build time. Staff password login is disabled; use Demo UI.',
   );
 }
 
