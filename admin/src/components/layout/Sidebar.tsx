@@ -80,7 +80,7 @@ const BADGES: Partial<Record<AdminRoute, number>> = {
   payouts: mockBadgeCounts.payouts,
 };
 
-export function Sidebar() {
+export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const { session, signOut } = useAuth();
   if (!session) return null;
 
@@ -92,7 +92,7 @@ export function Sidebar() {
     .filter((section) => section.routes.length > 0);
 
   return (
-    <aside className="flex h-full w-[236px] shrink-0 flex-col bg-sidebar text-panel">
+    <div className="flex h-full min-h-0 w-full flex-col bg-sidebar text-panel">
       <div className="border-b border-white/10 px-[22px] pb-[22px] pt-5">
         <BrandMark variant="onDark" size="md" showWordmark />
         <div className="mt-2 text-[9.5px] font-semibold tracking-[0.2em] text-gold uppercase">
@@ -115,6 +115,7 @@ export function Sidebar() {
                     key={route}
                     to={ROUTE_PATHS[route]}
                     end={route === 'operations'}
+                    onClick={() => onNavigate?.()}
                     className={({ isActive }) =>
                       cn(
                         'flex items-center justify-between gap-2 border-l-2 py-2.5 pr-2.5 pl-[18px] text-[12.5px] transition',
@@ -163,6 +164,14 @@ export function Sidebar() {
           Sign out
         </button>
       </div>
+    </div>
+  );
+}
+
+export function Sidebar() {
+  return (
+    <aside className="hidden h-full w-[236px] shrink-0 lg:flex">
+      <SidebarNav />
     </aside>
   );
 }

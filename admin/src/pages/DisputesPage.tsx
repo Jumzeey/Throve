@@ -1,16 +1,21 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/auth/AuthContext';
+import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
 import { EmptyState } from '@/components/admin/empty-state';
 import { FilterChips } from '@/components/admin/filter-chips';
+import { CopyableId } from '@/components/admin/copyable-id';
+import { ListWindowFooter } from '@/components/admin/list-window-footer';
 import { StatusBadge } from '@/components/admin/status-badge';
+import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { formatNaira, mockDisputes, type MockDispute } from '@/data/mock';
+import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
 import { canAct, ROLE_LABELS } from '@/lib/roles';
 import { cn } from '@/lib/utils';
@@ -66,7 +71,7 @@ export function DisputesPage() {
   const { banner, show } = useToast();
   const [filter, setFilter] = useState('open');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useState(mockDisputes[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useBleedSelection(mockDisputes[0]?.id ?? null);
   const [outcome, setOutcome] = useState<Decision>('Refund buyer');
   const [reason, setReason] = useState(mockDisputes[0]?.defaultReason ?? '');
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -107,6 +112,8 @@ export function DisputesPage() {
     });
   }, [filter, search]);
 
+  const listWindow = useListWindow(rows);
+
   const selected = mockDisputes.find((d) => d.id === selectedId) ?? null;
   const recordedForSelected = selected ? recorded[selected.id] : undefined;
   const isDecided =
@@ -133,8 +140,15 @@ export function DisputesPage() {
 
   return (
     <>
-      <div className="grid h-full min-h-0 grid-cols-2">
-        <div className="flex min-h-0 min-w-0 flex-col border-r border-[#dccfc4] bg-panel">
+      <BleedSplit
+        open={!!selectedId}
+        onOpenChange={(open) => {
+          if (!open) setSelectedId(null);
+        }}
+        gridClassName="grid-cols-1 lg:grid-cols-2"
+        inspectorTitle="Dispute"
+        list={
+          <>
           <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
             <FilterChips
               tone="soft"
@@ -150,7 +164,7 @@ export function DisputesPage() {
             {banner}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-auto px-3 py-3">
+          <div ref={listWindow.scrollRef} className="min-h-0 flex-1 overflow-auto px-3 py-3">
             {rows.length === 0 ? (
               <EmptyState
                 title="No cases found"
@@ -163,7 +177,7 @@ export function DisputesPage() {
               />
             ) : (
               <div className="flex flex-col gap-2">
-                {rows.map((d) => {
+                {listWindow.visible.map((d) => {
                   const active = d.id === selectedId;
                   return (
                     <button
@@ -203,6 +217,7 @@ export function DisputesPage() {
                     </button>
                   );
                 })}
+                <ListWindowFooter {...listWindow} />
               </div>
             )}
           </div>
@@ -210,15 +225,16 @@ export function DisputesPage() {
           <div className="border-t border-[#e7dcd2] px-4 py-2.5 text-[10.5px] text-[#8c7a73]">
             Showing {rows.length} of 23 · queue order is AI-assisted, review is human.
           </div>
-        </div>
-
-        {selected ? (
-          <div className="flex min-h-0 min-w-0 flex-col overflow-auto bg-panel px-5 py-5">
+          </>
+        }
+        inspector={
+          selected ? (
+            <div className="flex min-h-0 min-w-0 flex-col overflow-auto bg-panel px-5 py-5">
             <div className="flex flex-col gap-3.5">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
+                <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="font-display text-[26px] leading-none text-espresso">{selected.id}</h2>
+                    <CopyableId value={selected.id} variant="display" />
                     {isFinance ? <StatusBadge tone="plum">Finance</StatusBadge> : null}
                     {isSupport ? <StatusBadge tone="plum">Customer Support</StatusBadge> : null}
                     {selected.unassigned ? <StatusBadge tone="neutral">New · unassigned</StatusBadge> : null}
@@ -660,10 +676,13 @@ export function DisputesPage() {
               ) : null}
             </div>
           </div>
-        ) : (
-          <div className="flex items-center justify-center text-[12px] text-muted">Select a case to inspect.</div>
-        )}
-      </div>
+          ) : (
+            <div className="flex flex-1 items-center justify-center px-6 text-[12px] text-muted">
+              Select a case to inspect.
+            </div>
+          )
+        }
+      />
 
       {confirmOpen && selected ? (
         <ConfirmActionDialog

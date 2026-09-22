@@ -1,6 +1,7 @@
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Inbox, Loader2, WifiOff } from 'lucide-react';
+import { ListSkeleton } from '@/components/admin/loading-skeleton';
+import { Inbox, WifiOff } from 'lucide-react';
 
 export function EmptyState({
   title = 'Nothing here',
@@ -27,13 +28,9 @@ export function EmptyState({
   );
 }
 
-export function LoadingState({ label = 'Loading…' }: { label?: string }) {
-  return (
-    <div className="flex items-center justify-center gap-2 py-16 text-[12.5px] text-muted">
-      <Loader2 className="size-4 animate-spin" />
-      {label}
-    </div>
-  );
+/** List skeleton for queue loads — never a spinner (auth screens keep their own). */
+export function LoadingState({ rows = 8 }: { label?: string; rows?: number }) {
+  return <ListSkeleton rows={rows} />;
 }
 
 export function OfflineBanner({ onRetry }: { onRetry?: () => void }) {

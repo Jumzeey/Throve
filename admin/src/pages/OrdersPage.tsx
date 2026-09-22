@@ -1,21 +1,25 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth, roleLabel } from '@/auth/AuthContext';
+import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
-import { EmptyState, ErrorState, LoadingState, OfflineBanner } from '@/components/admin/empty-state';
+import { EmptyState } from '@/components/admin/empty-state';
+import { ExpandableListHeader, ExpandableListRow } from '@/components/admin/expandable-list-row';
 import { FilterChips } from '@/components/admin/filter-chips';
+import { CopyableId } from '@/components/admin/copyable-id';
+import { ListWindowFooter } from '@/components/admin/list-window-footer';
 import { StatusBadge, type StatusTone } from '@/components/admin/status-badge';
+import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { formatNaira, mockOrders, type MockOrder, type MockOrderFlag } from '@/data/mock';
+import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
 import { ROLE_LABELS } from '@/lib/roles';
-import { cn } from '@/lib/utils';
 import { Lock } from 'lucide-react';
 
-type DemoState = 'ready' | 'loading' | 'empty' | 'error' | 'offline';
 type QueueFilter =
   | 'needs_assistance'
   | 'Paid'
@@ -79,9 +83,8 @@ export function OrdersPage() {
   const { banner, show } = useToast();
   const [queue, setQueue] = useState<QueueFilter>('needs_assistance');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useState(mockOrders[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useBleedSelection(mockOrders[0]?.id ?? null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
-  const [demoState, setDemoState] = useState<DemoState>('ready');
   const [overrides, setOverrides] = useState<Record<string, OrderOverride>>({});
   const [noteDraft, setNoteDraft] = useState('');
 
@@ -141,6 +144,8 @@ export function OrdersPage() {
   const refundCompleted = selected?.refundId === 'REF-3298';
   const payoutEligible = selected?.status === 'Completed' && selected.flags.includes('payout');
 
+  const listWindow = useListWindow(rows);
+
   function patchOrder(id: string, next: OrderOverride) {
     setOverrides((current) => ({
       ...current,
@@ -165,162 +170,179 @@ export function OrdersPage() {
     return session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
   }
 
+  const orderDesktopCols =
+    'grid-cols-[92px_minmax(0,1.5fr)_104px_112px_112px_minmax(120px,0.95fr)] items-start gap-x-3 py-4';
+
   return (
     <>
-      <div className="grid h-full min-h-0 grid-cols-[minmax(0,1.35fr)_minmax(360px,0.95fr)]">
-        <div className="flex min-h-0 min-w-0 flex-col border-r border-[#dccfc4] bg-panel">
-          <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
-            <div className="text-[10px] font-semibold tracking-[0.12em] text-muted-2 uppercase">
-              Screen 7 preview states
+      <BleedSplit
+        open={!!selectedId}
+        onOpenChange={(open) => {
+          if (!open) setSelectedId(null);
+        }}
+        gridClassName="grid-cols-1 lg:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.95fr)]"
+        inspectorTitle="Order"
+        list={
+          <>
+            <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
+              <FilterChips
+                value={queue}
+                onChange={(id) => setQueue(id as QueueFilter)}
+                options={[
+                  { id: 'needs_assistance', label: 'Needs assistance', count: needsAssistanceCount },
+                  { id: 'Paid', label: 'Paid' },
+                  { id: 'Awaiting dispatch', label: 'Awaiting dispatch' },
+                  { id: 'In transit', label: 'In transit' },
+                  { id: 'Delivered', label: 'Delivered' },
+                  { id: 'Completed', label: 'Completed' },
+                  { id: 'Cancelled', label: 'Cancelled' },
+                ]}
+              />
+              {banner}
             </div>
-            <FilterChips
-              tone="soft"
-              value={demoState}
-              onChange={(id) => setDemoState(id as DemoState)}
-              options={[
-                { id: 'ready', label: 'Ready' },
-                { id: 'loading', label: 'Loading' },
-                { id: 'empty', label: 'Empty' },
-                { id: 'error', label: 'Error' },
-                { id: 'offline', label: 'Offline' },
-              ]}
-            />
-            <FilterChips
-              value={queue}
-              onChange={(id) => setQueue(id as QueueFilter)}
-              options={[
-                { id: 'needs_assistance', label: 'Needs assistance', count: needsAssistanceCount },
-                { id: 'Paid', label: 'Paid' },
-                { id: 'Awaiting dispatch', label: 'Awaiting dispatch' },
-                { id: 'In transit', label: 'In transit' },
-                { id: 'Delivered', label: 'Delivered' },
-                { id: 'Completed', label: 'Completed' },
-                { id: 'Cancelled', label: 'Cancelled' },
-              ]}
-            />
-            {banner}
-            {demoState === 'offline' ? <OfflineBanner onRetry={() => setDemoState('ready')} /> : null}
-          </div>
 
-          <div className="min-h-0 flex-1 overflow-auto">
-            {demoState === 'loading' ? <LoadingState label="Loading orders…" /> : null}
+            <div ref={listWindow.scrollRef} className="min-h-0 flex-1 overflow-auto">
+              {rows.length === 0 ? (
+                <EmptyState
+                  title="No orders match this filter"
+                  description={
+                    queue === 'needs_assistance'
+                      ? 'Disputes, holds, uncertain payments and open cancellation windows appear here.'
+                      : 'Try a different filter or search.'
+                  }
+                  actionLabel="Reset filters"
+                  onAction={() => {
+                    setQueue('needs_assistance');
+                    setSearch('');
+                  }}
+                />
+              ) : null}
 
-            {demoState === 'error' ? (
-              <ErrorState
-                title="Orders could not load"
-                description="Nothing was changed. Retry when the connection is stable."
-                onRetry={() => setDemoState('ready')}
-              />
-            ) : null}
-
-            {demoState === 'empty' || (demoState === 'ready' && rows.length === 0) ? (
-              <EmptyState
-                title="No orders match this filter"
-                description={
-                  queue === 'needs_assistance'
-                    ? 'Disputes, holds, uncertain payments and open cancellation windows appear here.'
-                    : 'Try a different filter or search.'
-                }
-                actionLabel="Reset filters"
-                onAction={() => {
-                  setQueue('needs_assistance');
-                  setSearch('');
-                  setDemoState('ready');
-                }}
-              />
-            ) : null}
-
-            {(demoState === 'ready' || demoState === 'offline') && rows.length > 0 ? (
-              <>
-                <div className="sticky top-0 z-[1] grid grid-cols-[92px_minmax(0,1.5fr)_104px_112px_112px_minmax(120px,0.95fr)] gap-x-3 border-b border-[#e7dcd2] bg-[#fbf5ef] px-4 py-3 text-[9.5px] font-semibold tracking-[0.13em] text-muted-2 uppercase">
-                  <span>Order</span>
-                  <span>Item · parties</span>
-                  <span>Price / pay</span>
-                  <span>Status</span>
-                  <span>Delivery</span>
-                  <span>Flags</span>
-                </div>
-                {rows.map((o) => {
-                  const active = o.id === selectedId;
-                  return (
-                    <button
-                      key={o.id}
-                      type="button"
-                      disabled={demoState === 'offline'}
-                      onClick={() => setSelectedId(o.id)}
-                      className={cn(
-                        'grid w-full grid-cols-[92px_minmax(0,1.5fr)_104px_112px_112px_minmax(120px,0.95fr)] items-start gap-x-3 border-b border-[#f0e7de] px-4 py-4 text-left last:border-0',
-                        active ? 'bg-[#f9f1ea]' : 'bg-panel hover:bg-[#fbf5ef]',
-                        demoState === 'offline' && 'opacity-60',
-                      )}
-                    >
-                      <span className="font-mono text-[11px] font-semibold text-plum">{o.id}</span>
-                      <div className="min-w-0">
-                        <div className="truncate text-[12.5px] font-semibold text-espresso">{o.listing}</div>
-                        <div className="mt-1 truncate text-[11.5px] text-body">
-                          @{o.buyer} → @{o.seller}
+              {rows.length > 0 ? (
+                <>
+                  <ExpandableListHeader
+                    desktopClassName={orderDesktopCols}
+                    columns={
+                      <>
+                        <span>Order</span>
+                        <span>Item · parties</span>
+                        <span>Price / pay</span>
+                        <span>Status</span>
+                        <span>Delivery</span>
+                        <span>Flags</span>
+                      </>
+                    }
+                  />
+                  {listWindow.visible.map((o) => {
+                    const active = o.id === selectedId;
+                    const statusLabel =
+                      o.paymentStatus === 'Uncertain' && o.status === 'Paid' ? 'Not yet Paid' : o.status;
+                    return (
+                      <ExpandableListRow
+                        key={o.id}
+                        selected={active}
+                        onSelect={() => setSelectedId(o.id)}
+                        desktopClassName={orderDesktopCols}
+                        primary={
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-[11px] font-semibold text-plum">{o.id}</span>
+                              <StatusBadge tone={statusTone(o.status)}>{statusLabel}</StatusBadge>
+                            </div>
+                            <div className="mt-1 truncate text-[12.5px] font-semibold text-espresso">
+                              {o.listing}
+                            </div>
+                            <div className="mt-0.5 truncate text-[11.5px] text-body">
+                              @{o.buyer} → @{o.seller}
+                            </div>
+                          </div>
+                        }
+                        details={[
+                          {
+                            label: 'Price / pay',
+                            value: (
+                              <span className="inline-flex flex-col items-end gap-1">
+                                <span className="font-semibold tabular-nums">
+                                  {showAmounts || isSupport ? formatNaira(o.itemPrice) : '—'}
+                                </span>
+                                <StatusBadge tone={paymentTone(o.paymentStatus)}>
+                                  {o.paymentStatus === 'Uncertain' ? 'Uncertain' : 'Confirmed'}
+                                </StatusBadge>
+                              </span>
+                            ),
+                          },
+                          { label: 'Delivery', value: o.delivery },
+                          {
+                            label: 'Flags',
+                            value:
+                              o.flags.length === 0 ? (
+                                '—'
+                              ) : (
+                                <span className="inline-flex flex-wrap justify-end gap-1.5">
+                                  {o.flags.map((f) => (
+                                    <StatusBadge key={f} tone={FLAG_META[f].tone}>
+                                      {FLAG_META[f].label}
+                                    </StatusBadge>
+                                  ))}
+                                </span>
+                              ),
+                          },
+                        ]}
+                      >
+                        <span className="font-mono text-[11px] font-semibold text-plum">{o.id}</span>
+                        <div className="min-w-0">
+                          <div className="truncate text-[12.5px] font-semibold text-espresso">{o.listing}</div>
+                          <div className="mt-1 truncate text-[11.5px] text-body">
+                            @{o.buyer} → @{o.seller}
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex flex-col items-start gap-2">
-                        <span className="text-[12px] font-semibold tabular-nums text-espresso">
-                          {showAmounts || isSupport ? formatNaira(o.itemPrice) : '—'}
-                        </span>
-                        <StatusBadge tone={paymentTone(o.paymentStatus)}>
-                          {o.paymentStatus === 'Uncertain' ? 'Uncertain' : 'Confirmed'}
-                        </StatusBadge>
-                      </div>
-                      <div>
-                        <StatusBadge tone={statusTone(o.status)}>
-                          {o.paymentStatus === 'Uncertain' && o.status === 'Paid' ? 'Not yet Paid' : o.status}
-                        </StatusBadge>
-                      </div>
-                      <span className="text-[11.5px] leading-snug text-body">{o.delivery}</span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {o.flags.length === 0 ? (
-                          <span className="text-[11px] text-body">—</span>
-                        ) : (
-                          o.flags.map((f) => (
-                            <StatusBadge key={f} tone={FLAG_META[f].tone}>
-                              {FLAG_META[f].label}
-                            </StatusBadge>
-                          ))
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
-                <p className="border-t border-[#e7dcd2] px-4 py-3 text-[11px] leading-relaxed text-body">
-                  Order status is driven by payment, dispatch, delivery and dispute workflows — not by admin
-                  override. Payment, refund and payout states live in their own finance modules.
-                </p>
-              </>
-            ) : null}
-          </div>
-        </div>
-
-        <aside className="flex min-h-0 flex-col bg-panel">
-          {!selected ? (
+                        <div className="flex flex-col items-start gap-2">
+                          <span className="text-[12px] font-semibold tabular-nums text-espresso">
+                            {showAmounts || isSupport ? formatNaira(o.itemPrice) : '—'}
+                          </span>
+                          <StatusBadge tone={paymentTone(o.paymentStatus)}>
+                            {o.paymentStatus === 'Uncertain' ? 'Uncertain' : 'Confirmed'}
+                          </StatusBadge>
+                        </div>
+                        <div>
+                          <StatusBadge tone={statusTone(o.status)}>{statusLabel}</StatusBadge>
+                        </div>
+                        <span className="text-[11.5px] leading-snug text-body">{o.delivery}</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {o.flags.length === 0 ? (
+                            <span className="text-[11px] text-body">—</span>
+                          ) : (
+                            o.flags.map((f) => (
+                              <StatusBadge key={f} tone={FLAG_META[f].tone}>
+                                {FLAG_META[f].label}
+                              </StatusBadge>
+                            ))
+                          )}
+                        </div>
+                      </ExpandableListRow>
+                    );
+                  })}
+                  <ListWindowFooter {...listWindow} />
+                  <p className="border-t border-[#e7dcd2] px-4 py-3 text-[11px] leading-relaxed text-body">
+                    Order status is driven by payment, dispatch, delivery and dispute workflows — not by admin
+                    override. Payment, refund and payout states live in their own finance modules.
+                  </p>
+                </>
+              ) : null}
+            </div>
+          </>
+        }
+        inspector={
+          !selected ? (
             <div className="flex flex-1 items-center justify-center px-6 text-[12.5px] text-body">
               Select an order to inspect.
-            </div>
-          ) : demoState === 'error' ? (
-            <div className="flex flex-1 flex-col justify-center gap-3 px-5">
-              <Alert className="rounded-[5px] border-risk-border bg-risk-bg">
-                <AlertTitle className="text-[12px] text-risk">Order could not load</AlertTitle>
-                <AlertDescription className="text-[11.5px] text-risk">
-                  Nothing was changed. Retry, or open the buyer or seller in Users.{' '}
-                  <button type="button" className="font-semibold underline" onClick={() => setDemoState('ready')}>
-                    Retry
-                  </button>
-                </AlertDescription>
-              </Alert>
             </div>
           ) : (
             <>
               <div className="border-b border-[#e7dcd2] px-5 py-4">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="font-display text-[26px] leading-none text-espresso">{selected.id}</div>
+                  <div className="min-w-0 flex-1">
+                    <CopyableId value={selected.id} variant="display" />
                     <div className="mt-2 text-[13px] font-semibold text-espresso">{selected.listing}</div>
                     <div className="mt-1 text-[12px] text-body">
                       @{selected.buyer} → @{selected.seller} · placed {selected.placedAt.replace(' · ', ' ')}
@@ -345,15 +367,6 @@ export function OrdersPage() {
                     </AlertTitle>
                     <AlertDescription className="text-[11.5px] text-[#8a5a15]">
                       {selected.recordStale.action}. Reload before advising.
-                    </AlertDescription>
-                  </Alert>
-                ) : null}
-
-                {demoState === 'offline' ? (
-                  <Alert className="rounded-[5px] border-border-soft bg-[#f3ede6]">
-                    <AlertTitle className="text-[12px] text-espresso">Offline</AlertTitle>
-                    <AlertDescription className="text-[11.5px] text-body">
-                      Notes and escalation are unavailable.
                     </AlertDescription>
                   </Alert>
                 ) : null}
@@ -705,7 +718,6 @@ export function OrdersPage() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={demoState === 'offline'}
                     onClick={() => {
                       setNoteDraft('');
                       setConfirm('note');
@@ -717,7 +729,6 @@ export function OrdersPage() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={demoState === 'offline'}
                     onClick={() => setConfirm('escalate')}
                   >
                     Escalate
@@ -729,9 +740,9 @@ export function OrdersPage() {
                 </p>
               </div>
             </>
-          )}
-        </aside>
-      </div>
+          )
+        }
+      />
 
       {confirm === 'note' && selected ? (
         <ConfirmActionDialog

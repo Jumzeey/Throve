@@ -1,21 +1,26 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth, roleLabel } from '@/auth/AuthContext';
+import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
-import { EmptyState, ErrorState, LoadingState, OfflineBanner } from '@/components/admin/empty-state';
+import { EmptyState } from '@/components/admin/empty-state';
+import { ExpandableListHeader, ExpandableListRow } from '@/components/admin/expandable-list-row';
 import { FilterChips } from '@/components/admin/filter-chips';
+import { CopyableId } from '@/components/admin/copyable-id';
+import { ListWindowFooter } from '@/components/admin/list-window-footer';
 import { StatusBadge, type StatusTone } from '@/components/admin/status-badge';
+import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { mockReviews, type MockReview } from '@/data/mock';
+import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
 import { canAct, ROLE_LABELS } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 import { Check, Lock, Star, X } from 'lucide-react';
 
-type DemoState = 'ready' | 'loading' | 'empty' | 'error' | 'offline';
 type QueueFilter = 'flagged' | 'all' | 'reported' | 'eligibility' | 'with_comment';
 type ConfirmKind = 'hide' | 'note' | null;
 
@@ -62,9 +67,8 @@ export function ReviewsPage() {
   const { banner, show } = useToast();
   const [queue, setQueue] = useState<QueueFilter>('flagged');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useState(mockReviews[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useBleedSelection(mockReviews[0]?.id ?? null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
-  const [demoState, setDemoState] = useState<DemoState>('ready');
   const [overrides, setOverrides] = useState<Record<string, ReviewOverride>>({});
   const [noteDraft, setNoteDraft] = useState('');
 
@@ -117,6 +121,8 @@ export function ReviewsPage() {
     });
   }, [reviews, queue, search]);
 
+  const listWindow = useListWindow(rows);
+
   const selected = reviews.find((r) => r.id === selectedId) ?? null;
   const selectedFlash = selected ? overrides[selected.id]?.flash : null;
   const commentAlreadyHidden =
@@ -146,129 +152,119 @@ export function ReviewsPage() {
     return session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
   }
 
+  const reviewDesktopCols =
+    'grid-cols-[84px_minmax(0,0.85fr)_minmax(0,0.85fr)_88px_56px_minmax(0,1.4fr)_118px] items-center py-3';
+
   return (
     <>
-      <div className="grid h-full min-h-0 grid-cols-[minmax(0,1.35fr)_minmax(360px,0.95fr)]">
-        <div className="flex min-h-0 min-w-0 flex-col border-r border-[#dccfc4] bg-panel">
-          <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
-            <div className="text-[10px] font-semibold tracking-[0.12em] text-muted-2 uppercase">
-              Screen 12 preview states
+      <BleedSplit
+        open={!!selectedId}
+        onOpenChange={(open) => {
+          if (!open) setSelectedId(null);
+        }}
+        gridClassName="grid-cols-1 lg:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.95fr)]"
+        inspectorTitle="Review"
+        list={
+          <>
+            <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
+              <FilterChips
+                value={queue}
+                onChange={(id) => setQueue(id as QueueFilter)}
+                options={[
+                  { id: 'flagged', label: 'Flagged', count: flaggedCount },
+                  { id: 'all', label: 'All reviews' },
+                  { id: 'reported', label: 'Reported' },
+                  { id: 'eligibility', label: 'Eligibility anomaly' },
+                  { id: 'with_comment', label: 'With comment' },
+                ]}
+              />
+              {banner}
             </div>
-            <FilterChips
-              tone="soft"
-              value={demoState}
-              onChange={(id) => setDemoState(id as DemoState)}
-              options={[
-                { id: 'ready', label: 'Ready' },
-                { id: 'loading', label: 'Loading' },
-                { id: 'empty', label: 'Empty' },
-                { id: 'error', label: 'Error' },
-                { id: 'offline', label: 'Offline' },
-              ]}
-            />
-            <FilterChips
-              value={queue}
-              onChange={(id) => setQueue(id as QueueFilter)}
-              options={[
-                { id: 'flagged', label: 'Flagged', count: flaggedCount },
-                { id: 'all', label: 'All reviews' },
-                { id: 'reported', label: 'Reported' },
-                { id: 'eligibility', label: 'Eligibility anomaly' },
-                { id: 'with_comment', label: 'With comment' },
-              ]}
-            />
-            {banner}
-            {demoState === 'offline' ? <OfflineBanner onRetry={() => setDemoState('ready')} /> : null}
-          </div>
 
-          <div className="min-h-0 flex-1 overflow-auto">
-            {demoState === 'loading' ? <LoadingState label="Loading reviews…" /> : null}
+            <div ref={listWindow.scrollRef} className="min-h-0 flex-1 overflow-auto">
+              {rows.length === 0 ? (
+                <EmptyState
+                  title={queue === 'flagged' ? 'No flagged reviews' : 'No reviews match'}
+                  description="Try a different filter or search."
+                  actionLabel="Reset filters"
+                  onAction={() => {
+                    setQueue('flagged');
+                    setSearch('');
+                  }}
+                />
+              ) : null}
 
-            {demoState === 'error' ? (
-              <ErrorState
-                title="Reviews could not load"
-                description="Nothing was changed. Retry when the connection is stable."
-                onRetry={() => setDemoState('ready')}
-              />
-            ) : null}
-
-            {demoState === 'empty' || (demoState === 'ready' && rows.length === 0) ? (
-              <EmptyState
-                title={queue === 'flagged' ? 'No flagged reviews' : 'No reviews match'}
-                description="Try a different filter or search."
-                actionLabel="Reset filters"
-                onAction={() => {
-                  setQueue('flagged');
-                  setSearch('');
-                  setDemoState('ready');
-                }}
-              />
-            ) : null}
-
-            {(demoState === 'ready' || demoState === 'offline') && rows.length > 0 ? (
-              <>
-                <div className="sticky top-0 z-[1] grid grid-cols-[84px_minmax(0,0.85fr)_minmax(0,0.85fr)_88px_56px_minmax(0,1.4fr)_118px] border-b border-[#e7dcd2] bg-[#fbf5ef] px-4 py-2.5 text-[9.5px] font-semibold tracking-[0.13em] text-muted-2 uppercase">
-                  <span>Review</span>
-                  <span>Seller</span>
-                  <span>Buyer</span>
-                  <span>Order</span>
-                  <span>Rating</span>
-                  <span>Comment</span>
-                  <span>Status</span>
-                </div>
-                {rows.map((r) => {
-                  const active = r.id === selectedId;
-                  return (
-                    <button
-                      key={r.id}
-                      type="button"
-                      disabled={demoState === 'offline'}
-                      onClick={() => setSelectedId(r.id)}
-                      className={cn(
-                        'grid w-full grid-cols-[84px_minmax(0,0.85fr)_minmax(0,0.85fr)_88px_56px_minmax(0,1.4fr)_118px] items-center border-b border-[#f0e7de] px-4 py-3 text-left last:border-0',
-                        active ? 'bg-[#f9f1ea]' : 'bg-panel hover:bg-[#fbf5ef]',
-                        demoState === 'offline' && 'opacity-60',
-                      )}
-                    >
-                      <span className="font-mono text-[11px] font-semibold text-plum">{r.id}</span>
-                      <span className="truncate text-[12px] text-espresso">@{r.seller}</span>
-                      <span className="truncate text-[12px] text-espresso">@{r.buyer}</span>
-                      <span className="font-mono text-[11px] text-body">{r.orderId}</span>
-                      <span className="text-[12px] font-semibold tabular-nums text-espresso">
-                        {r.rating} / 5
-                      </span>
-                      <span className="truncate pr-2 text-[12px] text-body">{r.commentSummary}</span>
-                      <StatusBadge tone={statusTone(r.status)}>{r.status}</StatusBadge>
-                    </button>
-                  );
-                })}
-              </>
-            ) : null}
-          </div>
-        </div>
-
-        <aside className="flex min-h-0 flex-col bg-panel">
-          {!selected ? (
+              {rows.length > 0 ? (
+                <>
+                  <ExpandableListHeader
+                    desktopClassName={reviewDesktopCols}
+                    columns={
+                      <>
+                        <span>Review</span>
+                        <span>Seller</span>
+                        <span>Buyer</span>
+                        <span>Order</span>
+                        <span>Rating</span>
+                        <span>Comment</span>
+                        <span>Status</span>
+                      </>
+                    }
+                  />
+                  {listWindow.visible.map((r) => {
+                    const active = r.id === selectedId;
+                    return (
+                      <ExpandableListRow
+                        key={r.id}
+                        selected={active}
+                        onSelect={() => setSelectedId(r.id)}
+                        desktopClassName={reviewDesktopCols}
+                        primary={
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-[11px] font-semibold text-plum">{r.id}</span>
+                              <StatusBadge tone={statusTone(r.status)}>{r.status}</StatusBadge>
+                            </div>
+                            <div className="mt-1 truncate text-[12px] text-espresso">
+                              @{r.seller} ← @{r.buyer}
+                            </div>
+                            <div className="mt-0.5 truncate text-[11.5px] text-body">{r.commentSummary}</div>
+                          </div>
+                        }
+                        details={[
+                          { label: 'Order', value: <span className="font-mono">{r.orderId}</span> },
+                          { label: 'Rating', value: `${r.rating} / 5` },
+                          { label: 'Comment', value: r.commentSummary },
+                        ]}
+                      >
+                        <span className="font-mono text-[11px] font-semibold text-plum">{r.id}</span>
+                        <span className="truncate text-[12px] text-espresso">@{r.seller}</span>
+                        <span className="truncate text-[12px] text-espresso">@{r.buyer}</span>
+                        <span className="font-mono text-[11px] text-body">{r.orderId}</span>
+                        <span className="text-[12px] font-semibold tabular-nums text-espresso">
+                          {r.rating} / 5
+                        </span>
+                        <span className="truncate pr-2 text-[12px] text-body">{r.commentSummary}</span>
+                        <StatusBadge tone={statusTone(r.status)}>{r.status}</StatusBadge>
+                      </ExpandableListRow>
+                    );
+                  })}
+                  <ListWindowFooter {...listWindow} />
+                </>
+              ) : null}
+            </div>
+          </>
+        }
+        inspector={
+          !selected ? (
             <div className="flex flex-1 items-center justify-center px-6 text-[12.5px] text-body">
               Select a review to inspect.
-            </div>
-          ) : demoState === 'error' ? (
-            <div className="flex flex-1 flex-col justify-center gap-3 px-5">
-              <Alert className="rounded-[5px] border-risk-border bg-risk-bg">
-                <AlertTitle className="text-[12px] text-risk">Review could not load · nothing was changed</AlertTitle>
-                <AlertDescription className="text-[11.5px] text-risk">
-                  <button type="button" className="font-semibold underline" onClick={() => setDemoState('ready')}>
-                    Retry
-                  </button>
-                </AlertDescription>
-              </Alert>
             </div>
           ) : (
             <>
               <div className="border-b border-[#e7dcd2] px-5 py-4">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="font-display text-[26px] leading-none text-espresso">{selected.id}</div>
+                  <div className="min-w-0 flex-1">
+                    <CopyableId value={selected.id} variant="display" />
                     <p className="mt-2 text-[12.5px] leading-snug text-body">{selected.headerMeta}</p>
                   </div>
                   <StatusBadge tone={statusTone(selected.status)}>{selected.status}</StatusBadge>
@@ -432,7 +428,6 @@ export function ReviewsPage() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={demoState === 'offline'}
                     onClick={() => {
                       setNoteDraft('');
                       setConfirm('note');
@@ -446,7 +441,6 @@ export function ReviewsPage() {
                       variant="outline"
                       size="sm"
                       className="border-risk text-risk hover:bg-risk-bg"
-                      disabled={demoState === 'offline'}
                       onClick={() => setConfirm('hide')}
                     >
                       Hide comment — rating retained
@@ -464,9 +458,9 @@ export function ReviewsPage() {
                 </p>
               </div>
             </>
-          )}
-        </aside>
-      </div>
+          )
+        }
+      />
 
       {confirm === 'hide' && selected ? (
         <ConfirmActionDialog

@@ -1,9 +1,11 @@
-import { Outlet } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
 import { PageHeader } from '@/components/admin/page-header';
-import { Sidebar } from './Sidebar';
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
+import { Sidebar, SidebarNav } from './Sidebar';
 import { ShellChromeProvider, useShellChrome } from './shell-chrome';
 
-function ShellMain() {
+function ShellMain({ onOpenNav }: { onOpenNav: () => void }) {
   const { chrome } = useShellChrome();
 
   const title = chrome?.title ?? 'Admin';
@@ -20,12 +22,13 @@ function ShellMain() {
         search={showSearch ? (chrome?.search ?? '') : undefined}
         onSearchChange={showSearch ? chrome?.onSearchChange : undefined}
         searchPlaceholder={chrome?.searchPlaceholder ?? 'Search…'}
+        onMenuClick={onOpenNav}
       />
       <div className="min-h-0 flex-1 overflow-auto">
         {bleed ? (
           <Outlet />
         ) : (
-          <div className="px-[30px] py-6">
+          <div className="px-4 py-4 md:px-[30px] md:py-6">
             <Outlet />
           </div>
         )}
@@ -36,11 +39,28 @@ function ShellMain() {
 
 /** Universal chrome: flush sidebar + shared header. Pages pass title/subtitle via usePageChrome. */
 export function AppShell() {
+  const [navOpen, setNavOpen] = useState(false);
+  const location = useLocation();
+
+  useEffect(() => {
+    setNavOpen(false);
+  }, [location.pathname]);
+
   return (
     <ShellChromeProvider>
       <div className="fixed inset-0 flex overflow-hidden bg-sidebar">
         <Sidebar />
-        <ShellMain />
+        <Sheet open={navOpen} onOpenChange={setNavOpen}>
+          <SheetContent
+            side="left"
+            showCloseButton
+            className="w-[280px] max-w-[85vw] gap-0 border-r-0 bg-sidebar p-0 text-panel sm:max-w-[280px]"
+          >
+            <SheetTitle className="sr-only">Navigation</SheetTitle>
+            <SidebarNav onNavigate={() => setNavOpen(false)} />
+          </SheetContent>
+        </Sheet>
+        <ShellMain onOpenNav={() => setNavOpen(true)} />
       </div>
     </ShellChromeProvider>
   );

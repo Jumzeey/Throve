@@ -1,12 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
 import { useAuth, roleLabel } from '@/auth/AuthContext';
 import { BrandMark } from '@/components/brand-mark';
-import { FilterChips } from '@/components/admin/filter-chips';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ApiError } from '@/lib/api';
 import { consumeAuthGateReason } from '@/lib/session';
 import { ROLE_LABELS, type AdminRole } from '@/lib/roles';
@@ -29,18 +27,16 @@ type GateState =
   | 'expired'
   | 'offline'
   | 'auth_error'
-  | 'unavailable'
-  | 'demo';
+  | 'unavailable';
 
 const fieldInput =
   'w-full rounded-[6px] border border-[#e2d7cc] bg-panel px-3.5 py-3 text-[14px] text-espresso outline-none placeholder:text-[#b0a399] focus:border-plum disabled:opacity-50';
 
 export function LoginPage() {
-  const { session, loading, apiReady, signInWithPassword, signInDemo } = useAuth();
+  const { session, loading, apiReady, signInWithPassword } = useAuth();
   const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [demoRole, setDemoRole] = useState<AdminRole>('trust_safety');
   const [error, setError] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
@@ -64,11 +60,6 @@ export function LoginPage() {
     const t = window.setTimeout(() => setHoldNavigate(false), 1200);
     return () => window.clearTimeout(t);
   }, [gate, session, holdNavigate]);
-
-  const chipValue = useMemo(() => {
-    if (gate === 'verifying' || gate === 'authorised') return 'form';
-    return gate;
-  }, [gate]);
 
   function validateFields() {
     const nextEmail = email.trim();
@@ -171,42 +162,19 @@ export function LoginPage() {
   }
 
   return (
-    <div className="relative h-svh min-h-svh w-full overflow-hidden bg-[#241c1a]">
-      <div className="absolute top-3 right-3 left-3 z-20 flex flex-wrap items-center justify-between gap-2 rounded-[6px] border border-[#e7dcd2]/70 bg-panel/90 px-3 py-2 backdrop-blur-sm lg:left-auto lg:max-w-[min(720px,52vw)]">
-        <div className="text-[10px] font-semibold tracking-[0.14em] text-muted-2 uppercase">
-          A01 · preview
-        </div>
-        <FilterChips
-          tone="soft"
-          value={chipValue}
-          onChange={(id) => {
-            setError(null);
-            setHoldNavigate(false);
-            setGate(id as GateState);
-          }}
-          options={[
-            { id: 'form', label: 'Ready' },
-            { id: 'unauthorized', label: 'Unauthorised' },
-            { id: 'revoked', label: 'Revoked' },
-            { id: 'expired', label: 'Expired' },
-            { id: 'offline', label: 'Offline' },
-            { id: 'auth_error', label: 'Auth error' },
-            { id: 'unavailable', label: 'Unavailable' },
-            { id: 'demo', label: 'Demo UI' },
-          ]}
-        />
-      </div>
-
-      <div className="grid h-full w-full grid-cols-1 lg:grid-cols-[minmax(0,0.4fr)_minmax(0,0.6fr)]">
-        <aside className="relative flex min-h-0 flex-col justify-between bg-sidebar px-10 py-10 text-panel sm:px-12 lg:px-14 lg:py-12">
-          <div>
-            <BrandMark variant="onDark" size="md" showWordmark />
-            <div className="mt-2 text-[9.5px] font-semibold tracking-[0.22em] text-gold uppercase">
+    <div className="relative min-h-svh w-full overflow-x-hidden overflow-y-auto bg-[#241c1a] lg:h-svh lg:overflow-hidden">
+      <div className="flex min-h-svh w-full flex-col lg:grid lg:h-full lg:grid-cols-[minmax(0,0.4fr)_minmax(0,0.6fr)]">
+        {/* Mobile: single-line brand strip · Desktop: full brand panel */}
+        <aside className="relative flex shrink-0 flex-row items-center gap-2.5 bg-sidebar px-4 py-2.5 text-panel sm:px-6 lg:min-h-0 lg:flex-col lg:items-stretch lg:justify-between lg:gap-0 lg:px-14 lg:py-12">
+          <div className="flex min-w-0 flex-1 items-center gap-2.5 lg:block lg:flex-none">
+            <BrandMark variant="onDark" size="sm" showWordmark className="lg:hidden" />
+            <BrandMark variant="onDark" size="md" showWordmark className="hidden lg:flex" />
+            <div className="text-[9px] font-semibold tracking-[0.2em] text-gold uppercase sm:text-[9.5px] sm:tracking-[0.22em] lg:mt-2">
               Admin console
             </div>
           </div>
 
-          <div className="max-w-[28rem] pb-1">
+          <div className="mt-6 hidden max-w-[28rem] pb-1 lg:mt-0 lg:block">
             <h1 className="font-display text-[36px] leading-[1.15] font-normal text-panel lg:text-[44px]">
               An internal console for the people who keep Throve safe.
             </h1>
@@ -220,13 +188,13 @@ export function LoginPage() {
           </div>
         </aside>
 
-        <section className="flex min-h-0 flex-col justify-center overflow-y-auto bg-[#f2eae2] px-8 py-12 sm:px-14 lg:px-20">
+        <section className="flex min-h-0 flex-1 flex-col justify-start bg-[#f2eae2] px-5 py-6 sm:px-10 sm:py-8 lg:justify-center lg:overflow-y-auto lg:px-20 lg:py-12">
           <div className="mx-auto w-full max-w-[420px]">
-            <BrandMark variant="onLight" size="sm" />
-            <div className="mt-5 text-[10px] font-semibold tracking-[0.2em] text-gold uppercase">
+            <BrandMark variant="onLight" size="sm" className="hidden lg:block" />
+            <div className="mt-0 hidden text-[10px] font-semibold tracking-[0.2em] text-gold uppercase lg:mt-5 lg:block">
               Throve Admin
             </div>
-            <h2 className="mt-3 font-display text-[34px] leading-tight font-normal text-espresso">
+            <h2 className="mt-0 font-display text-[28px] leading-tight font-normal text-espresso sm:text-[34px] lg:mt-3">
               Sign in to continue
             </h2>
             <p className="mt-2.5 text-[13.5px] leading-relaxed text-body">
@@ -361,44 +329,6 @@ export function LoginPage() {
                   </div>
                   <Button type="button" variant="outline" className="w-full" onClick={resetToForm}>
                     Retry
-                  </Button>
-                </div>
-              ) : null}
-
-              {gate === 'demo' ? (
-                <div className="space-y-4">
-                  <Alert className="rounded-[5px] border-border-soft bg-[#f3ede6]">
-                    <AlertTitle className="text-[12px] text-espresso">Demo mode</AlertTitle>
-                    <AlertDescription className="text-[11.5px] text-body">
-                      Browse the Hi-Fi console without API tokens. Use Ready for real staff email and password.
-                    </AlertDescription>
-                  </Alert>
-                  <div className="flex flex-col gap-1.5">
-                    <Label className="text-[10px] font-semibold tracking-[0.12em] text-muted-2 uppercase">
-                      Demo role
-                    </Label>
-                    <Select value={demoRole} onValueChange={(value) => setDemoRole(value as AdminRole)}>
-                      <SelectTrigger className="w-full bg-panel-elevated">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(Object.keys(ROLE_LABELS) as AdminRole[]).map((r) => (
-                          <SelectItem key={r} value={r}>
-                            {ROLE_LABELS[r]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <Button
-                    type="button"
-                    className="w-full bg-[#3e2b36] text-panel hover:bg-[#2f2029]"
-                    onClick={() => {
-                      const demo = DEMO_ROLES.find((d) => d.role === demoRole)!;
-                      signInDemo({ email: demo.email, name: demo.name, role: demo.role });
-                    }}
-                  >
-                    Enter demo console
                   </Button>
                 </div>
               ) : null}

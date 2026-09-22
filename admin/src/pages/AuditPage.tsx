@@ -1,20 +1,25 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/auth/AuthContext';
+import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
-import { EmptyState, ErrorState, LoadingState, OfflineBanner } from '@/components/admin/empty-state';
+import { EmptyState } from '@/components/admin/empty-state';
+import { ExpandableListHeader, ExpandableListRow } from '@/components/admin/expandable-list-row';
 import { FilterChips } from '@/components/admin/filter-chips';
+import { CopyableId } from '@/components/admin/copyable-id';
+import { ListWindowFooter } from '@/components/admin/list-window-footer';
 import { StatusBadge, type StatusTone } from '@/components/admin/status-badge';
+import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { mockAudit, type MockAudit } from '@/data/mock';
+import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
 import { ROLE_LABELS, type AdminRole } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 import { Lock } from 'lucide-react';
 
-type DemoState = 'ready' | 'loading' | 'empty' | 'error' | 'offline';
 type DateFilter = '7d' | '30d' | 'all';
 type ModuleFilter = 'all' | MockAudit['module'];
 type ResultFilter = 'all' | MockAudit['result'];
@@ -73,13 +78,11 @@ function roleScopeCopy(role: AdminRole) {
 export function AuditPage() {
   const { session } = useAuth();
   const { banner, show } = useToast();
-  const [demoState, setDemoState] = useState<DemoState>('ready');
   const [dateFilter, setDateFilter] = useState<DateFilter>('7d');
   const [moduleFilter, setModuleFilter] = useState<ModuleFilter>('all');
   const [resultFilter, setResultFilter] = useState<ResultFilter>('all');
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   const role = (session?.role ?? 'support') as AdminRole;
@@ -120,6 +123,10 @@ export function AuditPage() {
     });
   }, [visibleEvents, moduleFilter, resultFilter, roleFilter, dateFilter, search]);
 
+  const [selectedId, setSelectedId] = useBleedSelection(rows[0]?.id ?? null);
+
+  const listWindow = useListWindow(rows);
+
   const selected =
     (selectedId ? visibleEvents.find((a) => a.id === selectedId) : null) ??
     (rows[0] ?? null);
@@ -148,201 +155,205 @@ export function AuditPage() {
     }
   }
 
+  const auditDesktopCols =
+    'grid-cols-[72px_minmax(0,1fr)_72px_minmax(0,1.2fr)_78px_72px_36px] items-center gap-x-2 py-3.5';
+
   return (
     <>
-      <div className="grid h-full min-h-0 grid-cols-[minmax(0,1.45fr)_minmax(360px,0.95fr)]">
-        <div className="flex min-h-0 min-w-0 flex-col border-r border-[#dccfc4] bg-panel">
-          <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
-            <div className="text-[10px] font-semibold tracking-[0.12em] text-muted-2 uppercase">
-              Screen 13 preview states
-            </div>
-            <FilterChips
-              tone="soft"
-              value={demoState}
-              onChange={(id) => setDemoState(id as DemoState)}
-              options={[
-                { id: 'ready', label: 'Ready' },
-                { id: 'loading', label: 'Loading' },
-                { id: 'empty', label: 'Empty' },
-                { id: 'error', label: 'Error' },
-                { id: 'offline', label: 'Offline' },
-              ]}
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <FilterChips
-                value={dateFilter}
-                onChange={(id) => setDateFilter(id as DateFilter)}
-                options={[
-                  { id: '7d', label: 'Last 7 days' },
-                  { id: '30d', label: 'Last 30 days' },
-                  { id: 'all', label: 'All time' },
-                ]}
-              />
-              <span className="ml-auto text-[11.5px] tabular-nums text-body">
-                {rows.length} event{rows.length === 1 ? '' : 's'}
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <FilterChips
-                tone="soft"
-                value={roleFilter}
-                onChange={setRoleFilter}
-                options={[
-                  { id: 'all', label: 'Admin role' },
-                  ...actorRoles.map((r) => ({ id: r, label: r })),
-                ]}
-              />
-              <FilterChips
-                tone="soft"
-                value={moduleFilter}
-                onChange={(id) => setModuleFilter(id as ModuleFilter)}
-                options={[
-                  { id: 'all', label: 'Module' },
-                  ...modules.map((m) => ({ id: m, label: m })),
-                ]}
-              />
-              <FilterChips
-                tone="soft"
-                value={resultFilter}
-                onChange={(id) => setResultFilter(id as ResultFilter)}
-                options={[
-                  { id: 'all', label: 'Result' },
-                  { id: 'Completed', label: 'Completed' },
-                  { id: 'Denied', label: 'Denied' },
-                ]}
-              />
-            </div>
-            {banner}
-            {demoState === 'offline' ? <OfflineBanner onRetry={() => setDemoState('ready')} /> : null}
-            {!isSuper && scope ? (
-              <Alert className="rounded-[5px] border-dashed border-[#d4c8bc] bg-transparent">
-                <Lock className="size-3.5 text-body" />
-                <AlertTitle className="text-[11px] font-semibold text-espresso">Permission-limited view</AlertTitle>
-                <AlertDescription className="text-[11px] text-body">
-                  Events outside your role&apos;s scope are not listed. The log does not reveal what it withholds.
-                </AlertDescription>
-              </Alert>
-            ) : null}
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-auto">
-            {demoState === 'loading' ? <LoadingState label="Loading audit log…" /> : null}
-
-            {demoState === 'error' ? (
-              <ErrorState
-                title="Could not load the log — no records were altered"
-                description="Nothing in the trail changed. Retry when the connection is stable."
-                onRetry={() => setDemoState('ready')}
-              />
-            ) : null}
-
-            {demoState === 'empty' || (demoState === 'ready' && rows.length === 0) ? (
-              <EmptyState
-                title="No events in this range"
-                description="Widen the date range or clear the module filter."
-                actionLabel="Clear filters"
-                onAction={() => {
-                  setDateFilter('7d');
-                  setModuleFilter('all');
-                  setResultFilter('all');
-                  setRoleFilter('all');
-                  setSearch('');
-                  setDemoState('ready');
-                }}
-              />
-            ) : null}
-
-            {demoState === 'ready' && rows.length > 0 ? (
-              <>
-                <div className="sticky top-0 z-[1] grid grid-cols-[72px_minmax(0,1fr)_72px_minmax(0,1.2fr)_78px_72px_36px] gap-x-2 border-b border-[#e7dcd2] bg-[#fbf5ef] px-4 py-3 text-[9.5px] font-semibold tracking-[0.12em] text-muted-2 uppercase">
-                  <span>When</span>
-                  <span>Actor · role</span>
-                  <span>Module</span>
-                  <span>Action · record</span>
-                  <span>Result</span>
-                  <span>Sensitivity</span>
-                  <span>AI</span>
-                </div>
-                {rows.map((a) => {
-                  const active = a.id === (selected?.id ?? selectedId);
-                  return (
-                    <button
-                      key={a.id}
-                      type="button"
-                      onClick={() => setSelectedId(a.id)}
-                      className={cn(
-                        'grid w-full grid-cols-[72px_minmax(0,1fr)_72px_minmax(0,1.2fr)_78px_72px_36px] items-center gap-x-2 border-b border-[#f0e7de] px-4 py-3.5 text-left last:border-0',
-                        active ? 'bg-[#f9f1ea]' : 'bg-panel hover:bg-[#fbf5ef]',
-                      )}
-                    >
-                      <span className="text-[11px] tabular-nums text-body">{a.at}</span>
-                      <div className="min-w-0">
-                        <div className="truncate text-[12.5px] font-semibold text-espresso">{a.actor}</div>
-                        <div className="truncate text-[11px] text-body">{a.role}</div>
-                      </div>
-                      <span className="truncate text-[11.5px] text-body">{a.module}</span>
-                      <div className="min-w-0">
-                        <div className="truncate text-[12.5px] font-semibold text-espresso">{a.action}</div>
-                        <div className="truncate font-mono text-[11px] text-body">
-                          {a.recordId}
-                          {a.recordSub ? ` · ${a.recordSub}` : ''}
-                        </div>
-                      </div>
-                      <StatusBadge tone={resultTone(a.result)}>{a.result}</StatusBadge>
-                      <StatusBadge tone={sensitivityTone(a.sensitivity)}>{a.sensitivity}</StatusBadge>
-                      <span>
-                        {a.hasAi ? <StatusBadge tone="plum">AI</StatusBadge> : null}
-                      </span>
-                    </button>
-                  );
-                })}
-                <p className="border-t border-[#e7dcd2] px-4 py-3 text-[11px] leading-relaxed text-body">
-                  The log is read-only in this console: no edit, delete, reason rewrite, actor change or timestamp
-                  change exists for any role, including Super Admin.
-                </p>
-              </>
-            ) : null}
-
-            {demoState === 'offline' ? (
-              <div className="flex flex-1 items-center justify-center px-6 py-16 text-center text-[12.5px] text-body">
-                Offline — showing nothing rather than a stale record.
+      <BleedSplit
+        open={!!selectedId}
+        onOpenChange={(open) => {
+          if (!open) setSelectedId(null);
+        }}
+        gridClassName="grid-cols-1 lg:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.95fr)]"
+        inspectorTitle="Audit event"
+        list={
+          <>
+            <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <FilterChips
+                  value={dateFilter}
+                  onChange={(id) => setDateFilter(id as DateFilter)}
+                  options={[
+                    { id: '7d', label: 'Last 7 days' },
+                    { id: '30d', label: 'Last 30 days' },
+                    { id: 'all', label: 'All time' },
+                  ]}
+                />
+                <span className="ml-auto text-[11.5px] tabular-nums text-body">
+                  {rows.length} event{rows.length === 1 ? '' : 's'}
+                </span>
               </div>
-            ) : null}
-          </div>
-        </div>
+              <div className="flex flex-wrap gap-2">
+                <FilterChips
+                  tone="soft"
+                  value={roleFilter}
+                  onChange={setRoleFilter}
+                  options={[
+                    { id: 'all', label: 'Admin role' },
+                    ...actorRoles.map((r) => ({ id: r, label: r })),
+                  ]}
+                />
+                <FilterChips
+                  tone="soft"
+                  value={moduleFilter}
+                  onChange={(id) => setModuleFilter(id as ModuleFilter)}
+                  options={[
+                    { id: 'all', label: 'Module' },
+                    ...modules.map((m) => ({ id: m, label: m })),
+                  ]}
+                />
+                <FilterChips
+                  tone="soft"
+                  value={resultFilter}
+                  onChange={(id) => setResultFilter(id as ResultFilter)}
+                  options={[
+                    { id: 'all', label: 'Result' },
+                    { id: 'Completed', label: 'Completed' },
+                    { id: 'Denied', label: 'Denied' },
+                  ]}
+                />
+              </div>
+              {banner}
+              {!isSuper && scope ? (
+                <Alert className="rounded-[5px] border-dashed border-[#d4c8bc] bg-transparent">
+                  <Lock className="size-3.5 text-body" />
+                  <AlertTitle className="text-[11px] font-semibold text-espresso">Permission-limited view</AlertTitle>
+                  <AlertDescription className="text-[11px] text-body">
+                    Events outside your role&apos;s scope are not listed. The log does not reveal what it withholds.
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+            </div>
 
-        <aside className="flex min-h-0 flex-col bg-panel">
-          {!selected || demoState === 'empty' ? (
+            <div ref={listWindow.scrollRef} className="min-h-0 flex-1 overflow-auto">
+              {rows.length === 0 ? (
+                <EmptyState
+                  title="No events in this range"
+                  description="Widen the date range or clear the module filter."
+                  actionLabel="Clear filters"
+                  onAction={() => {
+                    setDateFilter('7d');
+                    setModuleFilter('all');
+                    setResultFilter('all');
+                    setRoleFilter('all');
+                    setSearch('');
+                  }}
+                />
+              ) : null}
+
+              {rows.length > 0 ? (
+                <>
+                  <ExpandableListHeader
+                    desktopClassName={auditDesktopCols}
+                    columns={
+                      <>
+                        <span>When</span>
+                        <span>Actor · role</span>
+                        <span>Module</span>
+                        <span>Action · record</span>
+                        <span>Result</span>
+                        <span>Sensitivity</span>
+                        <span>AI</span>
+                      </>
+                    }
+                  />
+                  {listWindow.visible.map((a) => {
+                    const active = a.id === (selected?.id ?? selectedId);
+                    return (
+                      <ExpandableListRow
+                        key={a.id}
+                        selected={active}
+                        onSelect={() => setSelectedId(a.id)}
+                        desktopClassName={auditDesktopCols}
+                        primary={
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-[11px] tabular-nums text-body">{a.at}</span>
+                              <StatusBadge tone={resultTone(a.result)}>{a.result}</StatusBadge>
+                            </div>
+                            <div className="mt-1 truncate text-[12.5px] font-semibold text-espresso">{a.action}</div>
+                            <div className="mt-0.5 truncate text-[11.5px] text-body">
+                              {a.actor} · {a.module}
+                            </div>
+                          </div>
+                        }
+                        details={[
+                          {
+                            label: 'Actor',
+                            value: (
+                              <span>
+                                {a.actor}
+                                <span className="block text-body">{a.role}</span>
+                              </span>
+                            ),
+                          },
+                          { label: 'Module', value: a.module },
+                          {
+                            label: 'Record',
+                            value: (
+                              <span className="font-mono">
+                                {a.recordId}
+                                {a.recordSub ? ` · ${a.recordSub}` : ''}
+                              </span>
+                            ),
+                          },
+                          {
+                            label: 'Sensitivity',
+                            value: (
+                              <StatusBadge tone={sensitivityTone(a.sensitivity)}>{a.sensitivity}</StatusBadge>
+                            ),
+                          },
+                          ...(a.hasAi
+                            ? [{ label: 'AI', value: <StatusBadge tone="plum">AI</StatusBadge> }]
+                            : []),
+                        ]}
+                      >
+                        <span className="text-[11px] tabular-nums text-body">{a.at}</span>
+                        <div className="min-w-0">
+                          <div className="truncate text-[12.5px] font-semibold text-espresso">{a.actor}</div>
+                          <div className="truncate text-[11px] text-body">{a.role}</div>
+                        </div>
+                        <span className="truncate text-[11.5px] text-body">{a.module}</span>
+                        <div className="min-w-0">
+                          <div className="truncate text-[12.5px] font-semibold text-espresso">{a.action}</div>
+                          <div className="truncate font-mono text-[11px] text-body">
+                            {a.recordId}
+                            {a.recordSub ? ` · ${a.recordSub}` : ''}
+                          </div>
+                        </div>
+                        <StatusBadge tone={resultTone(a.result)}>{a.result}</StatusBadge>
+                        <StatusBadge tone={sensitivityTone(a.sensitivity)}>{a.sensitivity}</StatusBadge>
+                        <span>{a.hasAi ? <StatusBadge tone="plum">AI</StatusBadge> : null}</span>
+                      </ExpandableListRow>
+                    );
+                  })}
+                  <ListWindowFooter {...listWindow} />
+                  <p className="border-t border-[#e7dcd2] px-4 py-3 text-[11px] leading-relaxed text-body">
+                    The log is read-only in this console: no edit, delete, reason rewrite, actor change or timestamp
+                    change exists for any role, including Super Admin.
+                  </p>
+                </>
+              ) : null}
+            </div>
+          </>
+        }
+        inspector={
+          !selected ? (
             <div className="flex flex-1 items-center justify-center px-6 text-[12.5px] text-body">
               Select an event to inspect.
-            </div>
-          ) : demoState === 'error' ? (
-            <div className="flex flex-1 flex-col justify-center gap-3 px-5">
-              <Alert className="rounded-[5px] border-risk-border bg-risk-bg">
-                <AlertTitle className="text-[12px] text-risk">Could not load the log — no records were altered</AlertTitle>
-                <AlertDescription className="text-[11.5px] text-risk">
-                  <button type="button" className="font-semibold underline" onClick={() => setDemoState('ready')}>
-                    Retry
-                  </button>
-                </AlertDescription>
-              </Alert>
-            </div>
-          ) : demoState === 'loading' ? (
-            <div className="flex flex-1 flex-col justify-center gap-2 px-5">
-              <div className="h-3 w-2/3 animate-pulse rounded bg-[#e8dfd6]" />
-              <div className="h-3 w-1/2 animate-pulse rounded bg-[#e8dfd6]" />
             </div>
           ) : (
             <>
               <div className="border-b border-[#e7dcd2] px-5 py-4">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="font-display text-[26px] leading-none text-espresso">{selected.id}</div>
+                  <div className="min-w-0 flex-1">
+                    <CopyableId value={selected.id} variant="display" />
                     <div className="mt-2 text-[12.5px] text-body">
                       {selected.action} · {selected.atFull}
                     </div>
                   </div>
-                  <div className="flex flex-col items-end gap-1.5">
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
                     <StatusBadge tone={sensitivityTone(selected.sensitivity)}>
                       {selected.sensitivity === 'Access' ? 'Access' : `${selected.sensitivity} sensitivity`}
                     </StatusBadge>
@@ -352,14 +363,6 @@ export function AuditPage() {
               </div>
 
               <div className="min-h-0 flex-1 space-y-4 overflow-auto px-5 py-4">
-                {demoState === 'offline' ? (
-                  <Alert className="rounded-[5px] border-hold-border bg-hold-bg">
-                    <AlertTitle className="text-[12px] text-[#8a5a15]">Offline</AlertTitle>
-                    <AlertDescription className="text-[11.5px] text-[#8a5a15]">
-                      Showing nothing rather than a stale record.
-                    </AlertDescription>
-                  </Alert>
-                ) : null}
 
                 {selected.deniedBanner ? (
                   <Alert className="rounded-[5px] border-risk-border bg-risk-bg">
@@ -589,7 +592,6 @@ export function AuditPage() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={demoState === 'offline'}
                     onClick={() => void copyReference(selected.id)}
                   >
                     {copied ? 'Copied' : 'Copy reference'}
@@ -600,9 +602,9 @@ export function AuditPage() {
                 </p>
               </div>
             </>
-          )}
-        </aside>
-      </div>
+          )
+        }
+      />
     </>
   );
 }

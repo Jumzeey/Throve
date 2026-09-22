@@ -1,21 +1,26 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth, roleLabel } from '@/auth/AuthContext';
+import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
-import { EmptyState, ErrorState, LoadingState, OfflineBanner } from '@/components/admin/empty-state';
+import { EmptyState } from '@/components/admin/empty-state';
+import { ExpandableListHeader, ExpandableListRow } from '@/components/admin/expandable-list-row';
 import { FilterChips } from '@/components/admin/filter-chips';
+import { CopyableId } from '@/components/admin/copyable-id';
+import { ListWindowFooter } from '@/components/admin/list-window-footer';
 import { StatusBadge, type StatusTone } from '@/components/admin/status-badge';
+import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { formatNaira, mockPayments, type MockPayment } from '@/data/mock';
+import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
 import { canAct, ROLE_LABELS } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 import { Lock } from 'lucide-react';
 
-type DemoState = 'ready' | 'loading' | 'empty' | 'error' | 'offline';
 type QueueFilter = 'needs_attention' | 'uncertain' | 'failed' | 'duplicate' | 'successful';
 type ConfirmKind = 'verify' | 'note' | 'escalate' | null;
 
@@ -37,9 +42,8 @@ export function PaymentsPage() {
   const { banner, show } = useToast();
   const [queue, setQueue] = useState<QueueFilter>('needs_attention');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useState(mockPayments[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useBleedSelection(mockPayments[0]?.id ?? null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
-  const [demoState, setDemoState] = useState<DemoState>('ready');
   const [overrides, setOverrides] = useState<Record<string, PaymentOverride>>({});
   const [noteDraft, setNoteDraft] = useState('');
 
@@ -94,6 +98,8 @@ export function PaymentsPage() {
     });
   }, [payments, queue, search]);
 
+  const listWindow = useListWindow(rows);
+
   const selected = payments.find((p) => p.id === selectedId) ?? null;
   const selectedFlash = selected ? overrides[selected.id]?.flash : null;
   const isDuplicateCluster =
@@ -124,144 +130,152 @@ export function PaymentsPage() {
     return session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
   }
 
+  const paymentDesktopCols =
+    'grid-cols-[88px_88px_minmax(0,1.3fr)_72px_64px_64px_72px_120px] items-center gap-x-2 py-3.5';
+
   return (
     <>
-      <div className="grid h-full min-h-0 grid-cols-[minmax(0,1.4fr)_minmax(360px,0.95fr)]">
-        <div className="flex min-h-0 min-w-0 flex-col border-r border-[#dccfc4] bg-panel">
-          <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
-            <div className="text-[10px] font-semibold tracking-[0.12em] text-muted-2 uppercase">
-              Screen 9 preview states
+      <BleedSplit
+        open={!!selectedId}
+        onOpenChange={(open) => {
+          if (!open) setSelectedId(null);
+        }}
+        gridClassName="grid-cols-1 lg:grid-cols-[minmax(0,1.4fr)_minmax(360px,0.95fr)]"
+        inspectorTitle="Payment"
+        list={
+          <>
+            <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
+              <FilterChips
+                value={queue}
+                onChange={(id) => setQueue(id as QueueFilter)}
+                options={[
+                  { id: 'needs_attention', label: 'Needs attention', count: needsAttentionCount },
+                  { id: 'uncertain', label: 'Status uncertain', count: uncertainCount },
+                  { id: 'failed', label: 'Confirmed failed' },
+                  { id: 'duplicate', label: 'Duplicate risk', count: duplicateCount },
+                  { id: 'successful', label: 'Successful' },
+                ]}
+              />
+              {banner}
             </div>
-            <FilterChips
-              tone="soft"
-              value={demoState}
-              onChange={(id) => setDemoState(id as DemoState)}
-              options={[
-                { id: 'ready', label: 'Ready' },
-                { id: 'loading', label: 'Loading' },
-                { id: 'empty', label: 'Empty' },
-                { id: 'error', label: 'Error' },
-                { id: 'offline', label: 'Offline' },
-              ]}
-            />
-            <FilterChips
-              value={queue}
-              onChange={(id) => setQueue(id as QueueFilter)}
-              options={[
-                { id: 'needs_attention', label: 'Needs attention', count: needsAttentionCount },
-                { id: 'uncertain', label: 'Status uncertain', count: uncertainCount },
-                { id: 'failed', label: 'Confirmed failed' },
-                { id: 'duplicate', label: 'Duplicate risk', count: duplicateCount },
-                { id: 'successful', label: 'Successful' },
-              ]}
-            />
-            {banner}
-            {demoState === 'offline' ? <OfflineBanner onRetry={() => setDemoState('ready')} /> : null}
-          </div>
 
-          <div className="min-h-0 flex-1 overflow-auto">
-            {demoState === 'loading' ? <LoadingState label="Loading payments…" /> : null}
+            <div ref={listWindow.scrollRef} className="min-h-0 flex-1 overflow-auto">
+              {rows.length === 0 ? (
+                <EmptyState
+                  title="No payments match this filter"
+                  description="Try a different filter or search."
+                  actionLabel="Reset filters"
+                  onAction={() => {
+                    setQueue('needs_attention');
+                    setSearch('');
+                  }}
+                />
+              ) : null}
 
-            {demoState === 'error' ? (
-              <ErrorState
-                title="Could not load · no status was changed"
-                description="Nothing was changed. Retry when the connection is stable."
-                onRetry={() => setDemoState('ready')}
-              />
-            ) : null}
-
-            {demoState === 'empty' || (demoState === 'ready' && rows.length === 0) ? (
-              <EmptyState
-                title="No payments match this filter"
-                description="Try a different filter or search."
-                actionLabel="Reset filters"
-                onAction={() => {
-                  setQueue('needs_attention');
-                  setSearch('');
-                  setDemoState('ready');
-                }}
-              />
-            ) : null}
-
-            {(demoState === 'ready' || demoState === 'offline') && rows.length > 0 ? (
-              <>
-                <div className="sticky top-0 z-[1] grid grid-cols-[88px_88px_minmax(0,1.3fr)_72px_64px_64px_72px_120px] gap-x-2 border-b border-[#e7dcd2] bg-[#fbf5ef] px-4 py-3 text-[9.5px] font-semibold tracking-[0.12em] text-muted-2 uppercase">
-                  <span>Payment</span>
-                  <span>Order</span>
-                  <span>Buyer · item</span>
-                  <span>Item</span>
-                  <span>Deliv.</span>
-                  <span>Prot.</span>
-                  <span>Total</span>
-                  <span>Status</span>
-                </div>
-                {rows.map((p) => {
-                  const active = p.id === selectedId;
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      disabled={demoState === 'offline'}
-                      onClick={() => setSelectedId(p.id)}
-                      className={cn(
-                        'grid w-full grid-cols-[88px_88px_minmax(0,1.3fr)_72px_64px_64px_72px_120px] items-center gap-x-2 border-b border-[#f0e7de] px-4 py-3.5 text-left last:border-0',
-                        active ? 'bg-[#f9f1ea]' : 'bg-panel hover:bg-[#fbf5ef]',
-                        demoState === 'offline' && 'opacity-60',
-                      )}
-                    >
-                      <span className="font-mono text-[11px] font-semibold text-plum">{p.id}</span>
-                      <span className="font-mono text-[11px] text-body">{p.orderId}</span>
-                      <div className="min-w-0">
-                        <div className="truncate text-[12.5px] font-semibold text-espresso">@{p.buyer}</div>
-                        <div className="mt-0.5 truncate text-[11.5px] text-body">{p.itemTitle}</div>
-                      </div>
-                      <span className="text-[12px] tabular-nums text-espresso">
-                        {showAmounts ? formatNaira(p.itemPrice) : '—'}
-                      </span>
-                      <span className="text-[12px] tabular-nums text-espresso">
-                        {showAmounts ? formatNaira(p.deliveryFee) : '—'}
-                      </span>
-                      <span className="text-[12px] tabular-nums text-espresso">
-                        {showAmounts ? formatNaira(p.buyerProtection) : '—'}
-                      </span>
-                      <span className="text-[12px] font-semibold tabular-nums text-espresso">
-                        {showAmounts ? formatNaira(p.amount) : '—'}
-                      </span>
-                      <StatusBadge tone={statusTone(p.status)}>{p.status}</StatusBadge>
-                    </button>
-                  );
-                })}
-                <p className="border-t border-[#e7dcd2] px-4 py-3 text-[11px] leading-relaxed text-body">
-                  Buyer Protection is 5% of the item price, minimum ₦300 and maximum ₦2,500, and is never calculated
-                  on delivery. Seller deductions do not appear in buyer payment amounts.
-                </p>
-              </>
-            ) : null}
-          </div>
-        </div>
-
-        <aside className="flex min-h-0 flex-col bg-panel">
-          {!selected ? (
+              {rows.length > 0 ? (
+                <>
+                  <ExpandableListHeader
+                    desktopClassName={paymentDesktopCols}
+                    columns={
+                      <>
+                        <span>Payment</span>
+                        <span>Order</span>
+                        <span>Buyer · item</span>
+                        <span>Item</span>
+                        <span>Deliv.</span>
+                        <span>Prot.</span>
+                        <span>Total</span>
+                        <span>Status</span>
+                      </>
+                    }
+                  />
+                  {listWindow.visible.map((p) => {
+                    const active = p.id === selectedId;
+                    return (
+                      <ExpandableListRow
+                        key={p.id}
+                        selected={active}
+                        onSelect={() => setSelectedId(p.id)}
+                        desktopClassName={paymentDesktopCols}
+                        primary={
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-[11px] font-semibold text-plum">{p.id}</span>
+                              <StatusBadge tone={statusTone(p.status)}>{p.status}</StatusBadge>
+                            </div>
+                            <div className="mt-1 truncate text-[12.5px] font-semibold text-espresso">
+                              @{p.buyer}
+                            </div>
+                            <div className="mt-0.5 truncate text-[11.5px] text-body">{p.itemTitle}</div>
+                          </div>
+                        }
+                        details={[
+                          { label: 'Order', value: <span className="font-mono">{p.orderId}</span> },
+                          {
+                            label: 'Item',
+                            value: showAmounts ? formatNaira(p.itemPrice) : '—',
+                          },
+                          {
+                            label: 'Delivery',
+                            value: showAmounts ? formatNaira(p.deliveryFee) : '—',
+                          },
+                          {
+                            label: 'Protection',
+                            value: showAmounts ? formatNaira(p.buyerProtection) : '—',
+                          },
+                          {
+                            label: 'Total',
+                            value: (
+                              <span className="font-semibold">
+                                {showAmounts ? formatNaira(p.amount) : '—'}
+                              </span>
+                            ),
+                          },
+                        ]}
+                      >
+                        <span className="font-mono text-[11px] font-semibold text-plum">{p.id}</span>
+                        <span className="font-mono text-[11px] text-body">{p.orderId}</span>
+                        <div className="min-w-0">
+                          <div className="truncate text-[12.5px] font-semibold text-espresso">@{p.buyer}</div>
+                          <div className="mt-0.5 truncate text-[11.5px] text-body">{p.itemTitle}</div>
+                        </div>
+                        <span className="text-[12px] tabular-nums text-espresso">
+                          {showAmounts ? formatNaira(p.itemPrice) : '—'}
+                        </span>
+                        <span className="text-[12px] tabular-nums text-espresso">
+                          {showAmounts ? formatNaira(p.deliveryFee) : '—'}
+                        </span>
+                        <span className="text-[12px] tabular-nums text-espresso">
+                          {showAmounts ? formatNaira(p.buyerProtection) : '—'}
+                        </span>
+                        <span className="text-[12px] font-semibold tabular-nums text-espresso">
+                          {showAmounts ? formatNaira(p.amount) : '—'}
+                        </span>
+                        <StatusBadge tone={statusTone(p.status)}>{p.status}</StatusBadge>
+                      </ExpandableListRow>
+                    );
+                  })}
+                  <ListWindowFooter {...listWindow} />
+                  <p className="border-t border-[#e7dcd2] px-4 py-3 text-[11px] leading-relaxed text-body">
+                    Buyer Protection is 5% of the item price, minimum ₦300 and maximum ₦2,500, and is never calculated
+                    on delivery. Seller deductions do not appear in buyer payment amounts.
+                  </p>
+                </>
+              ) : null}
+            </div>
+          </>
+        }
+        inspector={
+          !selected ? (
             <div className="flex flex-1 items-center justify-center px-6 text-[12.5px] text-body">
               Select a payment to inspect.
-            </div>
-          ) : demoState === 'error' ? (
-            <div className="flex flex-1 flex-col justify-center gap-3 px-5">
-              <Alert className="rounded-[5px] border-risk-border bg-risk-bg">
-                <AlertTitle className="text-[12px] text-risk">Could not load · no status was changed</AlertTitle>
-                <AlertDescription className="text-[11.5px] text-risk">
-                  <button type="button" className="font-semibold underline" onClick={() => setDemoState('ready')}>
-                    Retry
-                  </button>
-                </AlertDescription>
-              </Alert>
             </div>
           ) : (
             <>
               <div className="border-b border-[#e7dcd2] px-5 py-4">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="font-display text-[26px] leading-none text-espresso">{selected.id}</div>
+                  <div className="min-w-0 flex-1">
+                    <CopyableId value={selected.id} variant="display" />
                     <div className="mt-2 text-[12.5px] text-body">
                       {selected.orderId} · @{selected.buyer} · {selected.placedLabel}
                     </div>
@@ -293,15 +307,6 @@ export function PaymentsPage() {
                     <AlertTitle className="text-[12px] text-[#8a5a15]">{selected.recordStale.title}</AlertTitle>
                     <AlertDescription className="text-[11.5px] text-[#8a5a15]">
                       {selected.recordStale.body}
-                    </AlertDescription>
-                  </Alert>
-                ) : null}
-
-                {demoState === 'offline' ? (
-                  <Alert className="rounded-[5px] border-border-soft bg-[#f3ede6]">
-                    <AlertTitle className="text-[12px] text-espresso">Offline</AlertTitle>
-                    <AlertDescription className="text-[11.5px] text-body">
-                      Verification requests are unavailable.
                     </AlertDescription>
                   </Alert>
                 ) : null}
@@ -639,7 +644,6 @@ export function PaymentsPage() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      disabled={demoState === 'offline'}
                       onClick={() => {
                         setNoteDraft('');
                         setConfirm('note');
@@ -651,7 +655,6 @@ export function PaymentsPage() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      disabled={demoState === 'offline'}
                       onClick={() => setConfirm('escalate')}
                     >
                       Escalate to Finance
@@ -665,7 +668,6 @@ export function PaymentsPage() {
                         type="button"
                         variant="outline"
                         className="w-full"
-                        disabled={demoState === 'offline'}
                         onClick={() => setConfirm('verify')}
                       >
                         Request provider verification
@@ -676,7 +678,6 @@ export function PaymentsPage() {
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={demoState === 'offline'}
                         onClick={() => {
                           setNoteDraft('');
                           setConfirm('note');
@@ -706,9 +707,9 @@ export function PaymentsPage() {
                 </p>
               </div>
             </>
-          )}
-        </aside>
-      </div>
+          )
+        }
+      />
 
       {confirm === 'verify' && selected ? (
         <ConfirmActionDialog

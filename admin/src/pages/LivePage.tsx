@@ -1,21 +1,25 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth, roleLabel } from '@/auth/AuthContext';
+import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
-import { EmptyState, ErrorState, LoadingState, OfflineBanner } from '@/components/admin/empty-state';
+import { EmptyState } from '@/components/admin/empty-state';
 import { FilterChips } from '@/components/admin/filter-chips';
+import { CopyableId } from '@/components/admin/copyable-id';
+import { ListWindowFooter } from '@/components/admin/list-window-footer';
 import { StatusBadge, type StatusTone } from '@/components/admin/status-badge';
+import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { formatNaira, mockLive, type MockLive } from '@/data/mock';
+import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
 import { canAct } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 import { Lock } from 'lucide-react';
 
-type DemoState = 'ready' | 'loading' | 'empty' | 'error' | 'offline';
 type QueueFilter = 'live' | 'upcoming' | 'ended' | 'incidents';
 type ConfirmKind = 'end' | 'note' | 'escalate' | null;
 
@@ -56,9 +60,8 @@ export function LivePage() {
   const { banner, show } = useToast();
   const [queue, setQueue] = useState<QueueFilter>('live');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useState(mockLive[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useBleedSelection(mockLive[0]?.id ?? null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
-  const [demoState, setDemoState] = useState<DemoState>('ready');
   const [overrides, setOverrides] = useState<Record<string, LiveOverride>>({});
   const [noteDraft, setNoteDraft] = useState('');
 
@@ -111,6 +114,8 @@ export function LivePage() {
     });
   }, [sessions, queue, search]);
 
+  const listWindow = useListWindow(rows);
+
   const selected = sessions.find((s) => s.id === selectedId) ?? null;
   const selectedFlash = selected ? overrides[selected.id]?.flash : null;
   const selectedEndedByPlatform = selected ? Boolean(overrides[selected.id]?.endedByPlatform) : false;
@@ -143,26 +148,92 @@ export function LivePage() {
     return session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
   }
 
+  function platformSafetyActions(opts: { compact?: boolean; className?: string }) {
+    const showEnd = Boolean(selected && canPlatformAct && isActiveLive(selected) && !alreadyEnded);
+    return (
+      <div className={opts.className}>
+        <div
+          className={
+            opts.compact
+              ? 'mb-2 text-[11px] font-semibold tracking-[0.08em] text-plum'
+              : 'mb-3 text-[11px] font-semibold tracking-[0.08em] text-plum'
+          }
+        >
+          Platform safety actions
+        </div>
+        <div className="flex flex-col gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="justify-start border-[#d9bfcf] bg-panel"
+            onClick={() => {
+              setNoteDraft('');
+              setConfirm('note');
+            }}
+          >
+            Add internal note
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="justify-start border-[#d9bfcf] bg-panel"
+            asChild
+          >
+            <Link to="/users">Open viewer in Users</Link>
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="justify-start border-hold-border bg-panel text-[#8a5a15]"
+            onClick={() => setConfirm('escalate')}
+          >
+            {isSupport ? 'Escalate to T&S' : 'Escalate session risk'}
+          </Button>
+          {showEnd ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="justify-start border-risk text-risk hover:bg-risk-bg"
+              onClick={() => setConfirm('end')}
+            >
+              End Live for platform safety — requires reason
+            </Button>
+          ) : null}
+        </div>
+        <p
+          className={
+            opts.compact
+              ? 'mt-2 text-[10.5px] leading-relaxed text-[#7a5a6b]'
+              : 'mt-3 text-[11px] leading-relaxed text-[#7a5a6b]'
+          }
+        >
+          {canPlatformAct
+            ? opts.compact
+              ? 'Ending Live stops the broadcast. Reason and audit entry are required.'
+              : 'Ending Live stops the broadcast for host and viewers. It does not change orders or payments. Reason and audit entry are required.'
+            : 'Platform Live actions are hidden for Customer Support and Finance.'}
+          {primaryViewer ? ` Focus: @${primaryViewer}.` : null}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <>
-      <div className="grid h-full min-h-0 grid-cols-[minmax(320px,0.95fr)_minmax(0,1.45fr)]">
-        <div className="flex min-h-0 min-w-0 flex-col border-r border-[#dccfc4] bg-panel">
+      <BleedSplit
+        open={!!selectedId}
+        onOpenChange={(open) => {
+          if (!open) setSelectedId(null);
+        }}
+        gridClassName="grid-cols-1 lg:grid-cols-[minmax(320px,0.95fr)_minmax(0,1.45fr)]"
+        inspectorTitle="Live session"
+        list={
+          <>
           <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
-            <div className="text-[10px] font-semibold tracking-[0.12em] text-muted-2 uppercase">
-              Screen preview states
-            </div>
-            <FilterChips
-              tone="soft"
-              value={demoState}
-              onChange={(id) => setDemoState(id as DemoState)}
-              options={[
-                { id: 'ready', label: 'Ready' },
-                { id: 'loading', label: 'Loading' },
-                { id: 'empty', label: 'No lives' },
-                { id: 'error', label: 'Error' },
-                { id: 'offline', label: 'Offline' },
-              ]}
-            />
             <FilterChips
               value={queue}
               onChange={(id) => setQueue(id as QueueFilter)}
@@ -174,21 +245,11 @@ export function LivePage() {
               ]}
             />
             {banner}
-            {demoState === 'offline' ? <OfflineBanner onRetry={() => setDemoState('ready')} /> : null}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-auto">
-            {demoState === 'loading' ? <LoadingState label="Loading sessions…" /> : null}
+          <div ref={listWindow.scrollRef} className="min-h-0 flex-1 overflow-auto">
 
-            {demoState === 'error' ? (
-              <ErrorState
-                title="Session could not load"
-                description="Nothing was changed. Retry when the connection is stable."
-                onRetry={() => setDemoState('ready')}
-              />
-            ) : null}
-
-            {demoState === 'empty' || (demoState === 'ready' && rows.length === 0) ? (
+            {rows.length === 0 ? (
               <EmptyState
                 title={queue === 'live' ? 'Nothing live right now' : 'No sessions match'}
                 description={
@@ -200,14 +261,13 @@ export function LivePage() {
                 onAction={() => {
                   setQueue('live');
                   setSearch('');
-                  setDemoState('ready');
                 }}
               />
             ) : null}
 
-            {(demoState === 'ready' || demoState === 'offline') && rows.length > 0 ? (
+            {rows.length > 0 ? (
               <div className="flex flex-col">
-                {rows.map((s) => {
+                {listWindow.visible.map((s) => {
                   const active = s.id === selectedId;
                   const live = isActiveLive(s);
                   const incidentCount = s.reports || s.linkedIncidents.length;
@@ -219,12 +279,10 @@ export function LivePage() {
                     <button
                       key={s.id}
                       type="button"
-                      disabled={demoState === 'offline'}
                       onClick={() => setSelectedId(s.id)}
                       className={cn(
                         'border-b border-[#f0e7de] px-4 py-4 text-left last:border-0',
-                        active ? 'bg-[#f9f1ea]' : 'bg-panel hover:bg-[#fbf5ef]',
-                        demoState === 'offline' && 'opacity-60',
+                        active ? 'bg-[#f9f1ea]' : 'bg-panel hover:bg-[#fbf5ef]'
                       )}
                     >
                       <div className="flex items-start justify-between gap-3">
@@ -279,34 +337,24 @@ export function LivePage() {
                     </button>
                   );
                 })}
+                <ListWindowFooter {...listWindow} />
               </div>
             ) : null}
           </div>
-        </div>
-
-        <aside className="flex min-h-0 flex-col bg-panel">
-          {!selected ? (
+          </>
+        }
+        inspector={
+          !selected ? (
             <div className="flex flex-1 items-center justify-center px-6 text-[12.5px] text-body">
               Select a session to inspect.
             </div>
-          ) : demoState === 'error' ? (
-            <div className="flex flex-1 flex-col justify-center gap-3 px-5">
-              <Alert className="rounded-[5px] border-risk-border bg-risk-bg">
-                <AlertTitle className="text-[12px] text-risk">Session could not load · nothing was changed</AlertTitle>
-                <AlertDescription className="text-[11.5px] text-risk">
-                  <button type="button" className="font-semibold underline" onClick={() => setDemoState('ready')}>
-                    Retry
-                  </button>
-                </AlertDescription>
-              </Alert>
-            </div>
           ) : (
-            <>
-              <div className="border-b border-[#e7dcd2] px-5 py-4">
+            <div className="flex h-full min-h-0 flex-1 flex-col">
+              <div className="shrink-0 border-b border-[#e7dcd2] px-5 py-4">
                 <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="font-display text-[28px] leading-none text-espresso">{selected.id}</h2>
+                      <CopyableId value={selected.id} variant="display" />
                       {isActiveLive(selected) ? (
                         <span className="inline-flex items-center rounded-[3px] bg-risk px-[7px] py-[3px] text-[10.5px] font-semibold text-white">
                           Live now
@@ -341,6 +389,7 @@ export function LivePage() {
                 </div>
               </div>
 
+              <div className="flex min-h-0 flex-1 flex-col">
               <div className="min-h-0 flex-1 overflow-auto">
                 <div className="grid min-h-full grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.85fr)]">
                   <div className="space-y-5 border-r-0 px-5 py-4 lg:border-r lg:border-[#e7dcd2]">
@@ -604,72 +653,24 @@ export function LivePage() {
                       ) : null}
                     </div>
 
-                    <div className="border-t border-[#e3d0db] bg-[#f4ecf1] px-5 py-4">
-                      <div className="mb-3 text-[11px] font-semibold tracking-[0.08em] text-plum">
-                        Platform safety actions
-                      </div>
-                      <div className="flex flex-col gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="justify-start border-[#d9bfcf] bg-panel"
-                          disabled={demoState === 'offline'}
-                          onClick={() => {
-                            setNoteDraft('');
-                            setConfirm('note');
-                          }}
-                        >
-                          Add internal note
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="justify-start border-[#d9bfcf] bg-panel"
-                          disabled={demoState === 'offline'}
-                          asChild
-                        >
-                          <Link to="/users">Open viewer in Users</Link>
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="justify-start border-hold-border bg-panel text-[#8a5a15]"
-                          disabled={demoState === 'offline'}
-                          onClick={() => setConfirm('escalate')}
-                        >
-                          {isSupport ? 'Escalate to T&S' : 'Escalate session risk'}
-                        </Button>
-
-                        {canPlatformAct && isActiveLive(selected) && !alreadyEnded ? (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="justify-start border-risk text-risk hover:bg-risk-bg"
-                            disabled={demoState === 'offline'}
-                            onClick={() => setConfirm('end')}
-                          >
-                            End Live for platform safety — requires reason
-                          </Button>
-                        ) : null}
-                      </div>
-                      <p className="mt-3 text-[11px] leading-relaxed text-[#7a5a6b]">
-                        {canPlatformAct
-                          ? 'Ending Live stops the broadcast for host and viewers. It does not change orders or payments. Reason and audit entry are required.'
-                          : 'Platform Live actions are hidden for Customer Support and Finance.'}
-                        {primaryViewer ? ` Focus: @${primaryViewer}.` : null}
-                      </p>
-                    </div>
+                    {/* Desktop: actions stay in the side column */}
+                    {platformSafetyActions({
+                      className: 'mt-auto hidden border-t border-[#e3d0db] bg-[#f4ecf1] px-5 py-4 lg:block',
+                    })}
                   </div>
                 </div>
               </div>
-            </>
-          )}
-        </aside>
-      </div>
+
+              {/* Mobile: pin actions to the bottom of the inspector Sheet */}
+              {platformSafetyActions({
+                compact: true,
+                className: 'shrink-0 border-t border-[#e3d0db] bg-[#f4ecf1] px-4 py-3 lg:hidden',
+              })}
+              </div>
+            </div>
+          )
+        }
+      />
 
       {confirm === 'end' && selected ? (
         <ConfirmActionDialog

@@ -24,12 +24,7 @@ import type { Department } from '@/data/types';
 import { apiUpload } from '@/lib/api';
 import { formatLiveSchedule, formatNaira } from '@/lib/format';
 import { listingPhotoFormPart, pickListingPhotos } from '@/lib/listing-photos';
-import {
-  loadLiveVideoProfileOverride,
-  resolveLiveVideoProfile,
-  setLiveVideoProfileOverride,
-  type LiveVideoProfileId,
-} from '@/lib/live-video-profile';
+import { setLiveVideoProfileOverride } from '@/lib/live-video-profile';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
@@ -112,7 +107,6 @@ export default function PrepareLiveScreen() {
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [modsOpen, setModsOpen] = useState(false);
-  const [videoProfile, setVideoProfile] = useState<LiveVideoProfileId>('legacy');
   const productsRef = useRef<View>(null);
 
   const products = useMemo(() => {
@@ -131,22 +125,11 @@ export default function PrepareLiveScreen() {
     };
   }, []);
 
+  // Drop any prior closed-tester A/B override so hosts use the optimized legacy profile.
   useEffect(() => {
     if (Platform.OS !== 'android') return;
-    let cancelled = false;
-    void (async () => {
-      await loadLiveVideoProfileOverride();
-      if (!cancelled) setVideoProfile(resolveLiveVideoProfile());
-    })();
-    return () => {
-      cancelled = true;
-    };
+    void setLiveVideoProfileOverride('legacy');
   }, []);
-
-  async function selectVideoProfile(next: LiveVideoProfileId) {
-    setVideoProfile(next);
-    await setLiveVideoProfileOverride(next);
-  }
   function openSchedulePicker() {
     setScheduleMode(true);
     setPickerStep(Platform.OS === 'ios' ? 'datetime' : 'date');
@@ -489,44 +472,6 @@ export default function PrepareLiveScreen() {
               display={Platform.OS === 'ios' ? 'spinner' : 'default'}
               {...(Platform.OS === 'ios' ? { themeVariant: 'dark' as const } : {})}
             />
-          ) : null}
-
-          {Platform.OS === 'android' ? (
-            <>
-              <Text style={[styles.sectionLabel, styles.deviceSection]}>Video quality test · temporary</Text>
-              <Text style={styles.profileHint}>
-                Closed testers only — pick which encode profile to broadcast. Remove after A/B.
-              </Text>
-              <View style={styles.whenRow}>
-                <Pressable
-                  onPress={() => void selectVideoProfile('legacy')}
-                  style={[styles.whenBtn, videoProfile === 'legacy' && styles.whenBtnOn]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: videoProfile === 'legacy' }}
-                  accessibilityLabel="Use legacy video profile"
-                >
-                  <Text style={[styles.whenBtnLabel, videoProfile === 'legacy' && styles.whenBtnLabelOn]}>
-                    Legacy · VP8
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => void selectVideoProfile('test')}
-                  style={[styles.whenBtn, videoProfile === 'test' && styles.whenBtnOn]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: videoProfile === 'test' }}
-                  accessibilityLabel="Use test higher-bitrate video profile"
-                >
-                  <Text style={[styles.whenBtnLabel, videoProfile === 'test' && styles.whenBtnLabelOn]}>
-                    Test · higher bitrate
-                  </Text>
-                </Pressable>
-              </View>
-              <Text style={styles.profileSub}>
-                {videoProfile === 'test'
-                  ? 'Higher bitrate VP8. If the camera stays black, switch back to Legacy · VP8.'
-                  : 'Current defaults: ~720p / VP8 / ~1.7 Mbps.'}
-              </Text>
-            </>
           ) : null}
 
           <Text style={[styles.sectionLabel, styles.deviceSection]}>Device check</Text>
@@ -978,22 +923,6 @@ const styles = StyleSheet.create({
   },
   deviceSection: {
     marginTop: 12,
-  },
-  profileHint: {
-    marginTop: -4,
-    marginBottom: 10,
-    fontSize: 12.5,
-    lineHeight: 18,
-    fontFamily: Typography.body,
-    color: IVORY_50,
-  },
-  profileSub: {
-    marginTop: 8,
-    marginBottom: 4,
-    fontSize: 12,
-    lineHeight: 17,
-    fontFamily: Typography.body,
-    color: IVORY_50,
   },
   deviceRow: {
     flexDirection: 'row',

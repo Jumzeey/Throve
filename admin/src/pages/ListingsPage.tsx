@@ -3,21 +3,26 @@ import { Link } from 'react-router-dom';
 import { useAuth, roleLabel } from '@/auth/AuthContext';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
-import { EmptyState, ErrorState, LoadingState, OfflineBanner } from '@/components/admin/empty-state';
+import { EmptyState, ErrorState } from '@/components/admin/empty-state';
+import { ListSkeleton, DetailSkeleton } from '@/components/admin/loading-skeleton';
+import { ExpandableListHeader, ExpandableListRow } from '@/components/admin/expandable-list-row';
 import { FilterChips } from '@/components/admin/filter-chips';
 import { StatusBadge, type StatusTone } from '@/components/admin/status-badge';
+import { CopyableId } from '@/components/admin/copyable-id';
+import { ListWindowFooter } from '@/components/admin/list-window-footer';
 import { Timeline } from '@/components/admin/timeline';
+import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { formatNaira, mockListings, type MockListing } from '@/data/mock';
+import { useBleedSelection } from '@/hooks/use-bleed-selection';
+import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
 import { ApiError, apiFetch } from '@/lib/api';
 import { canAct, ROLE_LABELS } from '@/lib/roles';
-import { cn } from '@/lib/utils';
 import { Lock } from 'lucide-react';
 
-type DemoState = 'ready' | 'loading' | 'empty' | 'error' | 'offline';
 type ConfirmKind = 'remove' | 'restore' | 'note' | 'escalate' | 'approve' | 'reject' | null;
 type QueueFilter =
   | 'pending'
@@ -199,9 +204,8 @@ export function ListingsPage() {
   const [filter, setFilter] = useState<QueueFilter>('pending');
   const [dept, setDept] = useState('all');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
-  const [demoState, setDemoState] = useState<DemoState>(liveMode ? 'loading' : 'ready');
+  const [loading, setLoading] = useState(liveMode);
   const [overrides, setOverrides] = useState<Record<string, ListingOverride>>({});
   const [noteDraft, setNoteDraft] = useState('');
   const [liveListings, setLiveListings] = useState<ListingRow[]>([]);
@@ -217,7 +221,7 @@ export function ListingsPage() {
 
   const loadLive = useCallback(async () => {
     if (!liveMode) return;
-    setDemoState('loading');
+    setLoading(true);
     setLoadError(null);
     try {
       const queue = filter === 'reported' ? 'all' : filter;
@@ -228,21 +232,18 @@ export function ListingsPage() {
       const mapped = data.listings.map(fromApi);
       setLiveListings(mapped);
       setPendingCount(data.counts.pending ?? 0);
-      setSelectedId((current) => {
-        if (current && mapped.some((l) => l.id === current)) return current;
-        return mapped[0]?.id ?? null;
-      });
-      setDemoState(mapped.length === 0 ? 'empty' : 'ready');
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Could not load listings';
       setLoadError(message);
-      setDemoState('error');
+    } finally {
+      setLoading(false);
     }
   }, [liveMode, filter, search]);
 
   useEffect(() => {
     if (!liveMode) {
-      setDemoState('ready');
+      setLoading(false);
+      setLoadError(null);
       setLiveListings([]);
       setPendingCount(reportedCount(mockListings.map(fromMock)));
       return;
@@ -324,6 +325,17 @@ export function ListingsPage() {
       );
     });
   }, [listings, filter, dept, search, liveMode]);
+
+  const [selectedId, setSelectedId] = useBleedSelection(rows[0]?.id ?? listings[0]?.id ?? null);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    if (!listings.some((l) => l.id === selectedId)) {
+      setSelectedId(null);
+    }
+  }, [listings, selectedId, setSelectedId]);
+
+  const listWindow = useListWindow(rows);
 
   const selected = listings.find((l) => l.id === selectedId) ?? null;
   const selectedFlash = selected ? overrides[selected.id]?.flash : null;
@@ -425,172 +437,210 @@ export function ListingsPage() {
     setConfirm(null);
   }
 
+  const listingDesktopCols =
+    'grid-cols-[88px_minmax(0,1.4fr)_100px_118px_88px_108px_64px] items-center py-3';
+
   return (
     <>
-      <div className="grid h-full min-h-0 grid-cols-[minmax(0,1.35fr)_minmax(360px,0.95fr)]">
-        <div className="flex min-h-0 min-w-0 flex-col border-r border-[#dccfc4] bg-panel">
-          <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
-            {!liveMode ? (
-              <>
+      <BleedSplit
+        open={!!selectedId}
+        onOpenChange={(open) => {
+          if (!open) setSelectedId(null);
+        }}
+        gridClassName="grid-cols-1 lg:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.95fr)]"
+        inspectorTitle="Listing"
+        list={
+          <>
+            <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
+              {liveMode ? (
                 <div className="text-[10px] font-semibold tracking-[0.12em] text-muted-2 uppercase">
-                  Demo preview states
+                  Live queue · staff API
                 </div>
-                <FilterChips
-                  tone="soft"
-                  value={demoState}
-                  onChange={(id) => setDemoState(id as DemoState)}
-                  options={[
-                    { id: 'ready', label: 'Ready' },
-                    { id: 'loading', label: 'Loading' },
-                    { id: 'empty', label: 'No results' },
-                    { id: 'error', label: 'Error' },
-                    { id: 'offline', label: 'Offline' },
-                  ]}
+              ) : null}
+              <FilterChips
+                value={filter}
+                onChange={(id) => setFilter(id as QueueFilter)}
+                options={[
+                  { id: 'pending', label: 'Pending review', count: liveMode ? pendingCount : demoPendingCount },
+                  { id: 'rejected', label: 'Rejected' },
+                  { id: 'reported', label: 'Reported', count: flagged || undefined },
+                  { id: 'all', label: 'All listings' },
+                  { id: 'available', label: 'Available' },
+                  { id: 'reserved', label: 'Reserved' },
+                  { id: 'sold', label: 'Sold' },
+                  { id: 'hidden', label: 'Hidden' },
+                  { id: 'removed', label: 'Removed' },
+                ]}
+              />
+              <FilterChips
+                tone="soft"
+                value={dept}
+                onChange={setDept}
+                options={[
+                  { id: 'all', label: 'Women · Men · Kids' },
+                  { id: 'women', label: 'Women' },
+                  { id: 'men', label: 'Men' },
+                  { id: 'kids', label: 'Kids' },
+                ]}
+              />
+              {banner}
+              {loadError && liveMode ? (
+                <Alert variant="destructive">
+                  <AlertTitle>Load failed</AlertTitle>
+                  <AlertDescription>{loadError}</AlertDescription>
+                </Alert>
+              ) : null}
+            </div>
+
+            <div ref={listWindow.scrollRef} className="min-h-0 flex-1 overflow-auto">
+              {loading ? <ListSkeleton rows={9} /> : null}
+
+              {!loading && loadError && liveMode ? (
+                <ErrorState
+                  title="Listing could not load"
+                  description="Nothing was changed. Retry when the connection is stable."
+                  onRetry={() => void loadLive()}
                 />
-              </>
-            ) : (
-              <div className="text-[10px] font-semibold tracking-[0.12em] text-muted-2 uppercase">
-                Live queue · staff API
-              </div>
-            )}
-            <FilterChips
-              value={filter}
-              onChange={(id) => setFilter(id as QueueFilter)}
-              options={[
-                { id: 'pending', label: 'Pending review', count: liveMode ? pendingCount : demoPendingCount },
-                { id: 'rejected', label: 'Rejected' },
-                { id: 'reported', label: 'Reported', count: flagged || undefined },
-                { id: 'all', label: 'All listings' },
-                { id: 'available', label: 'Available' },
-                { id: 'reserved', label: 'Reserved' },
-                { id: 'sold', label: 'Sold' },
-                { id: 'hidden', label: 'Hidden' },
-                { id: 'removed', label: 'Removed' },
-              ]}
-            />
-            <FilterChips
-              tone="soft"
-              value={dept}
-              onChange={setDept}
-              options={[
-                { id: 'all', label: 'Women · Men · Kids' },
-                { id: 'women', label: 'Women' },
-                { id: 'men', label: 'Men' },
-                { id: 'kids', label: 'Kids' },
-              ]}
-            />
-            {banner}
-            {demoState === 'offline' ? <OfflineBanner onRetry={() => (liveMode ? void loadLive() : setDemoState('ready'))} /> : null}
-            {loadError && liveMode ? (
-              <Alert variant="destructive">
-                <AlertTitle>Load failed</AlertTitle>
-                <AlertDescription>{loadError}</AlertDescription>
-              </Alert>
-            ) : null}
-          </div>
+              ) : null}
 
-          <div className="min-h-0 flex-1 overflow-auto">
-            {demoState === 'loading' ? <LoadingState label="Loading listings…" /> : null}
+              {!loading && !(loadError && liveMode) && rows.length === 0 ? (
+                <EmptyState
+                  title={filter === 'pending' ? 'No listings pending review' : 'No listings match'}
+                  description={
+                    filter === 'pending'
+                      ? 'Seller publishes land here until Trust & Safety approves or rejects.'
+                      : 'Try a different reference, title or seller.'
+                  }
+                  actionLabel="Reset filters"
+                  onAction={() => {
+                    setFilter('pending');
+                    setDept('all');
+                    setSearch('');
+                  }}
+                />
+              ) : null}
 
-            {demoState === 'error' ? (
-              <ErrorState
-                title="Listing could not load"
-                description="Nothing was changed. Retry when the connection is stable."
-                onRetry={() => (liveMode ? void loadLive() : setDemoState('ready'))}
-              />
-            ) : null}
-
-            {demoState === 'empty' || (demoState === 'ready' && rows.length === 0) ? (
-              <EmptyState
-                title={filter === 'pending' ? 'No listings pending review' : 'No listings match'}
-                description={
-                  filter === 'pending'
-                    ? 'Seller publishes land here until Trust & Safety approves or rejects.'
-                    : 'Try a different reference, title or seller.'
-                }
-                actionLabel="Reset filters"
-                onAction={() => {
-                  setFilter('pending');
-                  setDept('all');
-                  setSearch('');
-                  if (!liveMode) setDemoState('ready');
-                }}
-              />
-            ) : null}
-
-            {(demoState === 'ready' || demoState === 'offline') && rows.length > 0 ? (
-              <>
-                <div className="sticky top-0 z-[1] grid grid-cols-[88px_minmax(0,1.4fr)_100px_118px_88px_108px_64px] border-b border-[#e7dcd2] bg-[#fbf5ef] px-4 py-2.5 text-[9.5px] font-semibold tracking-[0.13em] text-muted-2 uppercase">
-                  <span>Listing</span>
-                  <span>Item</span>
-                  <span>Seller</span>
-                  <span>Dept · category</span>
-                  <span>Condition</span>
-                  <span>Price / status</span>
-                  <span>Reports</span>
-                </div>
-                {rows.map((l) => {
-                  const active = l.id === selectedId;
-                  return (
-                    <button
-                      key={l.id}
-                      type="button"
-                      disabled={demoState === 'offline'}
-                      onClick={() => setSelectedId(l.id)}
-                      className={cn(
-                        'grid w-full grid-cols-[88px_minmax(0,1.4fr)_100px_118px_88px_108px_64px] items-center border-b border-[#f0e7de] px-4 py-3 text-left last:border-0',
-                        active ? 'bg-[#f9f1ea]' : 'bg-panel hover:bg-[#fbf5ef]',
-                        demoState === 'offline' && 'opacity-60',
-                      )}
-                    >
-                      <span className="truncate font-mono text-[11px] font-semibold text-espresso">{l.id.slice(0, 8)}</span>
-                      <span className="flex min-w-0 items-center gap-2.5">
-                        {l.photoUrls[0] ? (
-                          <img
-                            src={l.photoUrls[0]}
-                            alt=""
-                            className="size-9 shrink-0 rounded-[4px] border border-[#e2d7cc] object-cover"
-                          />
-                        ) : (
-                          <span className="size-9 shrink-0 rounded-[4px] border border-[#e2d7cc] bg-[#efe6dd]" />
-                        )}
-                        <span className="min-w-0">
-                          <span className="block truncate text-[12.5px] font-semibold text-espresso">{l.title}</span>
-                          <span className="block truncate text-[10.5px] text-muted">{l.updatedAt}</span>
+              {!loading && !(loadError && liveMode) && rows.length > 0 ? (
+                <>
+                  <ExpandableListHeader
+                    desktopClassName={listingDesktopCols}
+                    columns={
+                      <>
+                        <span>Listing</span>
+                        <span>Item</span>
+                        <span>Seller</span>
+                        <span>Dept · category</span>
+                        <span>Condition</span>
+                        <span>Price / status</span>
+                        <span>Reports</span>
+                      </>
+                    }
+                  />
+                  {listWindow.visible.map((l) => {
+                    const active = l.id === selectedId;
+                    return (
+                      <ExpandableListRow
+                        key={l.id}
+                        selected={active}
+                        onSelect={() => setSelectedId(l.id)}
+                        desktopClassName={listingDesktopCols}
+                        primary={
+                          <div className="flex min-w-0 items-start gap-2.5">
+                            {l.photoUrls[0] ? (
+                              <img
+                                src={l.photoUrls[0]}
+                                alt=""
+                                className="size-9 shrink-0 rounded-[4px] border border-[#e2d7cc] object-cover"
+                              />
+                            ) : (
+                              <span className="size-9 shrink-0 rounded-[4px] border border-[#e2d7cc] bg-[#efe6dd]" />
+                            )}
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="truncate font-mono text-[11px] font-semibold text-espresso">
+                                  {l.id.slice(0, 8)}
+                                </span>
+                                <StatusBadge tone={statusTone(l.status)}>{l.statusLabel}</StatusBadge>
+                              </div>
+                              <div className="mt-1 truncate text-[12.5px] font-semibold text-espresso">{l.title}</div>
+                              <div className="mt-0.5 truncate text-[11px] text-body">@{l.seller}</div>
+                            </div>
+                          </div>
+                        }
+                        details={[
+                          {
+                            label: 'Dept · category',
+                            value: `${l.department} · ${l.category}`,
+                          },
+                          { label: 'Condition', value: l.condition },
+                          {
+                            label: 'Price',
+                            value: <span className="font-semibold tabular-nums">{formatNaira(l.price)}</span>,
+                          },
+                          {
+                            label: 'Reports',
+                            value:
+                              l.reports > 0 ? (
+                                <StatusBadge tone={l.reports >= 3 ? 'risk' : 'hold'}>{l.reports}</StatusBadge>
+                              ) : (
+                                '—'
+                              ),
+                          },
+                        ]}
+                      >
+                        <span className="truncate font-mono text-[11px] font-semibold text-espresso">
+                          {l.id.slice(0, 8)}
                         </span>
-                      </span>
-                      <span className="truncate text-[11.5px] text-body">@{l.seller}</span>
-                      <span className="truncate text-[11px] text-body">
-                        {l.department} · {l.category}
-                      </span>
-                      <span className="truncate text-[11px] text-body">{l.condition}</span>
-                      <span className="flex flex-col items-start gap-1">
-                        <span className="text-[11.5px] font-semibold tabular-nums text-espresso">
-                          {formatNaira(l.price)}
+                        <span className="flex min-w-0 items-center gap-2.5">
+                          {l.photoUrls[0] ? (
+                            <img
+                              src={l.photoUrls[0]}
+                              alt=""
+                              className="size-9 shrink-0 rounded-[4px] border border-[#e2d7cc] object-cover"
+                            />
+                          ) : (
+                            <span className="size-9 shrink-0 rounded-[4px] border border-[#e2d7cc] bg-[#efe6dd]" />
+                          )}
+                          <span className="min-w-0">
+                            <span className="block truncate text-[12.5px] font-semibold text-espresso">{l.title}</span>
+                            <span className="block truncate text-[10.5px] text-muted">{l.updatedAt}</span>
+                          </span>
                         </span>
-                        <StatusBadge tone={statusTone(l.status)}>{l.statusLabel}</StatusBadge>
-                      </span>
-                      <span>
-                        {l.reports > 0 ? (
-                          <StatusBadge tone={l.reports >= 3 ? 'risk' : 'hold'}>{l.reports}</StatusBadge>
-                        ) : (
-                          <span className="text-[11px] text-muted-2">—</span>
-                        )}
-                      </span>
-                    </button>
-                  );
-                })}
-              </>
-            ) : null}
-          </div>
-        </div>
-
-        <aside className="flex min-h-0 flex-col bg-panel">
-          {!selected ? (
+                        <span className="truncate text-[11.5px] text-body">@{l.seller}</span>
+                        <span className="truncate text-[11px] text-body">
+                          {l.department} · {l.category}
+                        </span>
+                        <span className="truncate text-[11px] text-body">{l.condition}</span>
+                        <span className="flex flex-col items-start gap-1">
+                          <span className="text-[11.5px] font-semibold tabular-nums text-espresso">
+                            {formatNaira(l.price)}
+                          </span>
+                          <StatusBadge tone={statusTone(l.status)}>{l.statusLabel}</StatusBadge>
+                        </span>
+                        <span>
+                          {l.reports > 0 ? (
+                            <StatusBadge tone={l.reports >= 3 ? 'risk' : 'hold'}>{l.reports}</StatusBadge>
+                          ) : (
+                            <span className="text-[11px] text-muted-2">—</span>
+                          )}
+                        </span>
+                      </ExpandableListRow>
+                    );
+                  })}
+                  <ListWindowFooter {...listWindow} />
+                </>
+              ) : null}
+            </div>
+          </>
+        }
+        inspector={
+          loading ? (
+            <DetailSkeleton />
+          ) : !selected ? (
             <div className="flex flex-1 items-center justify-center px-6 text-[12.5px] text-muted">
               Select a listing to inspect.
             </div>
-          ) : demoState === 'error' ? (
+          ) : loadError && liveMode ? (
             <div className="flex flex-1 flex-col justify-center gap-3 px-5">
               <Alert className="rounded-[5px] border-risk-border bg-risk-bg">
                 <AlertTitle className="text-[12px] text-risk">Listing could not load</AlertTitle>
@@ -606,12 +656,14 @@ export function ListingsPage() {
             <>
               <div className="border-b border-[#e7dcd2] px-5 py-4">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="font-mono text-[11px] font-semibold text-muted">{selected.id}</div>
+                  <div className="min-w-0 flex-1">
+                    <CopyableId value={selected.id} variant="mono" />
                     <div className="mt-0.5 font-display text-[20px] leading-tight text-espresso">{selected.title}</div>
                     <div className="mt-1 text-[11.5px] text-muted">@{selected.seller}</div>
                   </div>
-                  <StatusBadge tone={statusTone(selected.status)}>{selected.statusLabel}</StatusBadge>
+                  <StatusBadge tone={statusTone(selected.status)} className="shrink-0">
+                    {selected.statusLabel}
+                  </StatusBadge>
                 </div>
               </div>
 
@@ -768,7 +820,7 @@ export function ListingsPage() {
                       <Button
                         type="button"
                         className="flex-1"
-                        disabled={demoState === 'offline' || actionBusy}
+                        disabled={actionBusy}
                         onClick={() => setConfirm('approve')}
                       >
                         Approve · go live
@@ -779,7 +831,7 @@ export function ListingsPage() {
                         type="button"
                         variant="outline"
                         className="flex-1 border-risk text-risk hover:bg-risk-bg"
-                        disabled={demoState === 'offline' || actionBusy}
+                        disabled={actionBusy}
                         onClick={() => setConfirm('reject')}
                       >
                         Reject · needs changes
@@ -793,7 +845,6 @@ export function ListingsPage() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={demoState === 'offline'}
                     onClick={() => {
                       setNoteDraft('');
                       setConfirm('note');
@@ -805,7 +856,6 @@ export function ListingsPage() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={demoState === 'offline'}
                     onClick={() => setConfirm('escalate')}
                   >
                     {isSupport ? 'Escalate to T&S' : 'Escalate seller risk'}
@@ -817,7 +867,6 @@ export function ListingsPage() {
                     type="button"
                     variant="outline"
                     className="mt-2.5 w-full border-risk text-risk hover:bg-risk-bg"
-                    disabled={demoState === 'offline'}
                     onClick={() => setConfirm('remove')}
                   >
                     Remove from public marketplace — requires reason
@@ -828,7 +877,6 @@ export function ListingsPage() {
                   <Button
                     type="button"
                     className="mt-2.5 w-full"
-                    disabled={demoState === 'offline'}
                     onClick={() => setConfirm('restore')}
                   >
                     Restore visibility — requires reason
@@ -836,9 +884,9 @@ export function ListingsPage() {
                 ) : null}
               </div>
             </>
-          )}
-        </aside>
-      </div>
+          )
+        }
+      />
 
       {confirm === 'approve' && selected ? (
         <ConfirmActionDialog

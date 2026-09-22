@@ -1,20 +1,25 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth, roleLabel } from '@/auth/AuthContext';
+import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
-import { EmptyState, ErrorState, LoadingState, OfflineBanner } from '@/components/admin/empty-state';
+import { EmptyState } from '@/components/admin/empty-state';
+import { ExpandableListHeader, ExpandableListRow } from '@/components/admin/expandable-list-row';
 import { FilterChips } from '@/components/admin/filter-chips';
+import { CopyableId } from '@/components/admin/copyable-id';
+import { ListWindowFooter } from '@/components/admin/list-window-footer';
 import { StatusBadge, type StatusTone } from '@/components/admin/status-badge';
+import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { formatNaira, mockPayouts, type MockPayout } from '@/data/mock';
+import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
 import { canAct, ROLE_LABELS } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 import { Check, Lock, X } from 'lucide-react';
 
-type DemoState = 'ready' | 'loading' | 'empty' | 'error' | 'offline';
 type QueueFilter =
   | 'eligible'
   | 'on_hold'
@@ -57,9 +62,8 @@ export function PayoutsPage() {
   const { banner, show } = useToast();
   const [queue, setQueue] = useState<QueueFilter>('eligible');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useState(mockPayouts[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useBleedSelection(mockPayouts[0]?.id ?? null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
-  const [demoState, setDemoState] = useState<DemoState>('ready');
   const [overrides, setOverrides] = useState<Record<string, PayoutOverride>>({});
   const [noteDraft, setNoteDraft] = useState('');
   const [actionInvalid, setActionInvalid] = useState<string | null>(null);
@@ -127,6 +131,8 @@ export function PayoutsPage() {
     });
   }, [payouts, queue, search]);
 
+  const listWindow = useListWindow(rows);
+
   const selected = payouts.find((p) => p.id === selectedId) ?? null;
   const selectedFlash = selected ? overrides[selected.id]?.flash : null;
 
@@ -165,162 +171,176 @@ export function PayoutsPage() {
     setConfirm('process');
   }
 
+  const payoutDesktopCols =
+    'grid-cols-[88px_minmax(0,1.2fr)_72px_72px_64px_72px_88px_120px] items-center gap-x-2 py-3.5';
+
   return (
     <>
-      <div className="grid h-full min-h-0 grid-cols-[minmax(0,1.4fr)_minmax(360px,0.95fr)]">
-        <div className="flex min-h-0 min-w-0 flex-col border-r border-[#dccfc4] bg-panel">
-          <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
-            <div className="text-[10px] font-semibold tracking-[0.12em] text-muted-2 uppercase">
-              Screen 11 preview states
+      <BleedSplit
+        open={!!selectedId}
+        onOpenChange={(open) => {
+          if (!open) setSelectedId(null);
+        }}
+        gridClassName="grid-cols-1 lg:grid-cols-[minmax(0,1.4fr)_minmax(360px,0.95fr)]"
+        inspectorTitle="Payout"
+        list={
+          <>
+            <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <FilterChips
+                  value={queue}
+                  onChange={(id) => setQueue(id as QueueFilter)}
+                  options={[
+                    { id: 'eligible', label: 'Eligible', count: eligibleCount },
+                    { id: 'on_hold', label: 'On Hold', count: holdCount },
+                    { id: 'verification', label: 'Verification required', count: verifyCount },
+                    { id: 'processing', label: 'Processing', count: processingCount },
+                    { id: 'failed', label: 'Failed', count: failedCount },
+                    { id: 'not_eligible', label: 'Not yet eligible' },
+                    { id: 'paid', label: 'Paid out' },
+                  ]}
+                />
+                {showAmounts ? (
+                  <div className="ml-auto text-[11.5px] font-semibold tabular-nums text-espresso">
+                    Eligible total {formatNaira(eligibleTotal)}
+                  </div>
+                ) : null}
+              </div>
+              {banner}
             </div>
-            <FilterChips
-              tone="soft"
-              value={demoState}
-              onChange={(id) => setDemoState(id as DemoState)}
-              options={[
-                { id: 'ready', label: 'Ready' },
-                { id: 'loading', label: 'Loading' },
-                { id: 'empty', label: 'Empty' },
-                { id: 'error', label: 'Error' },
-                { id: 'offline', label: 'Offline' },
-              ]}
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <FilterChips
-                value={queue}
-                onChange={(id) => setQueue(id as QueueFilter)}
-                options={[
-                  { id: 'eligible', label: 'Eligible', count: eligibleCount },
-                  { id: 'on_hold', label: 'On Hold', count: holdCount },
-                  { id: 'verification', label: 'Verification required', count: verifyCount },
-                  { id: 'processing', label: 'Processing', count: processingCount },
-                  { id: 'failed', label: 'Failed', count: failedCount },
-                  { id: 'not_eligible', label: 'Not yet eligible' },
-                  { id: 'paid', label: 'Paid out' },
-                ]}
-              />
-              {showAmounts ? (
-                <div className="ml-auto text-[11.5px] font-semibold tabular-nums text-espresso">
-                  Eligible total {formatNaira(eligibleTotal)}
-                </div>
+
+            <div ref={listWindow.scrollRef} className="min-h-0 flex-1 overflow-auto">
+              {rows.length === 0 ? (
+                <EmptyState
+                  title="Nothing in this filter"
+                  description={
+                    queue === 'failed'
+                      ? 'No failed payouts today. Clear the filter to see the full queue.'
+                      : 'No payouts match this filter.'
+                  }
+                  actionLabel="Clear filter"
+                  onAction={() => {
+                    setQueue('eligible');
+                    setSearch('');
+                  }}
+                />
+              ) : null}
+
+              {rows.length > 0 ? (
+                <>
+                  <ExpandableListHeader
+                    desktopClassName={payoutDesktopCols}
+                    columns={
+                      <>
+                        <span>Payout</span>
+                        <span>Seller & order</span>
+                        <span>Sale</span>
+                        <span>Commission</span>
+                        <span>Fee</span>
+                        <span>Net</span>
+                        <span>Verification</span>
+                        <span>Status</span>
+                      </>
+                    }
+                  />
+                  {listWindow.visible.map((p) => {
+                    const active = p.id === selectedId;
+                    return (
+                      <ExpandableListRow
+                        key={p.id}
+                        selected={active}
+                        onSelect={() => {
+                          setSelectedId(p.id);
+                          setActionInvalid(null);
+                        }}
+                        desktopClassName={payoutDesktopCols}
+                        primary={
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-[11px] font-semibold text-plum">{p.id}</span>
+                              <StatusBadge tone={statusTone(p.status)}>{p.status}</StatusBadge>
+                            </div>
+                            <div className="mt-1 truncate text-[12.5px] font-semibold text-espresso">
+                              @{p.seller}
+                            </div>
+                            <div className="mt-0.5 font-mono text-[11px] text-body">{p.orderId}</div>
+                          </div>
+                        }
+                        details={[
+                          {
+                            label: 'Sale',
+                            value: showAmounts ? formatNaira(p.saleTotal) : '—',
+                          },
+                          {
+                            label: 'Commission',
+                            value: showAmounts ? formatNaira(p.commission) : '—',
+                          },
+                          {
+                            label: 'Fee',
+                            value: showAmounts ? formatNaira(p.fees) : '—',
+                          },
+                          {
+                            label: 'Net',
+                            value: (
+                              <span className="font-semibold">
+                                {showAmounts ? formatNaira(p.net) : '—'}
+                              </span>
+                            ),
+                          },
+                          {
+                            label: 'Verification',
+                            value: (
+                              <StatusBadge tone={verificationTone(p.verification)}>
+                                {p.verification}
+                              </StatusBadge>
+                            ),
+                          },
+                        ]}
+                      >
+                        <span className="font-mono text-[11px] font-semibold text-plum">{p.id}</span>
+                        <div className="min-w-0">
+                          <div className="truncate text-[12.5px] font-semibold text-espresso">@{p.seller}</div>
+                          <div className="mt-0.5 font-mono text-[11px] text-body">{p.orderId}</div>
+                        </div>
+                        <span className="text-[12px] tabular-nums text-espresso">
+                          {showAmounts ? formatNaira(p.saleTotal) : '—'}
+                        </span>
+                        <span className="text-[12px] tabular-nums text-espresso">
+                          {showAmounts ? formatNaira(p.commission) : '—'}
+                        </span>
+                        <span className="text-[12px] tabular-nums text-espresso">
+                          {showAmounts ? formatNaira(p.fees) : '—'}
+                        </span>
+                        <span className="text-[12px] font-semibold tabular-nums text-espresso">
+                          {showAmounts ? formatNaira(p.net) : '—'}
+                        </span>
+                        <StatusBadge tone={verificationTone(p.verification)}>{p.verification}</StatusBadge>
+                        <StatusBadge tone={statusTone(p.status)}>{p.status}</StatusBadge>
+                      </ExpandableListRow>
+                    );
+                  })}
+                  <ListWindowFooter {...listWindow} />
+                </>
               ) : null}
             </div>
-            {banner}
-            {demoState === 'offline' ? <OfflineBanner onRetry={() => setDemoState('ready')} /> : null}
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-auto">
-            {demoState === 'loading' ? <LoadingState label="Loading payouts…" /> : null}
-
-            {demoState === 'error' ? (
-              <ErrorState
-                title="Payouts could not load"
-                description="Nothing was changed. Retry when the connection is stable."
-                onRetry={() => setDemoState('ready')}
-              />
-            ) : null}
-
-            {demoState === 'empty' || (demoState === 'ready' && rows.length === 0) ? (
-              <EmptyState
-                title="Nothing in this filter"
-                description={
-                  queue === 'failed'
-                    ? 'No failed payouts today. Clear the filter to see the full queue.'
-                    : 'No payouts match this filter.'
-                }
-                actionLabel="Clear filter"
-                onAction={() => {
-                  setQueue('eligible');
-                  setSearch('');
-                  setDemoState('ready');
-                }}
-              />
-            ) : null}
-
-            {(demoState === 'ready' || demoState === 'offline') && rows.length > 0 ? (
-              <>
-                <div className="sticky top-0 z-[1] grid grid-cols-[88px_minmax(0,1.2fr)_72px_72px_64px_72px_88px_120px] gap-x-2 border-b border-[#e7dcd2] bg-[#fbf5ef] px-4 py-3 text-[9.5px] font-semibold tracking-[0.12em] text-muted-2 uppercase">
-                  <span>Payout</span>
-                  <span>Seller & order</span>
-                  <span>Sale</span>
-                  <span>Commission</span>
-                  <span>Fee</span>
-                  <span>Net</span>
-                  <span>Verification</span>
-                  <span>Status</span>
-                </div>
-                {rows.map((p) => {
-                  const active = p.id === selectedId;
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      disabled={demoState === 'offline'}
-                      onClick={() => {
-                        setSelectedId(p.id);
-                        setActionInvalid(null);
-                      }}
-                      className={cn(
-                        'grid w-full grid-cols-[88px_minmax(0,1.2fr)_72px_72px_64px_72px_88px_120px] items-center gap-x-2 border-b border-[#f0e7de] px-4 py-3.5 text-left last:border-0',
-                        active ? 'bg-[#f9f1ea]' : 'bg-panel hover:bg-[#fbf5ef]',
-                        demoState === 'offline' && 'opacity-60',
-                      )}
-                    >
-                      <span className="font-mono text-[11px] font-semibold text-plum">{p.id}</span>
-                      <div className="min-w-0">
-                        <div className="truncate text-[12.5px] font-semibold text-espresso">@{p.seller}</div>
-                        <div className="mt-0.5 font-mono text-[11px] text-body">{p.orderId}</div>
-                      </div>
-                      <span className="text-[12px] tabular-nums text-espresso">
-                        {showAmounts ? formatNaira(p.saleTotal) : '—'}
-                      </span>
-                      <span className="text-[12px] tabular-nums text-espresso">
-                        {showAmounts ? formatNaira(p.commission) : '—'}
-                      </span>
-                      <span className="text-[12px] tabular-nums text-espresso">
-                        {showAmounts ? formatNaira(p.fees) : '—'}
-                      </span>
-                      <span className="text-[12px] font-semibold tabular-nums text-espresso">
-                        {showAmounts ? formatNaira(p.net) : '—'}
-                      </span>
-                      <StatusBadge tone={verificationTone(p.verification)}>{p.verification}</StatusBadge>
-                      <StatusBadge tone={statusTone(p.status)}>{p.status}</StatusBadge>
-                    </button>
-                  );
-                })}
-              </>
-            ) : null}
-          </div>
-        </div>
-
-        <aside className="flex min-h-0 flex-col bg-panel">
-          {!selected ? (
+          </>
+        }
+        inspector={
+          !selected ? (
             <div className="flex flex-1 items-center justify-center px-6 text-[12.5px] text-body">
               Select a payout to inspect.
-            </div>
-          ) : demoState === 'error' ? (
-            <div className="flex flex-1 flex-col justify-center gap-3 px-5">
-              <Alert className="rounded-[5px] border-risk-border bg-risk-bg">
-                <AlertTitle className="text-[12px] text-risk">Payout could not load</AlertTitle>
-                <AlertDescription className="text-[11.5px] text-risk">
-                  Nothing was changed.{' '}
-                  <button type="button" className="font-semibold underline" onClick={() => setDemoState('ready')}>
-                    Retry
-                  </button>
-                </AlertDescription>
-              </Alert>
             </div>
           ) : (
             <>
               <div className="border-b border-[#e7dcd2] px-5 py-4">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="font-display text-[26px] leading-none text-espresso">{selected.id}</div>
+                  <div className="min-w-0 flex-1">
+                    <CopyableId value={selected.id} variant="display" />
                     <div className="mt-2 text-[12.5px] text-body">
                       @{selected.seller} · {selected.orderId} · {selected.createdAt}
                     </div>
                   </div>
-                  <div className="flex flex-col items-end gap-1.5">
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
                     <StatusBadge tone={statusTone(selected.status)}>{selected.headerStatus}</StatusBadge>
                     {isTs ? <StatusBadge tone="plum">Trust & Safety</StatusBadge> : null}
                   </div>
@@ -349,15 +369,6 @@ export function PayoutsPage() {
                     </AlertTitle>
                     <AlertDescription className="text-[11.5px] text-[#8a5a15]">
                       {selected.recordStale.by} placed a hold at {selected.recordStale.at}. Reload before acting.
-                    </AlertDescription>
-                  </Alert>
-                ) : null}
-
-                {demoState === 'offline' ? (
-                  <Alert className="rounded-[5px] border-border-soft bg-[#f3ede6]">
-                    <AlertTitle className="text-[12px] text-espresso">No connection</AlertTitle>
-                    <AlertDescription className="text-[11.5px] text-body">
-                      Payout execution is disabled while offline to prevent duplicate submissions.
                     </AlertDescription>
                   </Alert>
                 ) : null}
@@ -612,7 +623,6 @@ export function PayoutsPage() {
                       variant="outline"
                       size="sm"
                       className="border-hold-border text-[#8a5a15]"
-                      disabled={demoState === 'offline'}
                       onClick={() => setConfirm('maintain')}
                     >
                       Maintain hold
@@ -621,7 +631,6 @@ export function PayoutsPage() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      disabled={demoState === 'offline'}
                       onClick={() => {
                         setNoteDraft('');
                         setConfirm('note');
@@ -636,7 +645,6 @@ export function PayoutsPage() {
                       <Button
                         type="button"
                         className="w-full bg-[#3e2b36] text-panel hover:bg-[#2f2029]"
-                        disabled={demoState === 'offline'}
                         onClick={() => tryProcess(selected)}
                       >
                         Process payout — review & confirm
@@ -655,7 +663,6 @@ export function PayoutsPage() {
                           type="button"
                           variant="outline"
                           size="sm"
-                          disabled={demoState === 'offline'}
                           onClick={() => setConfirm('hold')}
                         >
                           Place hold
@@ -665,7 +672,6 @@ export function PayoutsPage() {
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={demoState === 'offline'}
                         onClick={() => {
                           setNoteDraft('');
                           setConfirm('note');
@@ -683,9 +689,9 @@ export function PayoutsPage() {
                 </p>
               </div>
             </>
-          )}
-        </aside>
-      </div>
+          )
+        }
+      />
 
       {confirm === 'process' && selected ? (
         <ConfirmActionDialog

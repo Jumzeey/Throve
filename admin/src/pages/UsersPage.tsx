@@ -1,14 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Lock } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
+import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
 import { EmptyState } from '@/components/admin/empty-state';
+import { ExpandableListHeader, ExpandableListRow } from '@/components/admin/expandable-list-row';
 import { FilterChips } from '@/components/admin/filter-chips';
+import { CopyableId } from '@/components/admin/copyable-id';
+import { ListWindowFooter } from '@/components/admin/list-window-footer';
+import { ListSkeleton } from '@/components/admin/loading-skeleton';
 import { StatusBadge } from '@/components/admin/status-badge';
+import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Button } from '@/components/ui/button';
 import { mockUsers, type MockUser } from '@/data/mock';
+import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
 import { canAct, canViewPayoutFields, ROLE_LABELS } from '@/lib/roles';
 import { cn } from '@/lib/utils';
@@ -52,7 +59,7 @@ export function UsersPage() {
   const { banner, show } = useToast();
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useState(mockUsers[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useBleedSelection(mockUsers[0]?.id ?? null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
   const [loading, setLoading] = useState(false);
   const [dismissedStale, setDismissedStale] = useState<Record<string, boolean>>({});
@@ -100,6 +107,8 @@ export function UsersPage() {
     });
   }, [filter, search]);
 
+  const listWindow = useListWindow(rows);
+
   const selected = mockUsers.find((u) => u.id === selectedId) ?? null;
   const showStale = Boolean(selected?.recordStale && !dismissedStale[selected.id]);
   const actionsLabel = role ? ROLE_LABELS[role] : 'Staff';
@@ -142,8 +151,16 @@ export function UsersPage() {
   };
 
   return (
-    <div className="flex h-full min-h-0">
-      <div className="flex min-w-0 flex-1 flex-col gap-3.5 px-6 py-5">
+    <>
+      <BleedSplit
+        open={!!selectedId}
+        onOpenChange={(open) => {
+          if (!open) setSelectedId(null);
+        }}
+        gridClassName="grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(360px,412px)]"
+        inspectorTitle="Account"
+        list={
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3.5 px-6 py-5">
         <div className="flex flex-wrap items-center gap-2">
           <FilterChips
             tone="soft"
@@ -165,21 +182,7 @@ export function UsersPage() {
 
         {loading ? (
           <div className="overflow-hidden rounded-[6px] border border-[#e7dcd2] bg-panel">
-            <div className="border-b border-[#e7dcd2] bg-[#fbf5ef] px-4 py-2.5 text-[11px] font-semibold text-[#8c7a73]">
-              Loading results
-            </div>
-            <div className="flex flex-col gap-3 px-4 py-4">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3">
-                  <div className="size-[30px] animate-pulse rounded-full bg-[#e7dcd2]" />
-                  <div className="flex flex-1 flex-col gap-1.5">
-                    <div className="h-2.5 w-[38%] animate-pulse rounded bg-[#e7dcd2]" />
-                    <div className="h-2 w-[52%] animate-pulse rounded bg-[#f0e7de]" />
-                  </div>
-                  <div className="h-5 w-16 animate-pulse rounded bg-[#f0e7de]" />
-                </div>
-              ))}
-            </div>
+            <ListSkeleton rows={6} withAvatar />
           </div>
         ) : rows.length === 0 ? (
           <div className="rounded-[6px] border border-border-soft bg-panel">
@@ -199,28 +202,90 @@ export function UsersPage() {
           </div>
         ) : (
           <div className="overflow-hidden rounded-[6px] border border-[#e7dcd2] bg-panel">
-            <div className="grid grid-cols-[1fr_116px_122px_128px_108px_74px] border-b border-[#e7dcd2] bg-[#fbf5ef] px-4 py-2.5 text-[9.5px] font-semibold tracking-[0.13em] text-[#8c7a73] uppercase">
-              <span>Account</span>
-              <span>Status</span>
-              <span>Seller</span>
-              <span>Payout verif.</span>
-              <span>Live host</span>
-              <span>Flags</span>
-            </div>
-            <div className="max-h-[calc(100vh-220px)] overflow-auto">
-              {rows.map((u) => {
+            <ExpandableListHeader
+              desktopClassName="grid-cols-[1fr_116px_122px_128px_108px_74px] items-center py-2.5"
+              compactLabel="Accounts"
+              columns={
+                <>
+                  <span>Account</span>
+                  <span>Status</span>
+                  <span>Seller</span>
+                  <span>Payout verif.</span>
+                  <span>Live host</span>
+                  <span>Flags</span>
+                </>
+              }
+            />
+            <div ref={listWindow.scrollRef} className="max-h-[calc(100vh-220px)] overflow-auto">
+              {listWindow.visible.map((u) => {
                 const active = u.id === selectedId;
                 const pt = payoutTone(u);
+                const meta =
+                  u.status === 'Suspended'
+                    ? `Suspended · ${u.name}`
+                    : u.status === 'Banned'
+                      ? 'Banned · by Super Admin'
+                      : u.status === 'Deactivated'
+                        ? `${u.name} · deactivated by user`
+                        : `${u.name} · joined ${u.joined}`;
                 return (
-                  <button
+                  <ExpandableListRow
                     key={u.id}
-                    type="button"
-                    onClick={() => setSelectedId(u.id)}
-                    className={cn(
-                      'grid w-full grid-cols-[1fr_116px_122px_128px_108px_74px] items-center border-b border-[#f0e7de] px-4 py-3 text-left last:border-0',
-                      active ? 'bg-[#f9f1ea]' : 'bg-panel hover:bg-[#fbf5ef]',
-                      u.status === 'Banned' && 'opacity-70',
-                    )}
+                    selected={active}
+                    onSelect={() => setSelectedId(u.id)}
+                    desktopClassName="grid-cols-[1fr_116px_122px_128px_108px_74px] items-center py-3"
+                    className={u.status === 'Banned' ? 'opacity-70' : undefined}
+                    primary={
+                      <span className="flex items-center gap-2.5">
+                        <span className="flex size-[30px] shrink-0 items-center justify-center rounded-full border border-[#d4c7be] bg-[#e7dcd2] text-[10px] font-semibold text-body">
+                          {initials(u.name)}
+                        </span>
+                        <span className="flex min-w-0 flex-col">
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span className="text-[12.5px] font-semibold text-espresso">@{u.username}</span>
+                            <StatusBadge
+                              tone={statusTone(u.status)}
+                              className={
+                                u.status === 'Banned' ? 'border-[#9e2b2b] bg-[#9e2b2b] text-panel' : undefined
+                              }
+                            >
+                              {u.status}
+                            </StatusBadge>
+                          </span>
+                          <span className="truncate text-[11px] text-muted">{meta}</span>
+                        </span>
+                      </span>
+                    }
+                    details={[
+                      {
+                        label: 'Seller',
+                        value: u.seller ? `Seller · ${u.ordersSold} sales` : 'Buyer only',
+                      },
+                      {
+                        label: 'Payout verif.',
+                        value: pt ? <StatusBadge tone={pt}>{payoutLabel(u)}</StatusBadge> : 'Not applicable',
+                      },
+                      {
+                        label: 'Live host',
+                        value:
+                          u.liveHost === 'Approved' || u.liveHost === 'Pending' ? (
+                            <StatusBadge tone={u.liveHost === 'Approved' ? 'plum' : 'hold'}>
+                              {u.liveHost === 'Approved' ? 'Approved' : 'Pending'}
+                            </StatusBadge>
+                          ) : (
+                            'Not approved'
+                          ),
+                      },
+                      {
+                        label: 'Flags',
+                        value:
+                          u.flags > 0 ? (
+                            <StatusBadge tone={u.flags >= 4 ? 'risk' : 'hold'}>{u.flags}</StatusBadge>
+                          ) : (
+                            '—'
+                          ),
+                      },
+                    ]}
                   >
                     <span className="flex items-center gap-2.5">
                       <span className="flex size-[30px] shrink-0 items-center justify-center rounded-full border border-[#d4c7be] bg-[#e7dcd2] text-[10px] font-semibold text-body">
@@ -228,15 +293,7 @@ export function UsersPage() {
                       </span>
                       <span className="flex min-w-0 flex-col">
                         <span className="text-[12.5px] font-semibold text-espresso">@{u.username}</span>
-                        <span className="truncate text-[11px] text-muted">
-                          {u.status === 'Suspended'
-                            ? `Suspended · ${u.name}`
-                            : u.status === 'Banned'
-                              ? 'Banned · by Super Admin'
-                              : u.status === 'Deactivated'
-                                ? `${u.name} · deactivated by user`
-                                : `${u.name} · joined ${u.joined}`}
-                        </span>
+                        <span className="truncate text-[11px] text-muted">{meta}</span>
                       </span>
                     </span>
                     <span>
@@ -273,24 +330,26 @@ export function UsersPage() {
                         <span className="text-[11.5px] text-[#8c7a73]">—</span>
                       )}
                     </span>
-                  </button>
+                  </ExpandableListRow>
                 );
               })}
+              <ListWindowFooter {...listWindow} />
             </div>
           </div>
         )}
-      </div>
-
-      <aside className="flex w-[412px] shrink-0 flex-col border-l border-[#dccfc4] bg-panel">
-        {selected ? (
+          </div>
+        }
+        inspector={
+          selected ? (
           <>
             <div className="border-b border-[#e7dcd2] px-5 py-4">
               <div className="flex items-start gap-3">
                 <span className="flex size-[46px] shrink-0 items-center justify-center rounded-full border border-[#d4c7be] bg-[#e7dcd2] text-[13px] font-semibold text-body">
                   {initials(selected.name)}
                 </span>
-                <div className="min-w-0">
-                  <div className="font-display text-[20px] leading-tight text-espresso">@{selected.username}</div>
+                <div className="min-w-0 flex-1">
+                  <CopyableId value={selected.id} variant="mono" />
+                  <div className="mt-0.5 font-display text-[20px] leading-tight text-espresso">@{selected.username}</div>
                   <div className="mt-1 text-[11.5px] text-muted">
                     {selected.name}
                     {selected.location ? ` · ${selected.location}` : ''} · joined {selected.joined}
@@ -563,8 +622,9 @@ export function UsersPage() {
           </>
         ) : (
           <div className="flex flex-1 items-center justify-center p-6 text-[12px] text-muted">Select an account to inspect.</div>
-        )}
-      </aside>
+        )
+        }
+      />
 
       {confirm && selected ? (
         <ConfirmActionDialog
@@ -598,6 +658,6 @@ export function UsersPage() {
           }}
         />
       ) : null}
-    </div>
+    </>
   );
 }

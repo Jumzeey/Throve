@@ -1,22 +1,27 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth, roleLabel } from '@/auth/AuthContext';
+import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
-import { EmptyState, ErrorState, LoadingState, OfflineBanner } from '@/components/admin/empty-state';
+import { EmptyState } from '@/components/admin/empty-state';
+import { ExpandableListHeader, ExpandableListRow } from '@/components/admin/expandable-list-row';
 import { FilterChips } from '@/components/admin/filter-chips';
+import { CopyableId } from '@/components/admin/copyable-id';
+import { ListWindowFooter } from '@/components/admin/list-window-footer';
 import { StatusBadge, type StatusTone } from '@/components/admin/status-badge';
 import { Timeline } from '@/components/admin/timeline';
+import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { mockReports, type MockReport } from '@/data/mock';
+import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
 import { ROLE_LABELS } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 import { Lock } from 'lucide-react';
 
-type DemoState = 'ready' | 'loading' | 'empty' | 'error' | 'offline';
 type QueueFilter =
   | 'open'
   | 'high'
@@ -64,9 +69,8 @@ export function ReportsPage() {
   const { banner, show } = useToast();
   const [queue, setQueue] = useState<QueueFilter>('open');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useState(mockReports[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useBleedSelection(mockReports[0]?.id ?? null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
-  const [demoState, setDemoState] = useState<DemoState>('ready');
   const [overrides, setOverrides] = useState<Record<string, ReportOverride>>({});
   const [noteDraft, setNoteDraft] = useState('');
 
@@ -124,6 +128,8 @@ export function ReportsPage() {
     });
   }, [reports, queue, search, session?.name]);
 
+  const listWindow = useListWindow(rows);
+
   const selected = reports.find((r) => r.id === selectedId) ?? null;
   const selectedFlash = selected ? overrides[selected.id]?.flash : null;
   const mod = selected ? moduleFor(selected.route) : null;
@@ -152,160 +158,152 @@ export function ReportsPage() {
     return session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
   }
 
+  const reportDesktopCols =
+    'grid-cols-[88px_92px_minmax(0,1.35fr)_minmax(0,1fr)_52px_100px_108px] items-center py-3';
+
   return (
     <>
-      <div className="grid h-full min-h-0 grid-cols-[minmax(0,1.4fr)_minmax(360px,0.95fr)]">
-        <div className="flex min-h-0 min-w-0 flex-col border-r border-[#dccfc4] bg-panel">
-          <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
-            <div className="text-[10px] font-semibold tracking-[0.12em] text-muted-2 uppercase">
-              Screen preview states
+      <BleedSplit
+        open={!!selectedId}
+        onOpenChange={(open) => {
+          if (!open) setSelectedId(null);
+        }}
+        gridClassName="grid-cols-1 lg:grid-cols-[minmax(0,1.4fr)_minmax(360px,0.95fr)]"
+        inspectorTitle="Report"
+        list={
+          <>
+            <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <FilterChips
+                  value={queue}
+                  onChange={(id) => setQueue(id as QueueFilter)}
+                  options={[
+                    { id: 'open', label: 'New & under review', count: awaiting },
+                    { id: 'high', label: 'High priority' },
+                    { id: 'repeat', label: 'Repeat reports' },
+                    { id: 'escalated', label: 'Escalated' },
+                    { id: 'action_taken', label: 'Action taken' },
+                    { id: 'closed', label: 'Closed' },
+                  ]}
+                />
+                <button
+                  type="button"
+                  onClick={() => setQueue('assigned_me')}
+                  className={cn(
+                    'ml-auto rounded border px-2.5 py-1.5 text-[11px] font-semibold transition-colors',
+                    queue === 'assigned_me'
+                      ? 'border-plum bg-plum-soft text-plum'
+                      : 'border-[#e2d7cc] bg-panel text-body hover:bg-[#fbf5ef]',
+                  )}
+                >
+                  Assigned to me · {assignedToMeCount}
+                </button>
+              </div>
+              {banner}
             </div>
-            <FilterChips
-              tone="soft"
-              value={demoState}
-              onChange={(id) => setDemoState(id as DemoState)}
-              options={[
-                { id: 'ready', label: 'Ready' },
-                { id: 'loading', label: 'Loading' },
-                { id: 'empty', label: 'No results' },
-                { id: 'error', label: 'Error' },
-                { id: 'offline', label: 'Offline' },
-              ]}
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <FilterChips
-                value={queue}
-                onChange={(id) => setQueue(id as QueueFilter)}
-                options={[
-                  { id: 'open', label: 'New & under review', count: awaiting },
-                  { id: 'high', label: 'High priority' },
-                  { id: 'repeat', label: 'Repeat reports' },
-                  { id: 'escalated', label: 'Escalated' },
-                  { id: 'action_taken', label: 'Action taken' },
-                  { id: 'closed', label: 'Closed' },
-                ]}
-              />
-              <button
-                type="button"
-                onClick={() => setQueue('assigned_me')}
-                className={cn(
-                  'ml-auto rounded border px-2.5 py-1.5 text-[11px] font-semibold transition-colors',
-                  queue === 'assigned_me'
-                    ? 'border-plum bg-plum-soft text-plum'
-                    : 'border-[#e2d7cc] bg-panel text-body hover:bg-[#fbf5ef]',
-                )}
-              >
-                Assigned to me · {assignedToMeCount}
-              </button>
-            </div>
-            {banner}
-            {demoState === 'offline' ? <OfflineBanner onRetry={() => setDemoState('ready')} /> : null}
-          </div>
 
-          <div className="min-h-0 flex-1 overflow-auto">
-            {demoState === 'loading' ? <LoadingState label="Loading reports…" /> : null}
+            <div ref={listWindow.scrollRef} className="min-h-0 flex-1 overflow-auto">
+              {rows.length === 0 ? (
+                <EmptyState
+                  title="No open reports"
+                  description="Nothing awaiting review in this filter."
+                  actionLabel="Reset filters"
+                  onAction={() => {
+                    setQueue('open');
+                    setSearch('');
+                  }}
+                />
+              ) : null}
 
-            {demoState === 'error' ? (
-              <ErrorState
-                title="Queue could not load"
-                description="Nothing was changed. Retry when the connection is stable."
-                onRetry={() => setDemoState('ready')}
-              />
-            ) : null}
-
-            {demoState === 'empty' || (demoState === 'ready' && rows.length === 0) ? (
-              <EmptyState
-                title="No open reports"
-                description="Nothing awaiting review in this filter."
-                actionLabel="Reset filters"
-                onAction={() => {
-                  setQueue('open');
-                  setSearch('');
-                  setDemoState('ready');
-                }}
-              />
-            ) : null}
-
-            {(demoState === 'ready' || demoState === 'offline') && rows.length > 0 ? (
-              <>
-                <div className="sticky top-0 z-[1] grid grid-cols-[88px_92px_minmax(0,1.35fr)_minmax(0,1fr)_52px_100px_108px] border-b border-[#e7dcd2] bg-[#fbf5ef] px-4 py-2.5 text-[9.5px] font-semibold tracking-[0.13em] text-muted-2 uppercase">
-                  <span>Report</span>
-                  <span>Type</span>
-                  <span>Reported object</span>
-                  <span>Category</span>
-                  <span>Age</span>
-                  <span>AI priority</span>
-                  <span>Status</span>
-                </div>
-                {rows.map((r) => {
-                  const active = r.id === selectedId;
-                  return (
-                    <button
-                      key={r.id}
-                      type="button"
-                      disabled={demoState === 'offline'}
-                      onClick={() => setSelectedId(r.id)}
-                      className={cn(
-                        'grid w-full grid-cols-[88px_92px_minmax(0,1.35fr)_minmax(0,1fr)_52px_100px_108px] items-center border-b border-[#f0e7de] px-4 py-3 text-left last:border-0',
-                        active ? 'bg-[#f9f1ea]' : 'bg-panel hover:bg-[#fbf5ef]',
-                        demoState === 'offline' && 'opacity-60',
-                      )}
-                    >
-                      <span className="font-mono text-[11px] font-semibold text-plum">{r.id}</span>
-                      <span className="truncate text-[11.5px] text-body">{r.route}</span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-[12.5px] font-semibold text-espresso">{r.objectTitle}</span>
-                        <span className="block truncate text-[11px] text-body">
-                          {r.target} · {r.objectMeta}
+              {rows.length > 0 ? (
+                <>
+                  <ExpandableListHeader
+                    desktopClassName={reportDesktopCols}
+                    columns={
+                      <>
+                        <span>Report</span>
+                        <span>Type</span>
+                        <span>Reported object</span>
+                        <span>Category</span>
+                        <span>Age</span>
+                        <span>AI priority</span>
+                        <span>Status</span>
+                      </>
+                    }
+                  />
+                  {listWindow.visible.map((r) => {
+                    const active = r.id === selectedId;
+                    return (
+                      <ExpandableListRow
+                        key={r.id}
+                        selected={active}
+                        onSelect={() => setSelectedId(r.id)}
+                        desktopClassName={reportDesktopCols}
+                        primary={
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-[11px] font-semibold text-plum">{r.id}</span>
+                              <StatusBadge tone={statusTone(r.status)}>{r.status}</StatusBadge>
+                            </div>
+                            <div className="mt-1 truncate text-[12.5px] font-semibold text-espresso">
+                              {r.objectTitle}
+                            </div>
+                            <div className="mt-0.5 truncate text-[11px] text-body">
+                              {r.target} · {r.objectMeta}
+                            </div>
+                          </div>
+                        }
+                        details={[
+                          { label: 'Type', value: r.route },
+                          { label: 'Category', value: r.category },
+                          { label: 'Age', value: r.ageLabel },
+                          {
+                            label: 'AI priority',
+                            value: <StatusBadge tone={aiTone(r.aiPriority)}>AI · {r.aiPriority}</StatusBadge>,
+                          },
+                        ]}
+                      >
+                        <span className="font-mono text-[11px] font-semibold text-plum">{r.id}</span>
+                        <span className="truncate text-[11.5px] text-body">{r.route}</span>
+                        <span className="min-w-0">
+                          <span className="block truncate text-[12.5px] font-semibold text-espresso">
+                            {r.objectTitle}
+                          </span>
+                          <span className="block truncate text-[11px] text-body">
+                            {r.target} · {r.objectMeta}
+                          </span>
                         </span>
-                      </span>
-                      <span className="truncate text-[11.5px] text-body">{r.category}</span>
-                      <span className="text-[11.5px] tabular-nums text-body">{r.ageLabel}</span>
-                      <span>
-                        <StatusBadge tone={aiTone(r.aiPriority)}>AI · {r.aiPriority}</StatusBadge>
-                      </span>
-                      <span>
-                        <StatusBadge tone={statusTone(r.status)}>{r.status}</StatusBadge>
-                      </span>
-                    </button>
-                  );
-                })}
-                <p className="px-4 py-3 text-[11px] leading-relaxed text-body">
-                  Categories stay deliberately broad. Throve’s full policy taxonomy is not settled in this hi-fi.
-                </p>
-              </>
-            ) : null}
-          </div>
-        </div>
-
-        <aside className="flex min-h-0 flex-col bg-panel">
-          {!selected ? (
+                        <span className="truncate text-[11.5px] text-body">{r.category}</span>
+                        <span className="text-[11.5px] tabular-nums text-body">{r.ageLabel}</span>
+                        <span>
+                          <StatusBadge tone={aiTone(r.aiPriority)}>AI · {r.aiPriority}</StatusBadge>
+                        </span>
+                        <span>
+                          <StatusBadge tone={statusTone(r.status)}>{r.status}</StatusBadge>
+                        </span>
+                      </ExpandableListRow>
+                    );
+                  })}
+                  <ListWindowFooter {...listWindow} />
+                  <p className="px-4 py-3 text-[11px] leading-relaxed text-body">
+                    Categories stay deliberately broad. Throve’s full policy taxonomy is not settled in this hi-fi.
+                  </p>
+                </>
+              ) : null}
+            </div>
+          </>
+        }
+        inspector={
+          !selected ? (
             <div className="flex flex-1 items-center justify-center px-6 text-[12.5px] text-body">
               Select a report to inspect.
-            </div>
-          ) : demoState === 'error' ? (
-            <div className="flex flex-1 flex-col justify-center gap-3 px-5">
-              <Alert className="rounded-[5px] border-risk-border bg-risk-bg">
-                <AlertTitle className="text-[12px] text-risk">Queue could not load — nothing was changed</AlertTitle>
-                <AlertDescription className="text-[11.5px] text-risk">
-                  <button type="button" className="font-semibold underline" onClick={() => setDemoState('ready')}>
-                    Retry
-                  </button>
-                </AlertDescription>
-              </Alert>
-              <Alert className="rounded-[5px] border-border-soft bg-[#f3ede6]">
-                <AlertTitle className="text-[12px] text-espresso">Offline</AlertTitle>
-                <AlertDescription className="text-[11.5px] text-body">
-                  Notes and case actions are unavailable while offline.
-                </AlertDescription>
-              </Alert>
             </div>
           ) : (
             <>
               <div className="border-b border-[#e7dcd2] px-5 py-4">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="font-mono text-[11px] font-semibold text-muted-2">{selected.id}</div>
+                  <div className="min-w-0 flex-1">
+                    <CopyableId value={selected.id} variant="mono" />
                     <div className="mt-0.5 font-display text-[20px] leading-tight text-espresso">{selected.reason}</div>
                     <div className="mt-1 text-[12px] leading-snug text-body">
                       {selected.route} report · submitted {selected.createdAt}
@@ -484,7 +482,6 @@ export function ReportsPage() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={demoState === 'offline'}
                     onClick={() => {
                       setNoteDraft('');
                       setConfirm('note');
@@ -498,7 +495,6 @@ export function ReportsPage() {
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={demoState === 'offline'}
                         onClick={() => setConfirm('associate')}
                       >
                         Associate record
@@ -507,7 +503,7 @@ export function ReportsPage() {
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={demoState === 'offline' || selected.status === 'Closed'}
+                        disabled={selected.status === 'Closed'}
                         onClick={() => setConfirm('escalate')}
                       >
                         Escalate
@@ -516,7 +512,7 @@ export function ReportsPage() {
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={demoState === 'offline' || selected.status === 'Closed'}
+                        disabled={selected.status === 'Closed'}
                         onClick={() => setConfirm('close')}
                       >
                         Close after review
@@ -527,7 +523,6 @@ export function ReportsPage() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      disabled={demoState === 'offline'}
                       onClick={() => setConfirm('escalate')}
                     >
                       Escalate to T&S
@@ -535,7 +530,7 @@ export function ReportsPage() {
                   )}
                 </div>
                 {canEnforce && mod ? (
-                  <Button type="button" className="mt-2.5 w-full" disabled={demoState === 'offline'} asChild>
+                  <Button type="button" className="mt-2.5 w-full" asChild>
                     <Link to={mod.to}>
                       {mod.act} — open {selected.target}
                     </Link>
@@ -547,9 +542,9 @@ export function ReportsPage() {
                 </p>
               </div>
             </>
-          )}
-        </aside>
-      </div>
+          )
+        }
+      />
 
       {confirm === 'close' && selected ? (
         <ConfirmActionDialog
