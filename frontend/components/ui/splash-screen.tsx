@@ -1,19 +1,15 @@
 import { Palette } from '@/constants/theme';
-import { Image, StyleSheet, View } from 'react-native';
+import { ThroveLogo } from '@/components/ui/throve-logo';
+import { StyleSheet, View } from 'react-native';
 
 /**
- * In-app splash that matches the native launch screen (ivory + throve wordmark).
+ * In-app splash that matches the native launch screen (ivory + Throve mark).
  * Shown while fonts/auth finish loading after the native splash hides.
  */
 export function SplashScreen() {
   return (
     <View style={styles.wrap} accessibilityLabel="Loading Throve">
-      <Image
-        source={require('@/assets/images/splash-icon.png')}
-        style={styles.logo}
-        resizeMode="contain"
-        accessibilityIgnoresInvertColors
-      />
+      <ThroveLogo size={120} />
     </View>
   );
 }
@@ -24,9 +20,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Palette.ivory,
-  },
-  logo: {
-    width: 220,
-    height: 88,
   },
 });

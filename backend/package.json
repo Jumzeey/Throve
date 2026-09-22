@@ -9,6 +9,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "seed": "tsx scripts/seed.ts",
+    "seed:staff": "tsx scripts/seed-staff.ts",
     "simulate-checkout-smoke": "node scripts/simulate-checkout-smoke.mjs"
   },
   "dependencies": {

@@ -12,8 +12,13 @@ export type StaffRequest = AuthedRequest & {
 export async function requireStaff(req: AuthedRequest, res: Response, next: NextFunction) {
   const profile = await getProfileById(req.supabase, req.userId);
   const role = profile?.admin_role ?? null;
-  if (!role) {
-    return res.status(403).json({ message: 'Staff access required', code: 'FORBIDDEN' });
+  if (!role || profile?.admin_active === false) {
+    return res.status(403).json({
+      message: profile?.admin_role && profile.admin_active === false
+        ? 'Your access to Throve Admin is no longer active'
+        : 'Staff access required',
+      code: profile?.admin_role && profile.admin_active === false ? 'ACCESS_REVOKED' : 'FORBIDDEN',
+    });
   }
   (req as StaffRequest).adminRole = role;
   return next();

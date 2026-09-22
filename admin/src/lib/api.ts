@@ -1,4 +1,10 @@
-import { clearStaffSession, readTokens, writeTokens } from './session';
+import {
+  clearStaffSession,
+  readTokens,
+  setAuthGateReason,
+  writeTokens,
+  type AuthGateReason,
+} from './session';
 
 declare const __THROVE_API_URL__: string;
 
@@ -20,6 +26,15 @@ export class ApiError extends Error {
 
 let refreshInFlight: Promise<string | null> | null = null;
 
+function redirectToLogin(reason: AuthGateReason) {
+  setAuthGateReason(reason);
+  clearStaffSession();
+  if (typeof window === 'undefined') return;
+  const path = window.location.pathname;
+  if (path.startsWith('/login')) return;
+  window.location.assign(`/login?reason=${reason}`);
+}
+
 async function refreshAccessToken(): Promise<string | null> {
   const tokens = readTokens();
   if (!tokens?.refreshToken) return null;
@@ -33,7 +48,14 @@ async function refreshAccessToken(): Promise<string | null> {
         body: JSON.stringify({ refreshToken: tokens.refreshToken }),
       });
       if (!res.ok) {
-        clearStaffSession();
+        let code = 'SESSION_EXPIRED';
+        try {
+          const body = (await res.json()) as { code?: string };
+          if (body.code) code = body.code;
+        } catch {
+          // ignore
+        }
+        redirectToLogin(code === 'ACCESS_REVOKED' ? 'revoked' : 'expired');
         return null;
       }
       const data = (await res.json()) as {
@@ -65,15 +87,40 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = 
   const headers = new Headers(init.headers);
   if (!headers.has('Content-Type') && init.body) headers.set('Content-Type', 'application/json');
 
-  const isPublicAuth = path.startsWith('/auth/staff/login') || path.startsWith('/auth/staff/refresh');
+  const isPublicAuth =
+    path.startsWith('/auth/staff/login') ||
+    path.startsWith('/auth/staff/refresh') ||
+    path.startsWith('/auth/staff/logout');
   const token = isPublicAuth ? null : getAccessToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
-  const res = await fetch(`${API_URL}${path}`, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, { ...init, headers });
+  } catch (err) {
+    throw err instanceof TypeError ? err : new TypeError('Network request failed');
+  }
 
   if (!isPublicAuth && res.status === 401 && retry && readTokens()?.refreshToken) {
     const next = await refreshAccessToken();
     if (next) return apiFetch<T>(path, init, false);
+  }
+
+  if (!isPublicAuth && res.status === 403) {
+    let code: string | undefined;
+    try {
+      const peek = (await res.clone().json()) as { code?: string };
+      code = peek.code;
+    } catch {
+      // ignore
+    }
+    if (code === 'ACCESS_REVOKED') {
+      redirectToLogin('revoked');
+    }
+  }
+
+  if (res.status === 204) {
+    return null as T;
   }
 
   const text = await res.text();
@@ -96,7 +143,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = 
     throw new ApiError(message, code, res.status);
   }
 
-  return payload as T;
+  return (payload ?? null) as T;
 }
 
 export { API_URL };

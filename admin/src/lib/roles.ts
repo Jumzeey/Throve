@@ -41,7 +41,7 @@ const ALL: AdminRole[] = ['super_admin', 'trust_safety', 'support', 'finance'];
 /** Least-privilege map from Hi-Fi role notes. */
 export const ROUTE_ROLES: Record<AdminRoute, AdminRole[]> = {
   operations: ALL,
-  users: ['super_admin', 'trust_safety', 'support'],
+  users: ['super_admin', 'trust_safety', 'support', 'finance'],
   listings: ['super_admin', 'trust_safety', 'support'],
   reports: ['super_admin', 'trust_safety', 'support'],
   live: ['super_admin', 'trust_safety'],
@@ -58,8 +58,62 @@ export function canAccess(role: AdminRole, route: AdminRoute) {
   return ROUTE_ROLES[route].includes(role);
 }
 
-export function navItemsFor(role: AdminRole): AdminRoute[] {
-  return (Object.keys(ROUTE_ROLES) as AdminRoute[]).filter((route) => canAccess(role, route));
+export type NavSection = {
+  label: string;
+  routes: AdminRoute[];
+};
+
+/** Role-aware sidebar groups from Hi-Fi (Finance splits Operations / Finance). */
+export function navSectionsFor(role: AdminRole): NavSection[] {
+  if (role === 'finance') {
+    return [
+      { label: 'Operations', routes: ['operations', 'users', 'disputes'] },
+      { label: 'Finance', routes: ['orders', 'payments', 'refunds', 'payouts'] },
+    ];
+  }
+  if (role === 'support') {
+    return [
+      {
+        label: 'Support',
+        routes: ['operations', 'users', 'orders', 'disputes', 'listings', 'reports', 'audit'],
+      },
+    ];
+  }
+  if (role === 'super_admin') {
+    return [
+      {
+        label: 'Operations',
+        routes: [
+          'operations',
+          'users',
+          'listings',
+          'reports',
+          'live',
+          'disputes',
+          'reviews',
+        ],
+      },
+      { label: 'Finance', routes: ['orders', 'payments', 'refunds', 'payouts'] },
+      { label: 'Governance', routes: ['audit'] },
+    ];
+  }
+  // trust_safety
+  return [
+    {
+      label: 'Operations',
+      routes: [
+        'operations',
+        'users',
+        'listings',
+        'reports',
+        'live',
+        'orders',
+        'disputes',
+        'reviews',
+        'audit',
+      ],
+    },
+  ];
 }
 
 export type ActionKey =

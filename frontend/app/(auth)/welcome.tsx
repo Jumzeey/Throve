@@ -1,6 +1,7 @@
-import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
+import { OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
 import { SplashScreen } from '@/components/ui/splash-screen';
+import { ThroveLogo } from '@/components/ui/throve-logo';
 import { Palette, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useNetworkStatus } from '@/hooks/use-network-status';
@@ -31,7 +32,7 @@ export default function WelcomeScreen() {
   return (
     <View style={[styles.screen, { paddingTop: top, paddingBottom: bottom + 24 }]}>
       <View style={styles.top}>
-        <Text style={styles.wordmark}>throve</Text>
+        <ThroveLogo size={56} />
       </View>
       <View style={styles.hero}>
         <Text style={styles.headline}>Curated{'\n'}secondhand{'\n'}fashion.</Text>
@@ -72,13 +73,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
   },
   top: { paddingTop: 48, paddingBottom: 32 },
-  wordmark: {
-    fontFamily: Typography.display,
-    fontSize: 44,
-    lineHeight: 44,
-    color: Palette.plum,
-    letterSpacing: -0.3,
-  },
   hero: { flex: 1, justifyContent: 'center', gap: 16 },
   headline: {
     fontFamily: Typography.display,

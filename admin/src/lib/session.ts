@@ -2,6 +2,7 @@ import type { AdminRole } from './roles';
 
 const TOKEN_KEY = 'throve-admin-tokens';
 const SESSION_KEY = 'throve-admin-session';
+const AUTH_REASON_KEY = 'throve-admin-auth-reason';
 
 export type StoredTokens = {
   accessToken: string;
@@ -15,6 +16,8 @@ export type StoredStaff = {
   name: string;
   role: AdminRole;
 };
+
+export type AuthGateReason = 'expired' | 'revoked';
 
 export function readTokens(): StoredTokens | null {
   try {
@@ -50,6 +53,25 @@ export function writeStoredStaff(staff: StoredStaff | null) {
     return;
   }
   sessionStorage.setItem(SESSION_KEY, JSON.stringify(staff));
+}
+
+export function setAuthGateReason(reason: AuthGateReason | null) {
+  if (!reason) {
+    sessionStorage.removeItem(AUTH_REASON_KEY);
+    return;
+  }
+  sessionStorage.setItem(AUTH_REASON_KEY, reason);
+}
+
+export function consumeAuthGateReason(): AuthGateReason | null {
+  try {
+    const raw = sessionStorage.getItem(AUTH_REASON_KEY);
+    sessionStorage.removeItem(AUTH_REASON_KEY);
+    if (raw === 'expired' || raw === 'revoked') return raw;
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export function clearStaffSession() {

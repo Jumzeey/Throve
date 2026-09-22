@@ -6,6 +6,7 @@ import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-
 import { ListingCard } from '@/components/ui/listing-card';
 import { ListingGrid } from '@/components/ui/listing-grid';
 import { ProfileAvatar } from '@/components/ui/profile-avatar';
+import { ThroveLogo } from '@/components/ui/throve-logo';
 import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useListings } from '@/context/listings-context';
@@ -205,7 +206,7 @@ export default function HomeScreen() {
   return (
     <View style={[styles.screen, { paddingTop: top }]}>
       <View style={styles.header}>
-        <Text style={styles.brand}>throve</Text>
+        <ThroveLogo size={36} />
         <Pressable onPress={() => router.push('/inbox/alerts')} hitSlop={12} style={styles.bellBtn}>
           <BellIcon />
           {unreadCount > 0 ? (
@@ -434,13 +435,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 14,
-  },
-  brand: {
-    fontSize: 30,
-    lineHeight: 30,
-    fontFamily: Typography.display,
-    color: Palette.plum,
-    letterSpacing: -0.3,
   },
   bellBtn: {
     width: 40,

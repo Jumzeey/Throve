@@ -5,6 +5,7 @@ import {
   clearStaffSession,
   readStoredStaff,
   readTokens,
+  setAuthGateReason,
   writeStoredStaff,
   writeTokens,
 } from '../lib/session';
@@ -23,7 +24,7 @@ type AuthContextValue = {
   loading: boolean;
   /** True when the admin can call the Node API (always, unless misconfigured). */
   apiReady: boolean;
-  signInWithPassword: (input: { email: string; password: string }) => Promise<void>;
+  signInWithPassword: (input: { email: string; password: string }) => Promise<StaffSession>;
   signInDemo: (input: { email: string; name: string; role: AdminRole }) => void;
   signOut: () => Promise<void>;
 };
@@ -38,6 +39,13 @@ type StaffLoginResponse = {
     name: string;
     adminRole: AdminRole;
   };
+};
+
+type StaffMeResponse = {
+  userId: string;
+  email: string;
+  name: string;
+  adminRole: AdminRole;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -57,15 +65,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const tokens = readTokens();
-    const staff = readStoredStaff();
-    if (tokens?.accessToken && staff?.role) {
-      setSession({
-        ...staff,
-        accessToken: tokens.accessToken,
-      });
+    let cancelled = false;
+
+    async function bootstrap() {
+      const tokens = readTokens();
+      const staff = readStoredStaff();
+
+      if (!tokens?.accessToken) {
+        if (!cancelled) {
+          setSession(null);
+          setLoading(false);
+        }
+        return;
+      }
+
+      // Demo sessions have no refresh token / empty access token
+      if (!tokens.refreshToken || tokens.accessToken === '') {
+        if (staff?.role && !cancelled) {
+          setSession({ ...staff, accessToken: tokens.accessToken || '' });
+        }
+        if (!cancelled) setLoading(false);
+        return;
+      }
+
+      try {
+        const me = await apiFetch<StaffMeResponse>('/auth/staff/me');
+        if (cancelled) return;
+        const next: StaffSession = {
+          userId: me.userId,
+          email: me.email,
+          name: me.name || me.email,
+          role: me.adminRole,
+          accessToken: readTokens()?.accessToken ?? tokens.accessToken,
+        };
+        writeStoredStaff({
+          userId: next.userId,
+          email: next.email,
+          name: next.name,
+          role: next.role,
+        });
+        setSession(next);
+      } catch (err) {
+        const code =
+          err && typeof err === 'object' && 'code' in err ? String((err as { code?: string }).code) : '';
+        if (code === 'ACCESS_REVOKED') setAuthGateReason('revoked');
+        else setAuthGateReason('expired');
+        clearStaffSession();
+        if (!cancelled) setSession(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
-    setLoading(false);
+
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const signInWithPassword = useCallback(async (input: { email: string; password: string }) => {
@@ -88,7 +143,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       name: data.user.name || data.user.email,
       role: data.user.adminRole,
     });
-    setSession(toSession(data.user, data.accessToken));
+    const next = toSession(data.user, data.accessToken);
+    setSession(next);
+    return next;
   }, []);
 
   const signInDemo = useCallback((input: { email: string; name: string; role: AdminRole }) => {
@@ -103,6 +160,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    const tokens = readTokens();
+    try {
+      if (tokens?.refreshToken) {
+        await apiFetch('/auth/staff/logout', {
+          method: 'POST',
+          body: JSON.stringify({ refreshToken: tokens.refreshToken }),
+        });
+      }
+    } catch {
+      // local clear still proceeds
+    }
     clearStaffSession();
     setSession(null);
   }, []);

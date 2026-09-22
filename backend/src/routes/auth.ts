@@ -540,7 +540,11 @@ router.post('/staff/login', async (req, res) => {
   const profile = await getProfileById(service, signIn.data.user.id);
   if (!profile?.admin_role) {
     await authClient.auth.signOut();
-    return sendError(res, 403, 'This account is not provisioned for the admin console', 'FORBIDDEN');
+    return sendError(res, 403, 'This account is not provisioned for the admin console', 'NOT_PROVISIONED');
+  }
+  if (profile.admin_active === false) {
+    await authClient.auth.signOut();
+    return sendError(res, 403, 'Your access to Throve Admin is no longer active', 'ACCESS_REVOKED');
   }
 
   const mapped = mapProfile(profile);
@@ -564,13 +568,13 @@ router.post('/staff/refresh', async (req, res) => {
   const authClient = createSupabaseClient();
   const refreshed = await authClient.auth.refreshSession({ refresh_token: parsed.data.refreshToken });
   if (refreshed.error || !refreshed.data.session || !refreshed.data.user) {
-    return sendError(res, 401, 'Session expired. Sign in again.', 'UNAUTHORIZED');
+    return sendError(res, 401, 'Session expired. Sign in again.', 'SESSION_EXPIRED');
   }
 
   const service = createServiceClient();
   const profile = await getProfileById(service, refreshed.data.user.id);
-  if (!profile?.admin_role) {
-    return sendError(res, 403, 'This account is not provisioned for the admin console', 'FORBIDDEN');
+  if (!profile?.admin_role || profile.admin_active === false) {
+    return sendError(res, 403, 'Your access to Throve Admin is no longer active', 'ACCESS_REVOKED');
   }
 
   const mapped = mapProfile(profile);
@@ -584,6 +588,56 @@ router.post('/staff/refresh', async (req, res) => {
       name: mapped.name || mapped.email,
       adminRole: mapped.adminRole,
     },
+  });
+});
+
+/** End staff session. Always 204 — client clears local tokens either way. */
+router.post('/staff/logout', async (req, res) => {
+  const parsed = z
+    .object({
+      refreshToken: z.string().min(10).optional(),
+    })
+    .safeParse(req.body ?? {});
+  if (!parsed.success) return sendError(res, 400, 'Invalid input');
+
+  try {
+    const authClient = createSupabaseClient();
+    if (parsed.data.refreshToken) {
+      await authClient.auth.refreshSession({ refresh_token: parsed.data.refreshToken }).catch(() => null);
+    }
+    await authClient.auth.signOut().catch(() => null);
+  } catch {
+    // ignore — local clear still happens on the client
+  }
+  return res.status(204).send();
+});
+
+/** Revalidate staff session after bootstrap or mid-session. */
+router.get('/staff/me', async (req, res) => {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) {
+    return sendError(res, 401, 'Missing authorization token', 'SESSION_EXPIRED');
+  }
+
+  const accessToken = header.slice(7);
+  const authClient = createSupabaseClient(accessToken);
+  const { data, error } = await authClient.auth.getUser(accessToken);
+  if (error || !data.user) {
+    return sendError(res, 401, 'Session expired. Sign in again.', 'SESSION_EXPIRED');
+  }
+
+  const service = createServiceClient();
+  const profile = await getProfileById(service, data.user.id);
+  if (!profile?.admin_role || profile.admin_active === false) {
+    return sendError(res, 403, 'Your access to Throve Admin is no longer active', 'ACCESS_REVOKED');
+  }
+
+  const mapped = mapProfile(profile);
+  return res.json({
+    userId: mapped.userId,
+    email: mapped.email,
+    name: mapped.name || mapped.email,
+    adminRole: mapped.adminRole,
   });
 });
 

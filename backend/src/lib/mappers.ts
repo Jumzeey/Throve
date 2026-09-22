@@ -23,6 +23,7 @@ type ProfileRow = {
   has_password?: boolean | null;
   payout_verified?: boolean | null;
   admin_role?: 'super_admin' | 'trust_safety' | 'support' | 'finance' | null;
+  admin_active?: boolean | null;
 };
 
 type ListingRow = {
@@ -74,6 +75,7 @@ export function mapProfile(row: ProfileRow, sellerUsername?: string) {
     setupComplete: row.setup_complete,
     canHostLive: row.can_host_live,
     adminRole: row.admin_role ?? null,
+    adminActive: row.admin_active !== false,
     deactivated: row.deactivated,
     notifOffers: row.notif_offers,
     notifMessages: row.notif_messages,
