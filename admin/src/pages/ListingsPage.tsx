@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useAuth, roleLabel } from '@/auth/AuthContext';
+import { useAuth } from '@/auth/AuthContext';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
 import { EmptyState, ErrorState } from '@/components/admin/empty-state';
@@ -941,8 +941,4 @@ export function ListingsPage() {
       ) : null}
     </>
   );
-}
-
-function reportedCount(list: ListingRow[]) {
-  return list.filter(isFlagged).length;
 }

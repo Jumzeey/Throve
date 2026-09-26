@@ -8,7 +8,7 @@ import {
   type AdminPaymentCounts,
   type AdminPaymentDto,
 } from '@/api/payments';
-import { useAuth, roleLabel } from '@/auth/AuthContext';
+import { useAuth } from '@/auth/AuthContext';
 import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
@@ -186,30 +186,6 @@ export function PaymentsPage() {
   const isDuplicateCluster =
     selected?.status === 'Duplicate risk' ||
     (selected?.relatedAttempts.filter((a) => a.kind === 'payment').length ?? 0) >= 2;
-
-  function patchPayment(id: string, next: PaymentOverride) {
-    setOverrides((current) => ({
-      ...current,
-      [id]: { ...current[id], ...next },
-    }));
-  }
-
-  function appendHistory(payment: AdminPaymentDto, entry: AdminPaymentDto['history'][number]) {
-    return [...(overrides[payment.id]?.history ?? payment.history), entry];
-  }
-
-  function stampNow() {
-    return new Date().toLocaleString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  }
-
-  function actorLabel() {
-    return session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
-  }
 
   async function runReconcile(reason: string) {
     if (!selected || !liveMode) return;

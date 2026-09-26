@@ -9,7 +9,7 @@ import {
   verifyAdminRefund,
   type AdminRefundDto,
 } from '@/api/refunds';
-import { useAuth, roleLabel } from '@/auth/AuthContext';
+import { useAuth } from '@/auth/AuthContext';
 import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
 import { EmptyState, ErrorState } from '@/components/admin/empty-state';
@@ -251,10 +251,6 @@ export function RefundsPage() {
       hour: '2-digit',
       minute: '2-digit',
     });
-  }
-
-  function actorLabel() {
-    return session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
   }
 
   function displayTotal(r: AdminRefundDto) {

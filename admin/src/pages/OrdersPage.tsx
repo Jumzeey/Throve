@@ -8,7 +8,8 @@ import {
   type AdminOrderCounts,
   type AdminOrderDto,
 } from '@/api/orders';
-import { useAuth, roleLabel } from '@/auth/AuthContext';
+import type { AdminOrderFlag } from '@/types/domain';
+import { useAuth } from '@/auth/AuthContext';
 import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
@@ -54,7 +55,7 @@ const emptyCounts: AdminOrderCounts = {
   cancelled: 0,
 };
 
-const FLAG_META: Record<AdminOrderDtoFlag, { label: string; tone: StatusTone }> = {
+const FLAG_META: Record<AdminOrderFlag, { label: string; tone: StatusTone }> = {
   dispute: { label: 'Dispute', tone: 'risk' },
   hold: { label: 'Hold', tone: 'hold' },
   cancellable: { label: 'Cancellable', tone: 'plum' },
@@ -238,30 +239,6 @@ export function OrdersPage() {
   const payoutEligible = Boolean(selected?.status === 'Completed' && selected.flags.includes('payout'));
 
   const listWindow = useListWindow(rows);
-
-  function patchOrder(id: string, next: OrderOverride) {
-    setOverrides((current) => ({
-      ...current,
-      [id]: { ...current[id], ...next },
-    }));
-  }
-
-  function appendTimeline(order: AdminOrderDto, entry: AdminOrderDto['timeline'][number]): AdminOrderDto['timeline'] {
-    return [...(overrides[order.id]?.timeline ?? order.timeline), entry];
-  }
-
-  function stampNow() {
-    return new Date().toLocaleString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  }
-
-  function actorLabel() {
-    return session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
-  }
 
   async function runNote(reason: string) {
     if (!selected || !liveMode) return;

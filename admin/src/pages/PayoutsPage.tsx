@@ -11,7 +11,7 @@ import {
   verifyAdminPayout,
   type AdminPayoutDto,
 } from '@/api/payouts';
-import { useAuth, roleLabel } from '@/auth/AuthContext';
+import { useAuth } from '@/auth/AuthContext';
 import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
 import { EmptyState, ErrorState } from '@/components/admin/empty-state';
@@ -218,30 +218,6 @@ export function PayoutsPage() {
 
   const selected = payouts.find((p) => p.id === selectedId) ?? null;
   const selectedFlash = selected ? overrides[selected.id]?.flash : null;
-
-  function patchPayout(id: string, next: PayoutOverride) {
-    setOverrides((current) => ({
-      ...current,
-      [id]: { ...current[id], ...next },
-    }));
-  }
-
-  function appendHistory(payout: AdminPayoutDto, entry: AdminPayoutDto['history'][number]) {
-    return [...(overrides[payout.id]?.history ?? payout.history), entry];
-  }
-
-  function stampNow() {
-    return new Date().toLocaleString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  }
-
-  function actorLabel() {
-    return session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
-  }
 
   function tryProcess(payout: AdminPayoutDto) {
     if (payout.status === 'On Hold' || payout.disputeId) {

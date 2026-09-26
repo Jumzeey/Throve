@@ -688,7 +688,7 @@ export function UsersPage() {
                 {canApproveHost && (selected.liveHost === 'Pending' || (liveMode && selected.liveHost === 'None')) ? (
                   <Button
                     className="col-span-2 h-auto py-2.5 text-[12px] font-semibold"
-                    disabled={actionBusy || selected.liveHost === 'Approved'}
+                    disabled={actionBusy}
                     onClick={() => setConfirm('approve_host')}
                   >
                     Approve live host

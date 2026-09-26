@@ -7,7 +7,6 @@ import {
   type OpsDashboard,
   type OpsQueueTab,
   type OpsSensitiveAction,
-  type OpsSupportRow,
 } from '@/api/ops';
 import { useAuth } from '@/auth/AuthContext';
 import { AiAdvisory } from '@/components/admin/ai-advisory';

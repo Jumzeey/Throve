@@ -285,7 +285,6 @@ export function DisputesPage() {
               <ErrorState
                 title="Could not load disputes"
                 description={loadError}
-                actionLabel="Retry"
                 onRetry={() => void loadLive()}
               />
             ) : null}

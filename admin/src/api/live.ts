@@ -4,6 +4,7 @@ import type { AdminLive } from '@/types/domain';
 export type AdminLiveDto = AdminLive & {
   /** Present on API rows: session is still broadcasting (DB status live). */
   broadcasting?: boolean;
+  aiUnavailable?: boolean;
 };
 
 export type AdminLiveCounts = {
