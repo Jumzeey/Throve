@@ -18,8 +18,8 @@ const DEMO_ROLES: { role: AdminRole; name: string; email: string }[] = [
   { role: 'finance', name: 'I. Danjuma', email: 'finance@throve.store' },
 ];
 
-// Quick-fill is local-dev only; the password never ships in the bundle.
-const SHOW_DEMO_FILL = import.meta.env.DEV;
+// Staff quick-fill; the password comes from the build env, not the repo.
+const SHOW_DEMO_FILL = true;
 const DEMO_PASSWORD = (import.meta.env.VITE_STAFF_DEMO_PASSWORD as string | undefined) ?? '';
 
 type GateState =

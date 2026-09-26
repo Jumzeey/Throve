@@ -29,4 +29,4 @@ STAFF_SEED_PASSWORD='choose-a-strong-password' npm run seed:staff
 
 All four share `STAFF_SEED_PASSWORD`. Share it out of band; never commit it.
 
-In local dev (`npm run dev`), the login page shows "Fill" buttons. Set `VITE_STAFF_DEMO_PASSWORD` in `admin/.env.local` to have them fill the password too. The buttons are not rendered in production builds.
+The login page shows "Fill" buttons for each staff account. They fill the password from `VITE_STAFF_DEMO_PASSWORD`, set in `admin/.env.local` locally and in the Vercel project env for deployed builds. It's a build-time value, so redeploy after changing it. Without it, the buttons fill only the email.
