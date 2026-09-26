@@ -1,7 +1,7 @@
 import { Image, type ImageStyle, type StyleProp } from 'react-native';
 
-/** Official Throve mark (plum T in arrow circle on ivory). */
-export const throveLogo = require('@/assets/images/throve-logo.jpeg');
+/** Official Throve mark (plum T in arrow circle), transparent and tightly cropped. */
+export const throveLogo = require('@/assets/images/throve-mark.png');
 
 export function ThroveLogo({
   style,

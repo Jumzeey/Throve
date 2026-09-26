@@ -17,14 +17,16 @@ Create / reset the four Hi-Fi staff users (Auth + `profiles.admin_role`):
 
 ```bash
 cd backend
-npm run seed:staff
+STAFF_SEED_PASSWORD='choose-a-strong-password' npm run seed:staff
 ```
 
-| Role | Email | Password |
-|------|-------|----------|
-| Super Admin | `okafor@throve.store` | `ThroveAdmin!2026` |
-| Trust & Safety | `safety@throve.store` | `ThroveAdmin!2026` |
-| Customer Support | `support@throve.store` | `ThroveAdmin!2026` |
-| Finance | `finance@throve.store` | `ThroveAdmin!2026` |
+| Role | Email |
+|------|-------|
+| Super Admin | `okafor@throve.store` |
+| Trust & Safety | `safety@throve.store` |
+| Customer Support | `support@throve.store` |
+| Finance | `finance@throve.store` |
 
-Override password with `STAFF_SEED_PASSWORD` when running the seed script. Dev/staging only — rotate before production.
+All four share `STAFF_SEED_PASSWORD`. Share it out of band; never commit it.
+
+In local dev (`npm run dev`), the login page shows "Fill" buttons. Set `VITE_STAFF_DEMO_PASSWORD` in `admin/.env.local` to have them fill the password too. The buttons are not rendered in production builds.

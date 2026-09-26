@@ -1,6 +1,5 @@
 -- Grant staff console access for seeded Hi-Fi personas.
--- Auth users + passwords are created by: backend `npm run seed:staff`
--- Password (default): ThroveAdmin!2026
+-- Auth users + passwords are created by: backend `npm run seed:staff` (STAFF_SEED_PASSWORD)
 
 update public.profiles
 set admin_role = 'super_admin', admin_active = true

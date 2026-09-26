@@ -5,8 +5,7 @@
  * Usage (from backend/):
  *   npm run seed:staff
  *
- * Default password for all seeded staff (dev / staging only):
- *   ThroveAdmin!2026
+ * Requires STAFF_SEED_PASSWORD (in backend/.env or the shell) — used for all seeded staff.
  */
 import dotenv from 'dotenv';
 import path from 'path';
@@ -15,7 +14,11 @@ import { createServiceClient } from '../src/lib/supabase.js';
 
 dotenv.config({ path: path.join(path.dirname(fileURLToPath(import.meta.url)), '../.env') });
 
-const STAFF_PASSWORD = process.env.STAFF_SEED_PASSWORD?.trim() || 'ThroveAdmin!2026';
+const STAFF_PASSWORD = process.env.STAFF_SEED_PASSWORD?.trim() ?? '';
+if (STAFF_PASSWORD.length < 12) {
+  console.error('Set STAFF_SEED_PASSWORD (at least 12 characters) before seeding staff.');
+  process.exit(1);
+}
 
 type StaffSeed = {
   email: string;

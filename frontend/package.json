@@ -11,8 +11,9 @@
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "postinstall": "node ./scripts/patch-livekit-webrtc-shim.js",
-    "update:preview": "eas update --channel preview --environment preview",
-    "update:production": "eas update --channel production --environment production"
+    "update:preview": "npx eas-cli@latest update --channel preview --environment preview",
+    "update:production": "npx eas-cli@latest update --channel production --environment production",
+    "brand:assets": "swift scripts/brand-assets.swift"
   },
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^13.0.0",

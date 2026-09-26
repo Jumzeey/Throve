@@ -11,12 +11,16 @@ import { ROLE_LABELS, type AdminRole } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 import { Check, Eye, EyeOff, Loader2, Lock } from 'lucide-react';
 
-const DEMO_ROLES: { role: AdminRole; name: string; email: string; password: string }[] = [
-  { role: 'super_admin', name: 'M. Okafor', email: 'okafor@throve.store', password: 'ThroveAdmin!2026' },
-  { role: 'trust_safety', name: 'F. Adeyemi', email: 'safety@throve.store', password: 'ThroveAdmin!2026' },
-  { role: 'support', name: 'S. Mensah', email: 'support@throve.store', password: 'ThroveAdmin!2026' },
-  { role: 'finance', name: 'I. Danjuma', email: 'finance@throve.store', password: 'ThroveAdmin!2026' },
+const DEMO_ROLES: { role: AdminRole; name: string; email: string }[] = [
+  { role: 'super_admin', name: 'M. Okafor', email: 'okafor@throve.store' },
+  { role: 'trust_safety', name: 'F. Adeyemi', email: 'safety@throve.store' },
+  { role: 'support', name: 'S. Mensah', email: 'support@throve.store' },
+  { role: 'finance', name: 'I. Danjuma', email: 'finance@throve.store' },
 ];
+
+// Quick-fill is local-dev only; the password never ships in the bundle.
+const SHOW_DEMO_FILL = import.meta.env.DEV;
+const DEMO_PASSWORD = (import.meta.env.VITE_STAFF_DEMO_PASSWORD as string | undefined) ?? '';
 
 type GateState =
   | 'form'
@@ -341,24 +345,26 @@ export function LoginPage() {
                       <AlertDescription className="text-[11.5px] text-risk">{error}</AlertDescription>
                     </Alert>
                   ) : null}
-                  <div className="flex flex-wrap gap-1.5">
-                    {DEMO_ROLES.map((staff) => (
-                      <button
-                        key={staff.role}
-                        type="button"
-                        className="rounded-[4px] border border-[#e2d7cc] bg-panel px-2 py-1 text-[10.5px] font-semibold text-body hover:border-plum/40 hover:text-plum"
-                        onClick={() => {
-                          setEmail(staff.email);
-                          setPassword(staff.password);
-                          setEmailError(null);
-                          setPasswordError(null);
-                          setError(null);
-                        }}
-                      >
-                        Fill {ROLE_LABELS[staff.role]}
-                      </button>
-                    ))}
-                  </div>
+                  {SHOW_DEMO_FILL ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {DEMO_ROLES.map((staff) => (
+                        <button
+                          key={staff.role}
+                          type="button"
+                          className="rounded-[4px] border border-[#e2d7cc] bg-panel px-2 py-1 text-[10.5px] font-semibold text-body hover:border-plum/40 hover:text-plum"
+                          onClick={() => {
+                            setEmail(staff.email);
+                            setPassword(DEMO_PASSWORD);
+                            setEmailError(null);
+                            setPasswordError(null);
+                            setError(null);
+                          }}
+                        >
+                          Fill {ROLE_LABELS[staff.role]}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="flex flex-col gap-2">
                     <Label
                       htmlFor="email"

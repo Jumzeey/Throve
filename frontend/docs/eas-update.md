@@ -25,7 +25,9 @@ If not logged in: `npx eas-cli@latest login`.
 
 **Runtime version** is the explicit string `1.0.0` (bare Android cannot use `{ "policy": "appVersion" }`). Keep `app.json` `runtimeVersion`, `expo.version`, and `android/.../strings.xml` `expo_runtime_version` in sync. Bump all three and rebuild when native deps change; OTAs only apply to matching runtime versions.
 
-`android/app/google-services.json` stays out of git; `frontend/.easignore` force-includes it so EAS cloud builds receive Firebase config.
+`android/app/google-services.json` is committed (Firebase client config, not a secret) so EAS cloud builds receive it.
+
+Icons, splash and notification icon are native: changing them needs a new build, not an OTA. Regenerate them from `assets/images/throve-logo.png` with `npm run brand:assets` (macOS).
 
 ## 1. Build a binary that can receive OTAs
 
