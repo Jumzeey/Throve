@@ -323,6 +323,13 @@ export default function SettingsScreen() {
           </Pressable>
         </Section>
 
+        <Section label="Selling">
+          <Pressable style={styles.linkRow} onPress={() => router.push('/profile/payout-account')}>
+            <Text style={styles.linkLabel}>Payout account</Text>
+            <Ionicons name="chevron-forward" size={15} color={Palette.muted2} />
+          </Pressable>
+        </Section>
+
         <Section label="Notifications">
           <NotifToggle
             title="Offers"

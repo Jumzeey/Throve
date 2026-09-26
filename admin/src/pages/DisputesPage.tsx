@@ -1,10 +1,20 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  decideAdminDispute,
+  decisionToApiOutcome,
+  escalateAdminDispute,
+  fetchAdminDispute,
+  fetchAdminDisputes,
+  noteAdminDispute,
+  type AdminDisputeDto,
+} from '@/api/disputes';
 import { useAuth } from '@/auth/AuthContext';
 import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
-import { EmptyState } from '@/components/admin/empty-state';
+import { EmptyState, ErrorState } from '@/components/admin/empty-state';
+import { ListSkeleton, DetailSkeleton } from '@/components/admin/loading-skeleton';
 import { FilterChips } from '@/components/admin/filter-chips';
 import { CopyableId } from '@/components/admin/copyable-id';
 import { ListWindowFooter } from '@/components/admin/list-window-footer';
@@ -14,20 +24,15 @@ import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { formatNaira, mockDisputes, type MockDispute } from '@/data/mock';
+import { formatNaira } from '@/lib/format';
 import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
+import { ApiError } from '@/lib/api';
 import { canAct, ROLE_LABELS } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 
 type Decision = 'Refund buyer' | 'Release to seller' | 'Close';
-
-type RecordedDecision = {
-  outcome: Decision;
-  reason: string;
-  by: string;
-  at: string;
-};
+type ConfirmKind = 'decide' | 'note' | 'escalate' | null;
 
 const DECISIONS: { id: Decision; label: string }[] = [
   { id: 'Refund buyer', label: 'Refund buyer' },
@@ -50,16 +55,14 @@ const PROTECTION_NOT_COVERED = [
   'Claims after the 48-hour window',
 ];
 
-function queueCounts() {
-  return {
-    open: mockDisputes.filter((d) => d.status === 'Open' || d.status === 'With T&S').length,
-    decision_ready: mockDisputes.filter((d) => d.decisionReady).length,
-    evidence_incomplete: mockDisputes.filter((d) => d.queue === 'evidence_incomplete').length,
-    awaiting_buyer: mockDisputes.filter((d) => d.queue === 'awaiting_buyer').length,
-  };
-}
+const EMPTY_DISPUTE_COUNTS = {
+  open: 0,
+  decision_ready: 0,
+  evidence_incomplete: 0,
+  awaiting_buyer: 0,
+};
 
-function outcomeHeadline(outcome: Decision | NonNullable<MockDispute['decision']>) {
+function outcomeHeadline(outcome: Decision | NonNullable<AdminDisputeDto['decision']>) {
   if (outcome === 'Refund buyer') return 'Buyer wins — refund approved';
   if (outcome === 'Release to seller') return 'Seller wins — release / continue payout';
   if (outcome === 'Close') return 'Closed with no financial change';
@@ -68,72 +71,184 @@ function outcomeHeadline(outcome: Decision | NonNullable<MockDispute['decision']
 
 export function DisputesPage() {
   const { session } = useAuth();
+  const liveMode = Boolean(session?.accessToken);
   const { banner, show } = useToast();
   const [filter, setFilter] = useState('open');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useBleedSelection(mockDisputes[0]?.id ?? null);
   const [outcome, setOutcome] = useState<Decision>('Refund buyer');
-  const [reason, setReason] = useState(mockDisputes[0]?.defaultReason ?? '');
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [recorded, setRecorded] = useState<Record<string, RecordedDecision>>({});
+  const [reason, setReason] = useState('');
+  const [confirm, setConfirm] = useState<ConfirmKind>(null);
   const [dismissedStale, setDismissedStale] = useState<Record<string, boolean>>({});
   const [saveError, setSaveError] = useState(false);
+  const [liveDisputes, setLiveDisputes] = useState<AdminDisputeDto[]>([]);
+  const [liveCounts, setLiveCounts] = useState(EMPTY_DISPUTE_COUNTS);
+  const [loading, setLoading] = useState(liveMode);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+
+  const canDecide = session ? canAct(session.role, 'decide_dispute') : false;
+  const isFinance = session?.role === 'finance';
+  const isSupport = session?.role === 'support';
+  const isTsOrSuper = session?.role === 'trust_safety' || session?.role === 'super_admin';
+  const counts = liveCounts;
+
+  const loadLive = useCallback(async () => {
+    if (!liveMode) return;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await fetchAdminDisputes(filter, search);
+      setLiveDisputes(data.disputes);
+      setLiveCounts(data.counts);
+    } catch (err) {
+      setLoadError(err instanceof ApiError ? err.message : 'Could not load disputes');
+    } finally {
+      setLoading(false);
+    }
+  }, [liveMode, filter, search]);
+
+  const applyDetail = useCallback((detail: { dispute: AdminDisputeDto }) => {
+    setLiveDisputes((current) => {
+      const idx = current.findIndex((d) => d.id === detail.dispute.id);
+      if (idx === -1) return [detail.dispute, ...current];
+      const next = [...current];
+      next[idx] = detail.dispute;
+      return next;
+    });
+  }, []);
+
+  const loadSelectedDetail = useCallback(
+    async (id: string) => {
+      if (!liveMode) return;
+      try {
+        const detail = await fetchAdminDispute(id);
+        applyDetail(detail);
+      } catch {
+        // Keep list row
+      }
+    },
+    [applyDetail, liveMode],
+  );
+
+  useEffect(() => {
+    if (!liveMode) {
+      setLoading(false);
+      setLoadError(null);
+      setLiveDisputes([]);
+      return;
+    }
+    void loadLive();
+  }, [liveMode, loadLive]);
 
   usePageChrome({
     title: 'Disputes',
-    subtitle: 'Buyer Protection cases · 23 open · 6 urgent · decision authority: Trust & Safety',
+    subtitle: `${counts.open} open · decision authority: Trust & Safety`,
     search,
     onSearchChange: setSearch,
     searchPlaceholder: 'Case, order or username…',
     bleed: true,
   });
 
-  const canDecide = session ? canAct(session.role, 'decide_dispute') : false;
-  const isFinance = session?.role === 'finance';
-  const isSupport = session?.role === 'support';
-  const isTsOrSuper = session?.role === 'trust_safety' || session?.role === 'super_admin';
-  const counts = queueCounts();
-
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return mockDisputes.filter((d) => {
-      if (filter === 'open' && !(d.status === 'Open' || d.status === 'With T&S')) return false;
-      if (filter === 'decision_ready' && !d.decisionReady) return false;
-      if (filter === 'evidence_incomplete' && d.queue !== 'evidence_incomplete') return false;
-      if (filter === 'awaiting_buyer' && d.queue !== 'awaiting_buyer') return false;
-      if (!q) return true;
-      return (
+    if (!q) return liveDisputes;
+    return liveDisputes.filter(
+      (d) =>
         d.id.toLowerCase().includes(q) ||
         d.orderId.toLowerCase().includes(q) ||
         d.buyer.toLowerCase().includes(q) ||
         d.seller.toLowerCase().includes(q) ||
-        d.reason.toLowerCase().includes(q)
-      );
-    });
-  }, [filter, search]);
+        d.reason.toLowerCase().includes(q),
+    );
+  }, [liveDisputes, search]);
+
+  const [selectedId, setSelectedId] = useBleedSelection(null);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    if (!liveDisputes.some((d) => d.id === selectedId)) {
+      setSelectedId(null);
+    }
+  }, [liveDisputes, selectedId, setSelectedId]);
+
+  useEffect(() => {
+    if (!liveMode || !selectedId) return;
+    void loadSelectedDetail(selectedId);
+  }, [liveMode, selectedId, loadSelectedDetail]);
 
   const listWindow = useListWindow(rows);
 
-  const selected = mockDisputes.find((d) => d.id === selectedId) ?? null;
-  const recordedForSelected = selected ? recorded[selected.id] : undefined;
+  const selected = liveDisputes.find((d) => d.id === selectedId) ?? null;
   const isDecided =
-    Boolean(recordedForSelected) ||
     selected?.status === 'Approved for refund' ||
     selected?.status === 'Denied' ||
     selected?.status === 'Closed' ||
     Boolean(selected?.decision);
 
-  const decidedOutcome = recordedForSelected?.outcome ?? selected?.decision;
+  const decidedOutcome = selected?.decision;
   const decidedBy =
-    recordedForSelected?.by ?? selected?.decidedBy ?? (session ? `${session.name} · ${ROLE_LABELS[session.role]}` : 'Staff');
+    selected?.decidedBy ?? (session ? `${session.name} · ${ROLE_LABELS[session.role]}` : 'Staff');
   const decisionBlocked =
     Boolean(selected?.evidenceBlockReason) || selected?.queue === 'awaiting_buyer' || Boolean(selected?.unassigned);
 
-  function selectCase(d: MockDispute) {
+  function selectCase(d: AdminDisputeDto) {
     setSelectedId(d.id);
     setOutcome('Refund buyer');
     setReason(d.defaultReason ?? '');
     setSaveError(false);
+  }
+
+  async function decideSelected(finalReason: string) {
+    if (!selected || !liveMode) return;
+    setActionBusy(true);
+    setSaveError(false);
+    try {
+      const detail = await decideAdminDispute(selected.id, decisionToApiOutcome(outcome), finalReason);
+      applyDetail(detail);
+      setConfirm(null);
+      show(`Decision recorded · ${selected.id} · ${outcome}`);
+      await loadLive();
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      setSaveError(true);
+      setConfirm(null);
+      show(err instanceof Error ? err.message : 'Decision not saved');
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function noteSelected(noteReason: string) {
+    if (!selected || !liveMode) return;
+    setActionBusy(true);
+    try {
+      const detail = await noteAdminDispute(selected.id, noteReason);
+      applyDetail(detail);
+      setConfirm(null);
+      show(`Internal note saved · ${selected.id}`);
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Note failed');
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function escalateSelected(escalateReason: string) {
+    if (!selected || !liveMode) return;
+    setActionBusy(true);
+    try {
+      const detail = await escalateAdminDispute(selected.id, escalateReason);
+      applyDetail(detail);
+      setConfirm(null);
+      show(`Escalated ${selected.id} to Trust & Safety`);
+      await loadLive();
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Escalate failed');
+    } finally {
+      setActionBusy(false);
+    }
   }
 
   const decidingRole = session ? ROLE_LABELS[session.role] : 'Staff';
@@ -165,7 +280,16 @@ export function DisputesPage() {
           </div>
 
           <div ref={listWindow.scrollRef} className="min-h-0 flex-1 overflow-auto px-3 py-3">
-            {rows.length === 0 ? (
+            {loading ? <ListSkeleton rows={6} /> : null}
+            {!loading && loadError ? (
+              <ErrorState
+                title="Could not load disputes"
+                description={loadError}
+                actionLabel="Retry"
+                onRetry={() => void loadLive()}
+              />
+            ) : null}
+            {!loading && !loadError && rows.length === 0 ? (
               <EmptyState
                 title="No cases found"
                 description={search ? `Nothing matches “${search}”.` : 'No disputes in this queue.'}
@@ -175,7 +299,8 @@ export function DisputesPage() {
                   setSearch('');
                 }}
               />
-            ) : (
+            ) : null}
+            {!loading && !loadError && rows.length > 0 ? (
               <div className="flex flex-col gap-2">
                 {listWindow.visible.map((d) => {
                   const active = d.id === selectedId;
@@ -190,7 +315,7 @@ export function DisputesPage() {
                       )}
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <span className="text-[13px] font-semibold text-espresso">{d.id}</span>
+                        <span className="text-[13px] font-semibold text-espresso">{d.id.slice(0, 8)}</span>
                         <span className="text-[10.5px] tabular-nums text-[#8c7a73]">{d.openLabel}</span>
                       </div>
                       <div className="mt-1 text-[12px] text-espresso">
@@ -210,7 +335,7 @@ export function DisputesPage() {
                         ) : null}
                         {d.decisionReady ? <StatusBadge tone="plum">Decision ready</StatusBadge> : null}
                         {d.queue === 'awaiting_buyer' ? <StatusBadge tone="neutral">Awaiting buyer</StatusBadge> : null}
-                        {d.decision === 'Refund buyer' || recorded[d.id]?.outcome === 'Refund buyer' ? (
+                        {d.decision === 'Refund buyer' ? (
                           <StatusBadge tone="clear">Refund approved</StatusBadge>
                         ) : null}
                       </div>
@@ -219,16 +344,18 @@ export function DisputesPage() {
                 })}
                 <ListWindowFooter {...listWindow} />
               </div>
-            )}
+            ) : null}
           </div>
 
           <div className="border-t border-[#e7dcd2] px-4 py-2.5 text-[10.5px] text-[#8c7a73]">
-            Showing {rows.length} of 23 · queue order is AI-assisted, review is human.
+            Showing {rows.length} · live cases.
           </div>
           </>
         }
         inspector={
-          selected ? (
+          loading && !selected ? (
+            <DetailSkeleton />
+          ) : selected ? (
             <div className="flex min-h-0 min-w-0 flex-col overflow-auto bg-panel px-5 py-5">
             <div className="flex flex-col gap-3.5">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -296,7 +423,7 @@ export function DisputesPage() {
                 </div>
               ) : null}
 
-              {selected.actionAlreadyApplied && !recordedForSelected ? (
+              {selected.actionAlreadyApplied ? (
                 <div className="rounded-[5px] border border-[#9fbfa8] bg-[#eef6f0] px-3.5 py-2.5">
                   <div className="text-[12px] font-semibold text-[#2f6b45]">
                     {selected.actionAlreadyApplied.action} already completed
@@ -404,14 +531,16 @@ export function DisputesPage() {
                       <Button
                         variant="outline"
                         className="h-auto border-plum py-2.5 text-[12px] font-semibold text-plum"
-                        onClick={() => show(`Internal note drafted on ${selected.id}`)}
+                        disabled={actionBusy}
+                        onClick={() => setConfirm('note')}
                       >
                         Add internal note
                       </Button>
                       <Button
                         variant="outline"
                         className="h-auto border-[#dccfc4] py-2.5 text-[12px] font-semibold text-espresso"
-                        onClick={() => show(`Escalated ${selected.id} to Trust & Safety`)}
+                        disabled={actionBusy}
+                        onClick={() => setConfirm('escalate')}
                       >
                         Escalate
                       </Button>
@@ -431,7 +560,7 @@ export function DisputesPage() {
                         </div>
                         <div className="mt-1 text-[11.5px] text-[#2f6b45]">
                           Decided by {decidedBy}
-                          {recordedForSelected?.at ? ` · ${recordedForSelected.at}` : selected.decidedAt ? ` · ${selected.decidedAt}` : ''}
+                          {selected.decidedAt ? ` · ${selected.decidedAt}` : ''}
                         </div>
                       </div>
                       <div className="rounded-[6px] border border-[#e7dcd2] bg-[#fbf5ef] px-3.5 py-3">
@@ -451,9 +580,9 @@ export function DisputesPage() {
                     </div>
                   ) : null}
 
-                  {!isDecided ? <AiAdvisory kind="CASE SUMMARY">{selected.aiSummary}</AiAdvisory> : null}
+                  {!isDecided && selected.aiSummary ? <AiAdvisory kind="CASE SUMMARY">{selected.aiSummary}</AiAdvisory> : null}
 
-                  {!isDecided ? (
+                  {!isDecided && selected.suggestedOutcome && selected.suggestedOutcome !== '—' ? (
                     <div className="rounded-[6px] border border-dashed border-[#d9bfcf] bg-[#f4ecf1] px-4 py-3.5">
                       <div className="mb-1.5 text-[9.5px] font-bold tracking-[0.14em] text-plum uppercase">
                         AI recommendation
@@ -526,8 +655,8 @@ export function DisputesPage() {
 
                           <Button
                             className="mt-3.5 h-auto w-full py-3 text-[12.5px] font-semibold"
-                            disabled={reason.trim().length < 3}
-                            onClick={() => setConfirmOpen(true)}
+                            disabled={reason.trim().length < 3 || actionBusy}
+                            onClick={() => setConfirm('decide')}
                           >
                             Record decision — review &amp; confirm
                           </Button>
@@ -684,13 +813,13 @@ export function DisputesPage() {
         }
       />
 
-      {confirmOpen && selected ? (
+      {confirm === 'decide' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={setConfirmOpen}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title={`Confirm decision — ${selected.id}`}
           description="You are recording the final case decision. This closes the investigation and instructs Finance when a refund is required. The case cannot be re-decided from this console."
-          confirmLabel="Record decision"
+          confirmLabel={actionBusy ? 'Recording…' : 'Record decision'}
           requireCheckbox
           checkboxLabel="I have reviewed the case evidence and confirm this decision."
           defaultReason={reason}
@@ -719,31 +848,37 @@ export function DisputesPage() {
             },
           ]}
           onConfirm={(finalReason) => {
-            // Demo path: simulate a save error when reason contains "fail"
-            if (/fail/i.test(finalReason)) {
-              setSaveError(true);
-              setConfirmOpen(false);
-              show(`Decision not saved for ${selected.id}`);
-              return;
-            }
-            const stamp = new Date().toLocaleString('en-GB', {
-              day: '2-digit',
-              month: 'short',
-              hour: '2-digit',
-              minute: '2-digit',
-            });
-            setRecorded((prev) => ({
-              ...prev,
-              [selected.id]: {
-                outcome,
-                reason: finalReason,
-                by: session ? `${session.name} · ${ROLE_LABELS[session.role]}` : 'Staff',
-                at: stamp,
-              },
-            }));
-            setSaveError(false);
-            setConfirmOpen(false);
-            show(`Decision recorded · ${selected.id} · ${outcome}`);
+            void decideSelected(finalReason);
+          }}
+        />
+      ) : null}
+
+      {confirm === 'note' && selected ? (
+        <ConfirmActionDialog
+          open
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
+          title="Add internal note"
+          description={`Note stays on ${selected.id}. Sellers and buyers never see this.`}
+          confirmLabel={actionBusy ? 'Saving…' : 'Save note'}
+          reasonLabel="Internal note"
+          reasonPlaceholder="Context for the next reviewer…"
+          onConfirm={(noteReason) => {
+            void noteSelected(noteReason);
+          }}
+        />
+      ) : null}
+
+      {confirm === 'escalate' && selected ? (
+        <ConfirmActionDialog
+          open
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
+          title="Escalate to Trust & Safety"
+          description={`Route ${selected.id} / @${selected.seller} for elevated review.`}
+          confirmLabel={actionBusy ? 'Escalating…' : 'Escalate'}
+          reasonLabel="Escalation reason"
+          reasonPlaceholder="Why this needs elevated review…"
+          onConfirm={(escalateReason) => {
+            void escalateSelected(escalateReason);
           }}
         />
       ) : null}

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { ensurePayoutForOrder } from './admin-payouts.js';
 import { orderCompletedEmail, orderPayoutStatusEmail } from './email/templates/orders.js';
 import { getProfileById } from './mappers.js';
 import { notifyUser } from './notify.js';
@@ -113,6 +114,13 @@ export async function runAutoCompleteDueOrders(supabase: SupabaseClient) {
       .select('id, seller_id, listing_title, total')
       .maybeSingle();
     if (!updated) continue;
+
+    void ensurePayoutForOrder(supabase, {
+      orderId: String(updated.id),
+      intent: 'eligible',
+    }).catch((err) => {
+      console.warn('[auto-complete] payout ensure failed', err instanceof Error ? err.message : err);
+    });
 
     const buyer = await getProfileById(supabase, String(row.buyer_id));
     void notifyUser({

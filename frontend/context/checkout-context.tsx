@@ -53,8 +53,6 @@ type CheckoutContextValue = {
     >,
   ) => void;
   cancelCheckout: () => Promise<string | null>;
-  /** @deprecated Prefer initPayment + verifyPayment (Flutterwave / simulate). */
-  completePayment: () => Promise<Order | null>;
   initPayment: () => Promise<PaymentInitResult>;
   verifyPayment: (
     txRef: string,
@@ -285,17 +283,6 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
-  const completePayment = useCallback(async () => {
-    const body = checkoutBody();
-    if (!body) return null;
-    const order = await apiFetch<Order>('/checkout/complete', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
-    await applyPaidOrder(order);
-    return order;
-  }, [applyPaidOrder, checkoutBody]);
-
   const getOrder = useCallback(
     (id: string) => orders.find((item) => item.id === id) ?? (lastOrder?.id === id ? lastOrder : undefined),
     [lastOrder, orders],
@@ -409,7 +396,6 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
       startCheckout,
       updateDraft,
       cancelCheckout,
-      completePayment,
       initPayment,
       verifyPayment,
       getPaymentStatus,
@@ -431,7 +417,6 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
       applyPaidOrder,
       cancelCheckout,
       cancelOrder,
-      completePayment,
       confirmReceived,
       draft,
       getOrder,

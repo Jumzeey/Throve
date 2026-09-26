@@ -4,7 +4,6 @@ import { handleSupabaseError, sendError } from '../lib/errors.js';
 import type { DbRow } from '../lib/db-types.js';
 import {
   liveClaimReservedEmail,
-  liveEndedWithClaimEmail,
   liveUpcomingEmail,
 } from '../lib/email/templates/live.js';
 import { notifyFollowersOfLive } from '../lib/follows.js';
@@ -18,6 +17,7 @@ import {
 } from '../lib/live-moderators.js';
 import { mapLiveClaim, mapLiveSession, mapLiveStreamProduct } from '../lib/live-mappers.js';
 import { createSessionMediaCredentials, configuredMediaProvider } from '../lib/live-media.js';
+import { finalizeLiveSessionEnd } from '../lib/live-session-end.js';
 import { ensureIvsChannelForSession, isIvsConfigured } from '../lib/ivs.js';
 import { getProfileById, mapListing, publicPhotoUrl } from '../lib/mappers.js';
 import { notifyUser } from '../lib/notify.js';
@@ -575,84 +575,31 @@ router.post('/sessions/:id/end', requireAuth, async (req, res) => {
   if (sessionError) return handleSupabaseError(res, sessionError);
   if (!session) return sendError(res, 404, 'Session not found');
 
-  const endedAt = session.status === 'ended' && session.ended_at
-    ? String(session.ended_at)
-    : new Date().toISOString();
-  const peakFromClient = parsed.success ? parsed.data.peakViewers : undefined;
-  const peakViewers = Math.max(
-    Number(session.peak_viewers ?? 0),
-    Number(session.viewers ?? 0),
-    peakFromClient ?? 0,
-  );
-
-  if (session.status !== 'ended') {
-    const { error } = await supabase
-      .from('live_sessions')
-      .update({
-        status: 'ended',
-        ended_at: endedAt,
-        peak_viewers: peakViewers,
-        viewers: 0,
-      })
-      .eq('id', req.params.id)
-      .eq('host_id', userId);
-    if (error) return handleSupabaseError(res, error);
-
-    // Claim notifications are best-effort and must not delay the host leaving the studio.
-    const sessionId = String(req.params.id);
-    void (async () => {
-      try {
-        const service = createServiceClient();
-        const { data: openClaims } = await service
-          .from('live_claims')
-          .select('id, user_id, listing_id')
-          .eq('live_session_id', sessionId)
-          .eq('status', 'active')
-          .limit(100);
-        if (!openClaims?.length) return;
-
-        const listingIds = [
-          ...new Set(
-            openClaims
-              .map((claim) => (claim.listing_id ? String(claim.listing_id) : ''))
-              .filter(Boolean),
-          ),
-        ];
-        const titleByListingId = new Map<string, string>();
-        if (listingIds.length) {
-          const { data: listings } = await service
-            .from('listings')
-            .select('id, title')
-            .in('id', listingIds);
-          for (const listing of listings ?? []) {
-            if (listing?.id && listing?.title) {
-              titleByListingId.set(String(listing.id), String(listing.title));
-            }
-          }
-        }
-
-        for (const claim of openClaims) {
-          const listingTitle = claim.listing_id
-            ? titleByListingId.get(String(claim.listing_id)) ?? 'your item'
-            : 'your item';
-          void notifyUser({
-            userId: String(claim.user_id),
-            category: 'live',
-            type: 'live_ended_with_claim',
-            title: 'Live ended — finish checkout',
-            body: listingTitle,
-            deepLink: `live/${sessionId}`,
-            data: { sessionId, claimId: String(claim.id) },
-            email: liveEndedWithClaimEmail({
-              sessionId,
-              listingTitle,
-            }),
-          });
-        }
-      } catch (err) {
-        console.warn('[live/end] claim notify failed', err);
-      }
-    })();
+  const endedReason = parsed.success ? parsed.data.reason ?? 'host' : 'host';
+  let peakViewers: number;
+  let endedAt: string;
+  try {
+    const result = await finalizeLiveSessionEnd({
+      sessionId: String(req.params.id),
+      session: {
+        id: String(session.id),
+        status: String(session.status),
+        ended_at: session.ended_at ? String(session.ended_at) : null,
+        peak_viewers: session.peak_viewers != null ? Number(session.peak_viewers) : null,
+        viewers: session.viewers != null ? Number(session.viewers) : null,
+        products_shown: session.products_shown != null ? Number(session.products_shown) : null,
+        started_at: session.started_at ? String(session.started_at) : null,
+        title: session.title ? String(session.title) : null,
+        host_id: String(session.host_id),
+      },
+      endedReason,
+      peakViewersClient: parsed.success ? parsed.data.peakViewers : undefined,
+      hostId: userId,
+    });
+    peakViewers = result.peakViewers;
+    endedAt = result.endedAt;
+  } catch (err) {
+    return handleSupabaseError(res, err as { message: string });
   }
 
   // Lightweight summary — avoid full product joins on the critical path.
@@ -679,7 +626,7 @@ router.post('/sessions/:id/end', requireAuth, async (req, res) => {
     peakViewers,
     productsShown,
     productsSold,
-    endedReason: parsed.success ? parsed.data.reason ?? 'host' : 'host',
+    endedReason,
   });
 });
 
@@ -1327,6 +1274,7 @@ router.post('/sessions/:id/report', requireAuth, async (req, res) => {
     .object({
       kind: z.enum(['session', 'user', 'listing']),
       listingId: z.string().uuid().optional().nullable(),
+      targetUsername: z.string().trim().min(1).optional().nullable(),
     })
     .safeParse(req.body);
   if (!parsed.success) return sendError(res, 400, 'Invalid report');
@@ -1345,6 +1293,18 @@ router.post('/sessions/:id/report', requireAuth, async (req, res) => {
   if (parsed.data.kind === 'listing' && !listingId) {
     return sendError(res, 400, 'listingId required');
   }
+  if (parsed.data.kind === 'user' && !parsed.data.targetUsername?.trim()) {
+    return sendError(res, 400, 'targetUsername required for user reports');
+  }
+
+  let targetUsername: string | null = null;
+  if (parsed.data.kind === 'user') {
+    targetUsername = parsed.data.targetUsername!.trim().replace(/^@/, '');
+  } else if (parsed.data.kind === 'session') {
+    targetUsername = host?.username ?? null;
+  } else if (parsed.data.targetUsername?.trim()) {
+    targetUsername = parsed.data.targetUsername.trim().replace(/^@/, '');
+  }
 
   const { data, error } = await supabase
     .from('live_reports')
@@ -1352,7 +1312,7 @@ router.post('/sessions/:id/report', requireAuth, async (req, res) => {
       reporter_id: userId,
       live_session_id: req.params.id,
       kind: parsed.data.kind,
-      target_username: host?.username ?? null,
+      target_username: targetUsername,
       listing_id: listingId,
     })
     .select('id')

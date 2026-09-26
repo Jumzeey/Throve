@@ -69,6 +69,7 @@ export function navSectionsFor(role: AdminRole): NavSection[] {
     return [
       { label: 'Operations', routes: ['operations', 'users', 'disputes'] },
       { label: 'Finance', routes: ['orders', 'payments', 'refunds', 'payouts'] },
+      { label: 'Governance', routes: ['audit'] },
     ];
   }
   if (role === 'support') {
@@ -120,6 +121,7 @@ export type ActionKey =
   | 'suspend_user'
   | 'restrict_user'
   | 'ban_user'
+  | 'recommend_ban'
   | 'approve_live_host'
   | 'hide_listing'
   | 'restore_listing'
@@ -130,14 +132,19 @@ export type ActionKey =
   | 'execute_refund'
   | 'execute_payout'
   | 'hold_payout'
+  | 'reconcile_payment'
   | 'hide_review'
   | 'view_sensitive_finance'
-  | 'view_kyc_payout';
+  | 'view_kyc_payout'
+  | 'dismiss_report'
+  | 'close_report'
+  | 'mark_report_action_taken';
 
 const ACTION_ROLES: Record<ActionKey, AdminRole[]> = {
   suspend_user: ['super_admin', 'trust_safety'],
   restrict_user: ['super_admin', 'trust_safety'],
-  ban_user: ['super_admin', 'trust_safety'],
+  ban_user: ['super_admin'],
+  recommend_ban: ['super_admin', 'trust_safety'],
   approve_live_host: ['super_admin', 'trust_safety'],
   hide_listing: ['super_admin', 'trust_safety'],
   restore_listing: ['super_admin', 'trust_safety'],
@@ -148,9 +155,13 @@ const ACTION_ROLES: Record<ActionKey, AdminRole[]> = {
   execute_refund: ['super_admin', 'finance'],
   execute_payout: ['super_admin', 'finance'],
   hold_payout: ['super_admin', 'finance'],
+  reconcile_payment: ['super_admin', 'finance'],
   hide_review: ['super_admin', 'trust_safety'],
   view_sensitive_finance: ['super_admin', 'finance', 'trust_safety'],
   view_kyc_payout: ['super_admin', 'trust_safety', 'finance'],
+  dismiss_report: ['super_admin', 'trust_safety'],
+  close_report: ['super_admin', 'trust_safety'],
+  mark_report_action_taken: ['super_admin', 'trust_safety'],
 };
 
 /** Support sees masked KYC/payout; T&S/Finance/Super see values. */

@@ -25,7 +25,6 @@ type AuthContextValue = {
   /** True when the admin can call the Node API (always, unless misconfigured). */
   apiReady: boolean;
   signInWithPassword: (input: { email: string; password: string }) => Promise<StaffSession>;
-  signInDemo: (input: { email: string; name: string; role: AdminRole }) => void;
   signOut: () => Promise<void>;
 };
 
@@ -148,17 +147,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return next;
   }, []);
 
-  const signInDemo = useCallback((input: { email: string; name: string; role: AdminRole }) => {
-    clearStaffSession();
-    setSession({
-      userId: 'demo',
-      email: input.email.trim().toLowerCase(),
-      name: input.name.trim(),
-      role: input.role,
-      accessToken: '',
-    });
-  }, []);
-
   const signOut = useCallback(async () => {
     const tokens = readTokens();
     try {
@@ -181,10 +169,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       apiReady: Boolean(API_URL),
       signInWithPassword,
-      signInDemo,
       signOut,
     }),
-    [session, loading, signInWithPassword, signInDemo, signOut],
+    [session, loading, signInWithPassword, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

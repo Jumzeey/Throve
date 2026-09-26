@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { ensurePayoutForOrder } from '../lib/admin-payouts.js';
 import { handleSupabaseError, sendError } from '../lib/errors.js';
 import type { DbRow } from '../lib/db-types.js';
 import {
@@ -20,7 +21,7 @@ import { createServiceClient } from '../lib/supabase.js';
 import { type AuthedRequest, requireAuth } from '../middleware/auth.js';
 import { buyerProtectionFee, shippingFee } from '../lib/listing-catalog.js';
 import { autoCompleteAtFrom, mapOrderJson, runAutoCompleteDueOrders } from '../lib/order-map.js';
-import { newOrderId } from '../lib/checkout-fulfill.js';
+import { newOrderId, paymentMode } from '../lib/checkout-fulfill.js';
 
 const router = Router();
 const RESERVE_MS = 10 * 60 * 1000;
@@ -191,6 +192,10 @@ router.post('/start', requireAuth, async (req, res) => {
 });
 
 router.post('/complete', requireAuth, async (req, res) => {
+  // Creates a paid order without a payment; only for local simulate tooling.
+  if (paymentMode() !== 'simulate' || process.env.ALLOW_DIRECT_COMPLETE !== 'true') {
+    return sendError(res, 410, 'Use /checkout/payments/init and /checkout/payments/verify', 'GONE');
+  }
   const { supabase, userId } = req as AuthedRequest;
   const parsed = z
     .object({
@@ -534,6 +539,13 @@ router.post('/orders/:id/confirm-received', requireAuth, async (req, res) => {
   if (error) return handleSupabaseError(res, error);
   if (!data) return sendError(res, 400, 'Order not eligible — confirm after delivery');
 
+  void ensurePayoutForOrder(createServiceClient(), {
+    orderId: String(data.id),
+    intent: 'eligible',
+  }).catch((err) => {
+    console.warn('[checkout] payout ensure failed', err instanceof Error ? err.message : err);
+  });
+
   const buyer = await getProfileById(supabase, userId);
   void notifyUser({
     userId: data.seller_id,
@@ -658,6 +670,16 @@ router.post('/orders/:id/dispute', requireAuth, async (req, res) => {
     .from('orders')
     .update({ payout_status: 'on_hold', auto_complete_at: null })
     .eq('id', order.id);
+
+  void ensurePayoutForOrder(createServiceClient(), {
+    orderId: String(order.id),
+    intent: 'on_hold',
+    disputeId: String(dispute.id),
+    actorId: userId,
+    reason: parsed.data.reason.trim(),
+  }).catch((err) => {
+    console.warn('[checkout] payout hold ensure failed', err instanceof Error ? err.message : err);
+  });
 
   const buyer = await getProfileById(supabase, userId);
   void notifyUser({
@@ -820,10 +842,11 @@ router.get('/reviews/:username', async (req, res) => {
   const reviews = await Promise.all(
     (data ?? []).map(async (row: DbRow) => {
       const buyer = await getProfileById(supabase, row.buyer_id);
+      const hidden = Boolean(row.comment_hidden);
       return {
         buyer: buyer?.username ?? 'unknown',
         rating: row.rating,
-        comment: row.comment,
+        comment: hidden ? '' : String(row.comment ?? ''),
         date: new Date(row.created_at).toLocaleDateString(),
       };
     }),

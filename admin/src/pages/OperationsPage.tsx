@@ -1,6 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Lock } from 'lucide-react';
+import {
+  fetchOpsDashboard,
+  type OpsCase,
+  type OpsDashboard,
+  type OpsQueueTab,
+  type OpsSensitiveAction,
+  type OpsSupportRow,
+} from '@/api/ops';
 import { useAuth } from '@/auth/AuthContext';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
 import { EmptyState } from '@/components/admin/empty-state';
@@ -9,12 +17,15 @@ import { ListWindowFooter } from '@/components/admin/list-window-footer';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { StatCard } from '@/components/admin/stat-card';
 import { StatusBadge } from '@/components/admin/status-badge';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useListWindow } from '@/hooks/use-list-window';
+import { useToast } from '@/hooks/use-toast';
+import { formatNaira } from '@/lib/format';
+import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { formatNaira, mockBadgeCounts, mockOpsCases, mockSensitiveActions } from '@/data/mock';
 
-type QueueTab = 'urgent' | 'all' | 'evidence';
+type QueueTab = OpsQueueTab;
 
 function aiTone(p: 'High' | 'Medium' | 'Normal') {
   if (p === 'High') return 'risk' as const;
@@ -22,45 +33,16 @@ function aiTone(p: 'High' | 'Medium' | 'Normal') {
   return 'neutral' as const;
 }
 
-const SUPPORT_ROWS = [
-  {
-    id: 'DSP-4452',
-    party: '@ada_e · ORD-88044',
-    status: 'Decision made — refund approved',
-    action: 'Contact buyer',
-    href: '/disputes',
-  },
-  {
-    id: 'DSP-4468',
-    party: '@tolu.a · ORD-88190',
-    status: 'Under review by Trust & Safety',
-    action: 'Add note',
-    href: '/disputes',
-  },
-  {
-    id: 'SUP-7712',
-    party: '@chidi_o · ORD-88144',
-    status: 'Awaiting buyer information',
-    action: 'Escalate',
-    href: '/reports',
-  },
-];
-
-const BAN_RECS = [
-  { user: '@resell_ng', by: 'O. Bello (Trust & Safety)' },
-  { user: '@quick_flip', by: 'F. Adeyemi (Trust & Safety)' },
-];
-
 export function OperationsPage() {
   const { session } = useAuth();
-  const role = session?.role ?? 'trust_safety';
-  const isFinance = role === 'finance';
-  const isSupport = role === 'support';
-  const isSuper = role === 'super_admin';
-  const isTs = role === 'trust_safety';
+  const liveMode = Boolean(session?.accessToken);
+  const { banner, show } = useToast();
 
   const [tab, setTab] = useState<QueueTab>('urgent');
   const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(liveMode);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [dashboard, setDashboard] = useState<OpsDashboard | null>(null);
 
   usePageChrome({
     title: 'Operations',
@@ -70,42 +52,90 @@ export function OperationsPage() {
     searchPlaceholder: 'Search users, orders, cases',
   });
 
-  const cases = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return mockOpsCases.filter((c) => {
-      if (c.role === 'finance') return false;
-      if (tab === 'urgent' && !c.urgent) return false;
-      if (tab === 'evidence' && !c.evidenceIncomplete) return false;
-      if (!q) return true;
-      return (
-        c.id.toLowerCase().includes(q) ||
-        c.subject.toLowerCase().includes(q) ||
-        c.detail.toLowerCase().includes(q) ||
-        c.category.toLowerCase().includes(q)
-      );
-    });
-  }, [tab, search]);
+  const loadLive = useCallback(async () => {
+    if (!liveMode) return;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await fetchOpsDashboard(tab, search);
+      setDashboard(data.dashboard);
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : 'Could not load operations';
+      setLoadError(message);
+      show(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [liveMode, tab, search, show]);
+
+  useEffect(() => {
+    if (!liveMode) {
+      setDashboard(null);
+      setLoading(false);
+      setLoadError(null);
+      return;
+    }
+    const handle = window.setTimeout(() => void loadLive(), search ? 250 : 0);
+    return () => window.clearTimeout(handle);
+  }, [liveMode, tab, search, loadLive]);
 
   return (
     <>
       <div className="flex flex-col gap-5">
-        {isFinance ? <FinanceDashboard /> : null}
-        {isSupport ? <SupportDashboard /> : null}
-        {isSuper ? <SuperAdminDashboard /> : null}
-        {isTs ? <TrustSafetyDashboard cases={cases} tab={tab} setTab={setTab} /> : null}
+        {banner}
+        {loadError ? (
+          <Alert className="rounded-[5px] border-risk bg-risk-bg">
+            <AlertTitle className="text-[12px] font-semibold text-risk">Could not load</AlertTitle>
+            <AlertDescription className="text-[12px] text-body">
+              {loadError}{' '}
+              <button type="button" className="font-semibold text-plum underline" onClick={() => void loadLive()}>
+                Retry
+              </button>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        {loading && !dashboard ? (
+          <p className="text-[12.5px] text-body">Loading operations dashboard…</p>
+        ) : null}
+
+        {dashboard?.kind === 'finance' ? <FinanceDashboard data={dashboard} /> : null}
+        {dashboard?.kind === 'support' ? <SupportDashboard data={dashboard} /> : null}
+        {dashboard?.kind === 'super_admin' ? <SuperAdminDashboard data={dashboard} /> : null}
+        {dashboard?.kind === 'trust_safety' ? (
+          <TrustSafetyDashboard cases={dashboard.cases} tab={tab} setTab={setTab} data={dashboard} />
+        ) : null}
       </div>
     </>
   );
 }
 
-function FinanceDashboard() {
+function FinanceDashboard({
+  data,
+}: {
+  data: Extract<OpsDashboard, { kind: 'finance' }>;
+}) {
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard label="Payouts eligible" value={9} hint={`${formatNaira(241300)} total`} accent="clear" />
-        <StatCard label="On Hold" value={23} hint="Awaiting T&S outcome" accent="hold" />
-        <StatCard label="Refunds to execute" value={mockBadgeCounts.refunds} hint="Approved by Trust & Safety" accent="plum" />
-        <StatCard label="Failed operations" value={2} hint="1 payout · 1 refund" accent="risk" />
+        <StatCard
+          label="Payouts eligible"
+          value={data.payoutsEligible}
+          hint={`${formatNaira(data.eligibleAmountKobo)} total`}
+          accent="clear"
+        />
+        <StatCard label="On Hold" value={data.payoutsOnHold} hint="Awaiting T&S outcome" accent="hold" />
+        <StatCard
+          label="Refunds to execute"
+          value={data.refundsToExecute}
+          hint="Approved by Trust & Safety"
+          accent="plum"
+        />
+        <StatCard
+          label="Failed operations"
+          value={data.failedOps}
+          hint="Payouts failed + refunds uncertain"
+          accent="risk"
+        />
       </div>
 
       <div className="rounded-[5px] border border-border-soft bg-panel-elevated px-3.5 py-3">
@@ -137,18 +167,37 @@ function FinanceDashboard() {
   );
 }
 
-function SupportDashboard() {
+function SupportDashboard({
+  data,
+}: {
+  data: Extract<OpsDashboard, { kind: 'support' }>;
+}) {
   const navigate = useNavigate();
   const supportDesktopCols = 'grid-cols-[96px_1fr_150px_120px] items-center py-2.5';
-  const listWindow = useListWindow(SUPPORT_ROWS);
+  const listWindow = useListWindow(data.rows);
 
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard label="My open cases" value={18} hint="6 awaiting my reply" accent="plum" />
-        <StatCard label="Orders needing help" value={11} hint="Delivery queries" accent="hold" />
-        <StatCard label="Escalations open" value={5} hint="With Trust & Safety" accent="gold" />
-        <StatCard label="Decided, needs contact" value={3} hint="Communicate outcome" accent="clear" />
+        <StatCard
+          label="My open cases"
+          value={data.myOpenCases}
+          hint="Assigned reports + open disputes"
+          accent="plum"
+        />
+        <StatCard
+          label="Orders needing help"
+          value={data.ordersNeedingHelp}
+          hint="Recent window"
+          accent="hold"
+        />
+        <StatCard label="Escalations open" value={data.escalations} hint="With Trust & Safety" accent="gold" />
+        <StatCard
+          label="Decided, needs contact"
+          value={data.decidedNeedsContact}
+          hint="Last 7 days"
+          accent="clear"
+        />
       </div>
 
       <div className="overflow-hidden rounded-[5px] border border-border-soft bg-panel">
@@ -165,38 +214,44 @@ function SupportDashboard() {
           }
         />
         <div ref={listWindow.scrollRef} className="max-h-[min(480px,55vh)] overflow-auto">
-          {listWindow.visible.map((row) => (
-            <ExpandableListRow
-              key={row.id}
-              onSelect={() => navigate(row.href)}
-              desktopClassName={supportDesktopCols}
-              primary={
-                <div className="min-w-0">
-                  <div className="text-[11.5px] font-semibold tabular-nums text-plum">{row.id}</div>
-                  <div className="mt-0.5 text-[12px] text-espresso">{row.party}</div>
-                </div>
-              }
-              details={[
-                { label: 'Status', value: row.status },
-                {
-                  label: 'Action',
-                  value: (
-                    <Link to={row.href} className="font-semibold text-plum" onClick={(e) => e.stopPropagation()}>
-                      {row.action}
-                    </Link>
-                  ),
-                },
-              ]}
-            >
-              <span className="text-[11.5px] font-semibold tabular-nums text-plum">{row.id}</span>
-              <span className="text-[12px] text-espresso">{row.party}</span>
-              <span className="text-[11px] text-body">{row.status}</span>
-              <Link to={row.href} className="text-[11px] font-semibold text-plum">
-                {row.action}
-              </Link>
-            </ExpandableListRow>
-          ))}
-          <ListWindowFooter {...listWindow} />
+          {data.rows.length === 0 ? (
+            <EmptyState title="No open support cases" description="Assigned reports and open disputes appear here." />
+          ) : (
+            <>
+              {listWindow.visible.map((row) => (
+                <ExpandableListRow
+                  key={row.id}
+                  onSelect={() => navigate(row.href)}
+                  desktopClassName={supportDesktopCols}
+                  primary={
+                    <div className="min-w-0">
+                      <div className="text-[11.5px] font-semibold tabular-nums text-plum">{row.id}</div>
+                      <div className="mt-0.5 text-[12px] text-espresso">{row.party}</div>
+                    </div>
+                  }
+                  details={[
+                    { label: 'Status', value: row.status },
+                    {
+                      label: 'Action',
+                      value: (
+                        <Link to={row.href} className="font-semibold text-plum" onClick={(e) => e.stopPropagation()}>
+                          {row.action}
+                        </Link>
+                      ),
+                    },
+                  ]}
+                >
+                  <span className="text-[11.5px] font-semibold tabular-nums text-plum">{row.id}</span>
+                  <span className="text-[12px] text-espresso">{row.party}</span>
+                  <span className="text-[11px] text-body">{row.status}</span>
+                  <Link to={row.href} className="text-[11px] font-semibold text-plum">
+                    {row.action}
+                  </Link>
+                </ExpandableListRow>
+              ))}
+              <ListWindowFooter {...listWindow} />
+            </>
+          )}
         </div>
       </div>
 
@@ -211,42 +266,58 @@ function SupportDashboard() {
   );
 }
 
-function SuperAdminDashboard() {
+function SuperAdminDashboard({
+  data,
+}: {
+  data: Extract<OpsDashboard, { kind: 'super_admin' }>;
+}) {
+  const actions: OpsSensitiveAction[] = data.sensitiveActions;
+
   return (
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="rounded-[5px] border border-border-soft bg-panel px-3.5 py-3">
           <div className="text-[9.5px] font-semibold tracking-[0.12em] text-muted-2 uppercase">Disputes</div>
-          <div className="mt-1.5 text-[12px] text-espresso">23 open · 6 urgent</div>
-          <div className="mt-0.5 text-[11px] text-muted">3 decision ready</div>
+          <div className="mt-1.5 text-[12px] text-espresso">
+            {data.disputesOpen} open · {data.disputesUrgent} urgent
+          </div>
+          <div className="mt-0.5 text-[11px] text-muted">{data.disputesDecisionReady} decision ready</div>
         </div>
         <div className="rounded-[5px] border border-border-soft bg-panel px-3.5 py-3">
           <div className="text-[9.5px] font-semibold tracking-[0.12em] text-muted-2 uppercase">Moderation</div>
-          <div className="mt-1.5 text-[12px] text-espresso">14 reports · 2 live</div>
-          <div className="mt-0.5 text-[11px] text-muted">4 flagged users</div>
+          <div className="mt-1.5 text-[12px] text-espresso">
+            {data.reportsOpen} reports · {data.liveIncidents} live
+          </div>
+          <div className="mt-0.5 text-[11px] text-muted">{data.flaggedUsers} flagged users</div>
         </div>
         <div className="rounded-[5px] border border-border-soft bg-panel px-3.5 py-3">
           <div className="text-[9.5px] font-semibold tracking-[0.12em] text-muted-2 uppercase">Finance</div>
-          <div className="mt-1.5 text-[12px] text-espresso">9 eligible · 23 held</div>
-          <div className="mt-0.5 text-[11px] text-muted">2 failed operations</div>
+          <div className="mt-1.5 text-[12px] text-espresso">
+            {data.payoutsEligible} eligible · {data.payoutsOnHold} held
+          </div>
+          <div className="mt-0.5 text-[11px] text-muted">{data.failedOps} failed operations</div>
         </div>
       </div>
 
       <div className="rounded-[5px] border border-border-soft bg-panel px-3.5 py-3">
         <div className="mb-1.5 text-[12px] font-semibold text-espresso">Ban recommendations awaiting Super Admin</div>
-        {BAN_RECS.map((b) => (
-          <div
-            key={b.user}
-            className="flex items-center justify-between border-t border-divider py-2.5 text-[12px]"
-          >
-            <span className="text-espresso">
-              {b.user} · recommended by {b.by}
-            </span>
-            <Link to="/users" className="font-semibold text-plum">
-              Review
-            </Link>
-          </div>
-        ))}
+        {data.banRecommendations.length === 0 ? (
+          <p className="border-t border-divider py-2.5 text-[12px] text-body">No pending recommendations.</p>
+        ) : (
+          data.banRecommendations.map((b) => (
+            <div
+              key={b.user}
+              className="flex items-center justify-between border-t border-divider py-2.5 text-[12px]"
+            >
+              <span className="text-espresso">
+                {b.user} · recommended by {b.by}
+              </span>
+              <Link to="/users" className="font-semibold text-plum">
+                Review
+              </Link>
+            </div>
+          ))
+        )}
       </div>
 
       <p className="text-[11px] leading-relaxed text-muted">
@@ -257,17 +328,29 @@ function SuperAdminDashboard() {
         <div className="rounded-[6px] border border-border-soft bg-panel px-4 py-[15px]">
           <div className="text-[13.5px] font-semibold text-espresso">Recent sensitive actions</div>
           <div className="mt-0.5 mb-3 text-[11px] text-muted">Human-executed · full record in Audit Log</div>
-          {mockSensitiveActions.map((a) => (
-            <div key={a.id} className="flex flex-col gap-0.5 border-t border-divider py-2.5">
-              <div className="text-[12px] text-espresso">{a.title}</div>
-              <div className="text-[11px] text-muted">{a.detail}</div>
-            </div>
-          ))}
+          {actions.length === 0 ? (
+            <p className="text-[12px] text-body">No recent High-sensitivity actions.</p>
+          ) : (
+            actions.map((a) => (
+              <div key={a.id} className="flex flex-col gap-0.5 border-t border-divider py-2.5">
+                <div className="text-[12px] text-espresso">{a.title}</div>
+                <div className="text-[11px] text-muted">{a.detail}</div>
+              </div>
+            ))
+          )}
         </div>
-        <AiAdvisory recommendation="Review ban recommendations first, then open Disputes for DSP-4471.">
-          Cross-role overview: 6 urgent disputes, 14 reports, and 4 refunds awaiting Finance. Super Admin can open any
-          module.
-        </AiAdvisory>
+        {data.aiUnavailable ? (
+          <Alert className="rounded-[5px] border-border-soft bg-[#f3ede6]">
+            <AlertTitle className="text-[12px] text-espresso">AI assistance unavailable</AlertTitle>
+            <AlertDescription className="text-[11.5px] text-body">
+              Review ban recommendations first, then open Disputes and Reports for open queues.
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <AiAdvisory recommendation="Review ban recommendations first, then open Disputes.">
+            Cross-role overview of open disputes, reports, and finance queues.
+          </AiAdvisory>
+        )}
       </div>
     </div>
   );
@@ -277,44 +360,54 @@ function TrustSafetyDashboard({
   cases,
   tab,
   setTab,
+  data,
 }: {
-  cases: typeof mockOpsCases;
+  cases: OpsCase[];
   tab: QueueTab;
   setTab: (t: QueueTab) => void;
+  data: Extract<OpsDashboard, { kind: 'trust_safety' }>;
 }) {
   const navigate = useNavigate();
   const tsDesktopCols = 'grid-cols-[104px_1fr_132px_78px_108px_116px] items-center py-3';
   const listWindow = useListWindow(cases);
+  const assignedPct = useMemo(
+    () => Math.min(100, Math.round((data.assignedToMe / Math.max(data.openDisputes, 1)) * 100)),
+    [data.assignedToMe, data.openDisputes],
+  );
+  const decisionPct = useMemo(
+    () => Math.min(100, Math.round((data.awaitingDecision / Math.max(data.openDisputes, 1)) * 100)),
+    [data.awaitingDecision, data.openDisputes],
+  );
 
   return (
     <>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <StatCard
           label="Urgent disputes"
-          value={6}
-          meta="2 past 48h context"
-          hint="Oldest opened 41h ago"
+          value={data.urgentDisputes}
+          meta="Age ≥24h or decision-ready"
+          hint="Human review required"
           accent="risk"
         />
         <StatCard
           label="Open disputes"
-          value={mockBadgeCounts.disputes}
-          meta="8 evidence incomplete"
-          hint="All have payout On Hold"
+          value={data.openDisputes}
+          meta="Open + under review"
+          hint="Payout holds may apply"
           accent="plum"
         />
         <StatCard
           label="Reports to review"
-          value={mockBadgeCounts.reports}
-          meta="3 linked"
-          hint="5 listings · 9 users"
+          value={data.openReports}
+          meta="Chat + live open"
+          hint="Escalations in priority queue"
           accent="hold"
         />
         <StatCard
           label="Live incidents"
-          value={mockBadgeCounts.live}
-          meta="1 stream active"
-          hint="Reported during broadcast"
+          value={data.liveIncidents}
+          meta="Escalated or reported"
+          hint="Recent session window"
           accent="gold"
         />
       </div>
@@ -327,7 +420,7 @@ function TrustSafetyDashboard({
                 Priority queue · assigned to Trust &amp; Safety
               </div>
               <div className="mt-0.5 text-[11px] text-muted">
-                Ordered by AI-assigned urgency · human review required on every case
+                Ordered by urgency · human review required on every case
               </div>
             </div>
             <div className="flex shrink-0 gap-1.5">
@@ -376,61 +469,61 @@ function TrustSafetyDashboard({
             ) : (
               <>
                 {listWindow.visible.map((c, i) => (
-                <ExpandableListRow
-                  key={c.id}
-                  selected={i === 0}
-                  onSelect={() => navigate(c.href)}
-                  desktopClassName={tsDesktopCols}
-                  primary={
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-[12px] font-semibold tabular-nums text-plum">{c.id}</span>
-                        <StatusBadge tone={aiTone(c.aiPriority)}>AI · {c.aiPriority}</StatusBadge>
+                  <ExpandableListRow
+                    key={`${c.id}-${c.href}-${i}`}
+                    selected={i === 0}
+                    onSelect={() => navigate(c.href)}
+                    desktopClassName={tsDesktopCols}
+                    primary={
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[12px] font-semibold tabular-nums text-plum">{c.id}</span>
+                          <StatusBadge tone={aiTone(c.aiPriority)}>AI · {c.aiPriority}</StatusBadge>
+                        </div>
+                        <div className="mt-1 truncate text-[12.5px] text-espresso">{c.subject}</div>
+                        <div className="mt-0.5 truncate text-[11px] text-muted">{c.detail}</div>
                       </div>
-                      <div className="mt-1 truncate text-[12.5px] text-espresso">{c.subject}</div>
-                      <div className="mt-0.5 truncate text-[11px] text-muted">{c.detail}</div>
-                    </div>
-                  }
-                  details={[
-                    { label: 'Category', value: c.category },
-                    {
-                      label: 'Age',
-                      value: (
-                        <span className={cn('tabular-nums', c.ageUrgent ? 'text-risk' : 'text-body')}>{c.age}</span>
-                      ),
-                    },
-                    {
-                      label: 'Payout',
-                      value:
-                        c.payout === 'On Hold' ? (
-                          <StatusBadge tone="hold">On Hold</StatusBadge>
-                        ) : (
-                          '—'
+                    }
+                    details={[
+                      { label: 'Category', value: c.category },
+                      {
+                        label: 'Age',
+                        value: (
+                          <span className={cn('tabular-nums', c.ageUrgent ? 'text-risk' : 'text-body')}>{c.age}</span>
                         ),
-                    },
-                  ]}
-                >
-                  <span className="text-[12px] font-semibold tabular-nums text-plum">{c.id}</span>
-                  <span className="flex min-w-0 flex-col gap-0.5 pr-2">
-                    <span className="truncate text-[12.5px] text-espresso">{c.subject}</span>
-                    <span className="truncate text-[11px] text-muted">{c.detail}</span>
-                  </span>
-                  <span className="text-[12px] text-body">{c.category}</span>
-                  <span className={cn('text-[12px] tabular-nums', c.ageUrgent ? 'text-risk' : 'text-body')}>
-                    {c.age}
-                  </span>
-                  <span>
-                    <StatusBadge tone={aiTone(c.aiPriority)}>AI · {c.aiPriority}</StatusBadge>
-                  </span>
-                  <span>
-                    {c.payout === 'On Hold' ? (
-                      <StatusBadge tone="hold">On Hold</StatusBadge>
-                    ) : (
-                      <span className="text-[11.5px] text-muted-2">—</span>
-                    )}
-                  </span>
-                </ExpandableListRow>
-              ))}
+                      },
+                      {
+                        label: 'Payout',
+                        value:
+                          c.payout === 'On Hold' ? (
+                            <StatusBadge tone="hold">On Hold</StatusBadge>
+                          ) : (
+                            '—'
+                          ),
+                      },
+                    ]}
+                  >
+                    <span className="text-[12px] font-semibold tabular-nums text-plum">{c.id}</span>
+                    <span className="flex min-w-0 flex-col gap-0.5 pr-2">
+                      <span className="truncate text-[12.5px] text-espresso">{c.subject}</span>
+                      <span className="truncate text-[11px] text-muted">{c.detail}</span>
+                    </span>
+                    <span className="text-[12px] text-body">{c.category}</span>
+                    <span className={cn('text-[12px] tabular-nums', c.ageUrgent ? 'text-risk' : 'text-body')}>
+                      {c.age}
+                    </span>
+                    <span>
+                      <StatusBadge tone={aiTone(c.aiPriority)}>AI · {c.aiPriority}</StatusBadge>
+                    </span>
+                    <span>
+                      {c.payout === 'On Hold' ? (
+                        <StatusBadge tone="hold">On Hold</StatusBadge>
+                      ) : (
+                        <span className="text-[11.5px] text-muted-2">—</span>
+                      )}
+                    </span>
+                  </ExpandableListRow>
+                ))}
                 <ListWindowFooter {...listWindow} />
               </>
             )}
@@ -438,7 +531,7 @@ function TrustSafetyDashboard({
 
           <div className="flex items-center justify-between px-[18px] py-2.5 text-[11px] text-muted">
             <span>
-              Showing {cases.length} of {mockBadgeCounts.disputes} open cases
+              Showing {cases.length} of {data.openDisputes} open disputes (plus reports / live)
             </span>
             <Link to="/disputes" className="font-semibold text-plum">
               Open Disputes module
@@ -447,22 +540,33 @@ function TrustSafetyDashboard({
         </div>
 
         <div className="flex flex-col gap-4">
-          <AiAdvisory recommendation="Review RPT-2210 first, then DSP-4471. Recommended destination: Disputes.">
-            Repeated risk pattern detected across 3 linked reports naming seller{' '}
-            <strong className="font-semibold">@style_by_k</strong>, all referencing the same listing type. Two open
-            disputes share the same delivery courier and destination area.
-          </AiAdvisory>
+          {data.aiUnavailable ? (
+            <Alert className="rounded-[5px] border-border-soft bg-[#f3ede6]">
+              <AlertTitle className="text-[12px] text-espresso">AI assistance unavailable</AlertTitle>
+              <AlertDescription className="text-[11.5px] text-body">
+                Review urgent disputes and incomplete evidence first. Policy classification is not modelled yet.
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <AiAdvisory recommendation="Review urgent disputes first.">
+              Priority queue mixes disputes, reports, and live incidents.
+            </AiAdvisory>
+          )}
 
           <div className="flex flex-1 flex-col rounded-[6px] border border-border-soft bg-panel px-4 py-[15px]">
             <div className="text-[13.5px] font-semibold text-espresso">Recent sensitive actions</div>
             <div className="mt-0.5 mb-3 text-[11px] text-muted">Human-executed · full record in Audit Log</div>
             <div className="flex flex-col">
-              {mockSensitiveActions.map((a) => (
-                <div key={a.id} className="flex flex-col gap-0.5 border-t border-divider py-2.5">
-                  <div className="text-[12px] text-espresso">{a.title}</div>
-                  <div className="text-[11px] text-muted">{a.detail}</div>
-                </div>
-              ))}
+              {data.sensitiveActions.length === 0 ? (
+                <p className="text-[12px] text-body">No recent High-sensitivity actions.</p>
+              ) : (
+                data.sensitiveActions.map((a) => (
+                  <div key={a.id} className="flex flex-col gap-0.5 border-t border-divider py-2.5">
+                    <div className="text-[12px] text-espresso">{a.title}</div>
+                    <div className="text-[11px] text-muted">{a.detail}</div>
+                  </div>
+                ))
+              )}
             </div>
             <div className="mt-auto border-t border-divider pt-3 text-[11px] text-muted-2">
               Finance execution entries are visible to Finance and Super Admin only.
@@ -473,18 +577,18 @@ function TrustSafetyDashboard({
             <div className="mb-3 text-[13.5px] font-semibold text-espresso">My workload</div>
             <div className="flex flex-col gap-2.5">
               <div className="flex items-center justify-between text-[12px]">
-                <span className="text-body">Assigned disputes</span>
-                <span className="font-semibold tabular-nums text-espresso">7</span>
+                <span className="text-body">Reports assigned to me</span>
+                <span className="font-semibold tabular-nums text-espresso">{data.assignedToMe}</span>
               </div>
               <div className="h-[3px] overflow-hidden rounded-sm bg-divider">
-                <span className="block h-[3px] w-[58%] bg-plum" />
+                <span className="block h-[3px] bg-plum" style={{ width: `${assignedPct}%` }} />
               </div>
               <div className="flex items-center justify-between text-[12px]">
-                <span className="text-body">Awaiting my decision</span>
-                <span className="font-semibold tabular-nums text-espresso">3</span>
+                <span className="text-body">Awaiting decision</span>
+                <span className="font-semibold tabular-nums text-espresso">{data.awaitingDecision}</span>
               </div>
               <div className="h-[3px] overflow-hidden rounded-sm bg-divider">
-                <span className="block h-[3px] w-[26%] bg-hold" />
+                <span className="block h-[3px] bg-hold" style={{ width: `${decisionPct}%` }} />
               </div>
             </div>
           </div>

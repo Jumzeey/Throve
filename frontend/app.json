@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "throve",
-    "slug": "Throve-App",
+    "slug": "throve",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -27,17 +27,71 @@
         "LSApplicationQueriesSchemes": [
           "whatsapp",
           "instagram",
+          "instagram-stories",
           "twitter",
           "tg",
           "fb",
-          "sms"
+          "sms",
+          "mailto",
+          "whatsapp",
+          "instagram",
+          "instagram-stories",
+          "twitter",
+          "tg",
+          "fb",
+          "sms",
+          "mailto",
+          "whatsapp",
+          "instagram",
+          "instagram-stories",
+          "fb",
+          "twitter",
+          "tg",
+          "sms",
+          "mailto"
         ]
-      }
+      },
+      "bitcode": false
     },
     "android": {
       "package": "com.throve.app",
       "googleServicesFile": "./google-services.json",
       "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "data": [
+            {
+              "scheme": "throveapp",
+              "host": "auth",
+              "pathPrefix": "/callback"
+            },
+            {
+              "scheme": "throveapp",
+              "host": "inbox"
+            },
+            {
+              "scheme": "throveapp",
+              "host": "checkout"
+            },
+            {
+              "scheme": "throveapp",
+              "host": "product"
+            },
+            {
+              "scheme": "throveapp",
+              "host": "live"
+            },
+            {
+              "scheme": "throveapp",
+              "host": "profile"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        },
         {
           "action": "VIEW",
           "autoVerify": false,
@@ -78,12 +132,32 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
-          "android.permission.POST_NOTIFICATIONS",
-          "android.permission.SCHEDULE_EXACT_ALARM",
-          "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.INTERNET",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.INTERNET",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH"
       ],
       "blockedPermissions": [
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_MEDIA_VIDEO",
         "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
@@ -180,7 +254,16 @@
       "reactCompiler": true
     },
     "extra": {
-      "apiUrl": "https://throve-production.up.railway.app"
+      "apiUrl": "https://throve-production.up.railway.app",
+      "router": {},
+      "eas": {
+        "projectId": "b0504134-8367-4f6c-bd9a-d8960baf919e"
+      }
+    },
+    "owner": "jumzeeydevs-team",
+    "runtimeVersion": "1.0.0",
+    "updates": {
+      "url": "https://u.expo.dev/b0504134-8367-4f6c-bd9a-d8960baf919e"
     }
   }
 }

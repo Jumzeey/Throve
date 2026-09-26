@@ -318,7 +318,7 @@ export default function LiveBroadcastScreen() {
     try {
       await apiFetch(`/live/sessions/${sessionId}/report`, {
         method: 'POST',
-        body: JSON.stringify({ kind: 'user' }),
+        body: JSON.stringify({ kind: 'user', targetUsername: comment.user }),
       });
       setNotice(`Reported @${comment.user}`);
     } catch {

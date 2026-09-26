@@ -1,5 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  fetchAdminPayment,
+  fetchAdminPayments,
+  noteAdminPayment,
+  reconcileAdminPayment,
+  type AdminPaymentCounts,
+  type AdminPaymentDto,
+} from '@/api/payments';
 import { useAuth, roleLabel } from '@/auth/AuthContext';
 import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
@@ -14,48 +22,116 @@ import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { formatNaira, mockPayments, type MockPayment } from '@/data/mock';
 import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
+import { ApiError } from '@/lib/api';
 import { canAct, ROLE_LABELS } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 import { Lock } from 'lucide-react';
+import { formatNaira } from '@/lib/format';
 
 type QueueFilter = 'needs_attention' | 'uncertain' | 'failed' | 'duplicate' | 'successful';
 type ConfirmKind = 'verify' | 'note' | 'escalate' | null;
 
 type PaymentOverride = {
-  history?: MockPayment['history'];
+  history?: AdminPaymentDto['history'];
   flash?: string | null;
-  verification?: MockPayment['verification'];
+  verification?: AdminPaymentDto['verification'];
 };
 
-function statusTone(s: MockPayment['status']): StatusTone {
+function statusTone(s: AdminPaymentDto['status']): StatusTone {
   if (s === 'Successful') return 'clear';
   if (s === 'Status uncertain' || s === 'Initiated') return 'hold';
   if (s === 'Duplicate risk' || s === 'Confirmed failed') return 'risk';
   return 'neutral';
 }
 
+const emptyCounts: AdminPaymentCounts = {
+  needs_attention: 0,
+  uncertain: 0,
+  failed: 0,
+  duplicate: 0,
+  successful: 0,
+};
+
 export function PaymentsPage() {
   const { session } = useAuth();
+  const liveMode = Boolean(session?.accessToken);
   const { banner, show } = useToast();
   const [queue, setQueue] = useState<QueueFilter>('needs_attention');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useBleedSelection(mockPayments[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useBleedSelection(null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
   const [overrides, setOverrides] = useState<Record<string, PaymentOverride>>({});
   const [noteDraft, setNoteDraft] = useState('');
+  const [livePayments, setLivePayments] = useState<AdminPaymentDto[]>([]);
+  const [liveCounts, setLiveCounts] = useState<AdminPaymentCounts>(emptyCounts);
+  const [loading, setLoading] = useState(liveMode);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
 
-  const canFinanceAct = session ? canAct(session.role, 'execute_refund') || session.role === 'finance' || session.role === 'super_admin' : false;
+  const canFinanceAct = session ? canAct(session.role, 'reconcile_payment') : false;
   const isSupport = session?.role === 'support';
   const isTs = session?.role === 'trust_safety';
   const showAmounts = !isSupport && !isTs;
   const canAccessPaymentsNav = canFinanceAct || session?.role === 'super_admin';
 
+  const loadLive = useCallback(async () => {
+    if (!liveMode) return;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await fetchAdminPayments(queue, search);
+      setLivePayments(data.payments);
+      setLiveCounts(data.counts);
+    } catch (err) {
+      setLoadError(err instanceof ApiError ? err.message : 'Could not load payments');
+    } finally {
+      setLoading(false);
+    }
+  }, [liveMode, queue, search]);
+
+  const applyDetail = useCallback((detail: { payment: AdminPaymentDto }) => {
+    setLivePayments((current) => {
+      const idx = current.findIndex((p) => p.id === detail.payment.id);
+      if (idx === -1) return [detail.payment, ...current];
+      const next = [...current];
+      next[idx] = detail.payment;
+      return next;
+    });
+    setOverrides((current) => {
+      const next = { ...current };
+      delete next[detail.payment.id];
+      return next;
+    });
+  }, []);
+
+  const loadSelectedDetail = useCallback(
+    async (id: string) => {
+      if (!liveMode) return;
+      try {
+        const detail = await fetchAdminPayment(id);
+        applyDetail(detail);
+      } catch {
+        // keep list row
+      }
+    },
+    [applyDetail, liveMode],
+  );
+
+  useEffect(() => {
+    if (!liveMode) {
+      setLoading(false);
+      setLoadError(null);
+      setLivePayments([]);
+      return;
+    }
+    void loadLive();
+  }, [liveMode, loadLive]);
+
   const payments = useMemo(
     () =>
-      mockPayments.map((p) => {
+      livePayments.map((p) => {
         const o = overrides[p.id];
         if (!o) return p;
         return {
@@ -64,16 +140,16 @@ export function PaymentsPage() {
           verification: o.verification ?? p.verification,
         };
       }),
-    [overrides],
+    [livePayments, overrides],
   );
 
-  const needsAttentionCount = payments.filter((p) => p.needsAttention).length;
-  const uncertainCount = payments.filter((p) => p.status === 'Status uncertain').length;
-  const duplicateCount = payments.filter((p) => p.status === 'Duplicate risk').length;
+  const needsAttentionCount = liveCounts.needs_attention;
+  const uncertainCount = liveCounts.uncertain;
+  const duplicateCount = liveCounts.duplicate;
 
   usePageChrome({
     title: 'Payments',
-    subtitle: `${needsAttentionCount} needing attention · ${uncertainCount} awaiting verification · ${duplicateCount} possible duplicate`,
+    subtitle: `${needsAttentionCount} needing attention · reconcile reuses provider verify`,
     search,
     onSearchChange: setSearch,
     searchPlaceholder: 'Payment, order or buyer',
@@ -82,23 +158,28 @@ export function PaymentsPage() {
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return payments.filter((p) => {
-      if (queue === 'needs_attention' && !p.needsAttention) return false;
-      if (queue === 'uncertain' && p.status !== 'Status uncertain') return false;
-      if (queue === 'failed' && p.status !== 'Confirmed failed') return false;
-      if (queue === 'duplicate' && p.status !== 'Duplicate risk') return false;
-      if (queue === 'successful' && p.status !== 'Successful') return false;
-      if (!q) return true;
-      return (
+    if (!q) return payments;
+    return payments.filter(
+      (p) =>
         p.id.toLowerCase().includes(q) ||
+        (p.txRef?.toLowerCase().includes(q) ?? false) ||
         p.orderId.toLowerCase().includes(q) ||
         p.buyer.toLowerCase().includes(q) ||
-        p.itemTitle.toLowerCase().includes(q)
-      );
-    });
-  }, [payments, queue, search]);
+        p.itemTitle.toLowerCase().includes(q),
+    );
+  }, [payments, search]);
 
   const listWindow = useListWindow(rows);
+
+  useEffect(() => {
+    if (!liveMode || !selectedId) return;
+    void loadSelectedDetail(selectedId);
+  }, [liveMode, selectedId, loadSelectedDetail]);
+
+  useEffect(() => {
+    if (!liveMode || selectedId) return;
+    if (rows[0]) setSelectedId(rows[0].id);
+  }, [liveMode, rows, selectedId, setSelectedId]);
 
   const selected = payments.find((p) => p.id === selectedId) ?? null;
   const selectedFlash = selected ? overrides[selected.id]?.flash : null;
@@ -113,7 +194,7 @@ export function PaymentsPage() {
     }));
   }
 
-  function appendHistory(payment: MockPayment, entry: MockPayment['history'][number]) {
+  function appendHistory(payment: AdminPaymentDto, entry: AdminPaymentDto['history'][number]) {
     return [...(overrides[payment.id]?.history ?? payment.history), entry];
   }
 
@@ -130,8 +211,45 @@ export function PaymentsPage() {
     return session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
   }
 
+  async function runReconcile(reason: string) {
+    if (!selected || !liveMode) return;
+    setActionBusy(true);
+    try {
+      const detail = await reconcileAdminPayment(selected.id, reason);
+      applyDetail(detail);
+      show(`Verification requested for ${selected.id}`);
+      setConfirm(null);
+      await loadLive();
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Reconcile failed');
+      setConfirm(null);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function runNote(reason: string) {
+    if (!selected || !liveMode) return;
+    setActionBusy(true);
+    try {
+      const detail = await noteAdminPayment(selected.id, reason);
+      applyDetail(detail);
+      show('Internal note saved');
+      setConfirm(null);
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Could not save note');
+      setConfirm(null);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   const paymentDesktopCols =
     'grid-cols-[88px_88px_minmax(0,1.3fr)_72px_64px_64px_72px_120px] items-center gap-x-2 py-3.5';
+
+  const displayId = (p: AdminPaymentDto) => p.txRef ?? p.id;
 
   return (
     <>
@@ -149,18 +267,48 @@ export function PaymentsPage() {
                 value={queue}
                 onChange={(id) => setQueue(id as QueueFilter)}
                 options={[
-                  { id: 'needs_attention', label: 'Needs attention', count: needsAttentionCount },
-                  { id: 'uncertain', label: 'Status uncertain', count: uncertainCount },
-                  { id: 'failed', label: 'Confirmed failed' },
-                  { id: 'duplicate', label: 'Duplicate risk', count: duplicateCount },
-                  { id: 'successful', label: 'Successful' },
+                  {
+                    id: 'needs_attention',
+                    label: 'Needs attention',
+                    count: needsAttentionCount,
+                  },
+                  {
+                    id: 'uncertain',
+                    label: 'Status uncertain',
+                    count: liveMode ? liveCounts.uncertain : uncertainCount,
+                  },
+                  {
+                    id: 'failed',
+                    label: 'Confirmed failed',
+                    count: liveMode ? liveCounts.failed : undefined,
+                  },
+                  {
+                    id: 'duplicate',
+                    label: 'Duplicate risk',
+                    count: duplicateCount,
+                  },
+                  {
+                    id: 'successful',
+                    label: 'Successful',
+                    count: liveMode ? liveCounts.successful : undefined,
+                  },
                 ]}
               />
               {banner}
+              {liveMode && loadError ? (
+                <Alert className="rounded-[5px] border-risk-border bg-risk-bg">
+                  <AlertTitle className="text-[12px] text-risk">Could not load</AlertTitle>
+                  <AlertDescription className="text-[11.5px] text-risk">{loadError}</AlertDescription>
+                </Alert>
+              ) : null}
             </div>
 
             <div ref={listWindow.scrollRef} className="min-h-0 flex-1 overflow-auto">
-              {rows.length === 0 ? (
+              {loading && liveMode ? (
+                <p className="px-4 py-8 text-[12.5px] text-body">Loading payments…</p>
+              ) : null}
+
+              {!loading && !(loadError && liveMode) && rows.length === 0 ? (
                 <EmptyState
                   title="No payments match this filter"
                   description="Try a different filter or search."
@@ -172,7 +320,7 @@ export function PaymentsPage() {
                 />
               ) : null}
 
-              {rows.length > 0 ? (
+              {!loading && !(loadError && liveMode) && rows.length > 0 ? (
                 <>
                   <ExpandableListHeader
                     desktopClassName={paymentDesktopCols}
@@ -200,7 +348,9 @@ export function PaymentsPage() {
                         primary={
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-mono text-[11px] font-semibold text-plum">{p.id}</span>
+                              <span className="font-mono text-[11px] font-semibold text-plum">
+                                {displayId(p)}
+                              </span>
                               <StatusBadge tone={statusTone(p.status)}>{p.status}</StatusBadge>
                             </div>
                             <div className="mt-1 truncate text-[12.5px] font-semibold text-espresso">
@@ -233,10 +383,14 @@ export function PaymentsPage() {
                           },
                         ]}
                       >
-                        <span className="font-mono text-[11px] font-semibold text-plum">{p.id}</span>
+                        <span className="truncate font-mono text-[11px] font-semibold text-plum">
+                          {displayId(p)}
+                        </span>
                         <span className="font-mono text-[11px] text-body">{p.orderId}</span>
                         <div className="min-w-0">
-                          <div className="truncate text-[12.5px] font-semibold text-espresso">@{p.buyer}</div>
+                          <div className="truncate text-[12.5px] font-semibold text-espresso">
+                            @{p.buyer}
+                          </div>
                           <div className="mt-0.5 truncate text-[11.5px] text-body">{p.itemTitle}</div>
                         </div>
                         <span className="text-[12px] tabular-nums text-espresso">
@@ -257,8 +411,8 @@ export function PaymentsPage() {
                   })}
                   <ListWindowFooter {...listWindow} />
                   <p className="border-t border-[#e7dcd2] px-4 py-3 text-[11px] leading-relaxed text-body">
-                    Buyer Protection is 5% of the item price, minimum ₦300 and maximum ₦2,500, and is never calculated
-                    on delivery. Seller deductions do not appear in buyer payment amounts.
+                    Buyer Protection is 5% of the item price, minimum ₦300 and maximum ₦2,500, and is never
+                    calculated on delivery. Seller deductions do not appear in buyer payment amounts.
                   </p>
                 </>
               ) : null}
@@ -275,7 +429,7 @@ export function PaymentsPage() {
               <div className="border-b border-[#e7dcd2] px-5 py-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <CopyableId value={selected.id} variant="display" />
+                    <CopyableId value={displayId(selected)} variant="display" />
                     <div className="mt-2 text-[12.5px] text-body">
                       {selected.orderId} · @{selected.buyer} · {selected.placedLabel}
                     </div>
@@ -321,35 +475,6 @@ export function PaymentsPage() {
                   </Alert>
                 ) : null}
 
-                {isSupport ? (
-                  <div className="space-y-3">
-                    <div className="flex justify-end">
-                      <StatusBadge tone="plum">Customer Support</StatusBadge>
-                    </div>
-                    <div className="rounded-[8px] border border-[#ebe3da] bg-[#fbf7f2] px-3 py-3 text-[12.5px]">
-                      <div className="flex justify-between gap-2">
-                        <span className="text-body">Order</span>
-                        <span className="font-semibold text-espresso">{selected.orderId}</span>
-                      </div>
-                      <div className="mt-2 flex justify-between gap-2">
-                        <span className="text-body">Payment</span>
-                        <span className="font-semibold text-espresso">Being confirmed</span>
-                      </div>
-                      <div className="mt-2 flex justify-between gap-2">
-                        <span className="text-body">Amounts & references</span>
-                        <span className="font-semibold text-body">Restricted</span>
-                      </div>
-                    </div>
-                    <Alert className="rounded-[5px] border-dashed border-[#d4c8bc] bg-transparent">
-                      <AlertTitle className="text-[12px] text-espresso">What to tell the customer</AlertTitle>
-                      <AlertDescription className="text-[11.5px] text-body">
-                        “We’re confirming your payment. Please don’t pay again.” Support cannot manually change
-                        payment statuses.
-                      </AlertDescription>
-                    </Alert>
-                  </div>
-                ) : null}
-
                 {selected.attentionTitle ? (
                   <Alert
                     className={cn(
@@ -392,7 +517,10 @@ export function PaymentsPage() {
                     {selected.relatedAttempts
                       .filter((a) => a.kind === 'payment')
                       .map((a) => (
-                        <div key={a.id} className="flex justify-between gap-2 border-b border-[#f0e7de] py-2 last:border-0">
+                        <div
+                          key={a.id}
+                          className="flex justify-between gap-2 border-b border-[#f0e7de] py-2 last:border-0"
+                        >
                           <span className="font-mono text-[11px] font-semibold text-espresso">
                             {a.id} · {a.at}
                           </span>
@@ -408,7 +536,9 @@ export function PaymentsPage() {
                       ))}
                     <div className="mt-2 flex justify-between gap-2">
                       <span className="text-body">Amounts</span>
-                      <span className="font-semibold text-espresso">Identical · {formatNaira(selected.amount)}</span>
+                      <span className="font-semibold text-espresso">
+                        Identical · {formatNaira(selected.amount)}
+                      </span>
                     </div>
                     <p className="mt-2 text-[11px] leading-relaxed text-body">
                       No automated refunds or deletions. Human verification is required.
@@ -602,7 +732,11 @@ export function PaymentsPage() {
                                   : 'text-espresso',
                             )}
                           >
-                            {a.kind === 'order' ? (a.status.includes('Paid') ? a.status : 'Open order') : a.status}
+                            {a.kind === 'order'
+                              ? a.status.includes('Paid')
+                                ? a.status
+                                : 'Open order'
+                              : a.status}
                           </span>
                         </li>
                       ))}
@@ -638,29 +772,7 @@ export function PaymentsPage() {
                   Actions · {session ? ROLE_LABELS[session.role] : 'Staff'}
                 </div>
 
-                {isSupport ? (
-                  <div className="flex flex-col gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setNoteDraft('');
-                        setConfirm('note');
-                      }}
-                    >
-                      Add internal note
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setConfirm('escalate')}
-                    >
-                      Escalate to Finance
-                    </Button>
-                  </div>
-                ) : canFinanceAct ? (
+                {canFinanceAct ? (
                   <div className="flex flex-col gap-2">
                     {(selected.status === 'Status uncertain' || selected.status === 'Duplicate risk') &&
                     selected.verification === 'Pending' ? (
@@ -668,6 +780,7 @@ export function PaymentsPage() {
                         type="button"
                         variant="outline"
                         className="w-full"
+                        disabled={actionBusy}
                         onClick={() => setConfirm('verify')}
                       >
                         Request provider verification
@@ -678,6 +791,7 @@ export function PaymentsPage() {
                         type="button"
                         variant="outline"
                         size="sm"
+                        disabled={actionBusy}
                         onClick={() => {
                           setNoteDraft('');
                           setConfirm('note');
@@ -702,8 +816,8 @@ export function PaymentsPage() {
                 )}
 
                 <p className="mt-2.5 text-[11px] leading-relaxed text-body">
-                  There is no mark-as-paid, mark-as-failed, retry-charge or balance-adjustment control for any role.
-                  Payment status is set by verified transaction information only.
+                  There is no mark-as-paid, mark-as-failed, retry-charge or balance-adjustment control for any
+                  role. Payment status is set by verified transaction information only.
                 </p>
               </div>
             </>
@@ -714,33 +828,21 @@ export function PaymentsPage() {
       {confirm === 'verify' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
-          title={`Request verification for ${selected.id}`}
-          description="Requests a provider status check. This does not mark the payment paid or failed."
-          confirmLabel="Request verification"
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
+          title={`Request verification for ${displayId(selected)}`}
+          description="Requests a provider status check. This does not invent a paid result without the provider."
+          confirmLabel={actionBusy ? 'Requesting…' : 'Request verification'}
           reasonLabel="Context (recorded)"
           reasonPlaceholder="Why verification is needed…"
           defaultReason="No confirmed provider result yet — verify before advising buyer."
           metaRows={[
-            { label: 'Payment', value: selected.id },
+            { label: 'Payment', value: displayId(selected) },
             { label: 'Order', value: selected.orderId },
             { label: 'Environment', value: selected.environment },
             { label: 'Audit entry', value: 'Created on confirm' },
           ]}
           onConfirm={(reason) => {
-            const stamp = stampNow();
-            const by = actorLabel();
-            patchPayment(selected.id, {
-              flash: `Verification requested · ${stamp}`,
-              history: appendHistory(selected, {
-                id: `vf-${Date.now()}`,
-                at: stamp,
-                title: 'Verification requested',
-                detail: `${by} · no status change · ${reason}`,
-              }),
-            });
-            show(`Verification requested for ${selected.id}`);
-            setConfirm(null);
+            void runReconcile(reason);
           }}
         />
       ) : null}
@@ -748,57 +850,19 @@ export function PaymentsPage() {
       {confirm === 'note' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title="Add internal note"
-          description={`Note stays on ${selected.id}. Buyers never see this.`}
-          confirmLabel="Save note"
+          description={`Note stays on ${displayId(selected)}. Buyers never see this.`}
+          confirmLabel={actionBusy ? 'Saving…' : 'Save note'}
           reasonLabel="Internal note"
           reasonPlaceholder="Context for the next reviewer…"
           defaultReason={noteDraft}
           onConfirm={(reason) => {
-            const stamp = stampNow();
-            const by = actorLabel();
-            patchPayment(selected.id, {
-              flash: `Note saved · ${stamp}`,
-              history: appendHistory(selected, {
-                id: `nt-${Date.now()}`,
-                at: stamp,
-                title: 'Internal note added',
-                detail: `${by} · ${reason}`,
-              }),
-            });
-            show('Internal note saved');
-            setConfirm(null);
+            void runNote(reason);
           }}
         />
       ) : null}
 
-      {confirm === 'escalate' && selected ? (
-        <ConfirmActionDialog
-          open
-          onOpenChange={(o) => !o && setConfirm(null)}
-          title="Escalate to Finance"
-          description={`Route ${selected.id} / ${selected.orderId} to Finance for provider verification.`}
-          confirmLabel="Escalate"
-          reasonLabel="Escalation reason"
-          reasonPlaceholder="Why Finance needs to review this…"
-          onConfirm={(reason) => {
-            const stamp = stampNow();
-            const by = actorLabel();
-            patchPayment(selected.id, {
-              flash: `Escalated to Finance · ${stamp}`,
-              history: appendHistory(selected, {
-                id: `es-${Date.now()}`,
-                at: stamp,
-                title: 'Escalated to Finance',
-                detail: `${by} · ${reason}`,
-              }),
-            });
-            show('Escalated to Finance');
-            setConfirm(null);
-          }}
-        />
-      ) : null}
     </>
   );
 }

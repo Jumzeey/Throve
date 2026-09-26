@@ -1,7 +1,16 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth, roleLabel } from '@/auth/AuthContext';
 import { useBleedSelection } from '@/hooks/use-bleed-selection';
+import {
+  escalateAdminReview,
+  fetchAdminReview,
+  fetchAdminReviews,
+  hideAdminReview,
+  noteAdminReview,
+  type AdminReviewCounts,
+  type AdminReviewDto,
+} from '@/api/reviews';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
 import { EmptyState } from '@/components/admin/empty-state';
@@ -14,24 +23,34 @@ import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { mockReviews, type MockReview } from '@/data/mock';
 import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
+import { ApiError } from '@/lib/api';
 import { canAct, ROLE_LABELS } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 import { Check, Lock, Star, X } from 'lucide-react';
 
 type QueueFilter = 'flagged' | 'all' | 'reported' | 'eligibility' | 'with_comment';
-type ConfirmKind = 'hide' | 'note' | null;
+type ConfirmKind = 'hide' | 'note' | 'escalate' | null;
 
 type ReviewOverride = {
-  status?: MockReview['status'];
-  history?: MockReview['history'];
+  status?: AdminReviewDto['status'];
+  history?: AdminReviewDto['history'];
   flash?: string | null;
   commentHidden?: boolean;
+  flagged?: boolean;
+  reported?: boolean;
 };
 
-function statusTone(s: MockReview['status']): StatusTone {
+const emptyCounts: AdminReviewCounts = {
+  all: 0,
+  flagged: 0,
+  reported: 0,
+  eligibility: 0,
+  with_comment: 0,
+};
+
+function statusTone(s: AdminReviewDto['status']): StatusTone {
   if (s === 'Valid') return 'clear';
   if (s === 'Under review') return 'neutral';
   if (s === 'Eligibility anomaly') return 'risk';
@@ -40,7 +59,7 @@ function statusTone(s: MockReview['status']): StatusTone {
   return 'neutral';
 }
 
-function linkedPath(kind: MockReview['linkedRecords'][number]['kind']) {
+function linkedPath(kind: AdminReviewDto['linkedRecords'][number]['kind']) {
   if (kind === 'report') return '/reports';
   if (kind === 'order') return '/orders';
   return '/users';
@@ -64,34 +83,101 @@ function Stars({ rating }: { rating: number }) {
 
 export function ReviewsPage() {
   const { session } = useAuth();
+  const liveMode = Boolean(session?.accessToken);
   const { banner, show } = useToast();
   const [queue, setQueue] = useState<QueueFilter>('flagged');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useBleedSelection(mockReviews[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useBleedSelection(null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
   const [overrides, setOverrides] = useState<Record<string, ReviewOverride>>({});
   const [noteDraft, setNoteDraft] = useState('');
+  const [loading, setLoading] = useState(liveMode);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [liveReviews, setLiveReviews] = useState<AdminReviewDto[]>([]);
+  const [liveCounts, setLiveCounts] = useState<AdminReviewCounts>(emptyCounts);
+  const [flashById, setFlashById] = useState<Record<string, string>>({});
 
   const canHide = session ? canAct(session.role, 'hide_review') : false;
   const isSupport = session?.role === 'support';
   const isFinance = session?.role === 'finance';
 
-  const reviews = useMemo(
+  const loadLive = useCallback(async () => {
+    if (!liveMode) return;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await fetchAdminReviews(queue, search);
+      setLiveReviews(data.reviews);
+      setLiveCounts(data.counts);
+    } catch (err) {
+      setLoadError(err instanceof ApiError ? err.message : 'Could not load reviews');
+    } finally {
+      setLoading(false);
+    }
+  }, [liveMode, queue, search]);
+
+  const applyDetail = useCallback((detail: { review: AdminReviewDto }) => {
+    setLiveReviews((current) => {
+      const idx = current.findIndex((r) => r.id === detail.review.id);
+      if (idx === -1) return [detail.review, ...current];
+      const next = [...current];
+      next[idx] = detail.review;
+      return next;
+    });
+  }, []);
+
+  const loadSelectedDetail = useCallback(
+    async (id: string) => {
+      if (!liveMode) return;
+      try {
+        const detail = await fetchAdminReview(id);
+        applyDetail(detail);
+      } catch {
+        // keep list row
+      }
+    },
+    [applyDetail, liveMode],
+  );
+
+  useEffect(() => {
+    if (!liveMode) {
+      setLoading(false);
+      setLoadError(null);
+      setLiveReviews([]);
+      return;
+    }
+    void loadLive();
+  }, [liveMode, loadLive]);
+
+  useEffect(() => {
+    if (!liveMode || !selectedId) return;
+    void loadSelectedDetail(selectedId);
+  }, [liveMode, selectedId, loadSelectedDetail]);
+
+  useEffect(() => {
+    if (!liveMode || selectedId) return;
+    if (liveReviews[0]) setSelectedId(liveReviews[0].id);
+  }, [liveMode, liveReviews, selectedId, setSelectedId]);
+
+  const reviews: AdminReviewDto[] = useMemo(
     () =>
-      mockReviews.map((r) => {
+      liveReviews.map((r) => {
         const o = overrides[r.id];
         if (!o) return r;
         return {
           ...r,
           status: o.status ?? r.status,
           history: o.history ?? r.history,
+          flagged: o.flagged ?? r.flagged,
+          reported: o.reported ?? r.reported,
           comment: o.commentHidden ? '[comment hidden after human review]' : r.comment,
         };
       }),
-    [overrides],
+    [liveReviews, overrides],
   );
 
-  const flaggedCount = reviews.filter((r) => r.flagged || r.status === 'Under review').length;
+  const flaggedCount = liveCounts.flagged;
 
   usePageChrome({
     title: 'Reviews',
@@ -103,6 +189,19 @@ export function ReviewsPage() {
   });
 
   const rows = useMemo(() => {
+    if (liveMode) {
+      const q = search.trim().toLowerCase();
+      if (!q) return reviews;
+      return reviews.filter(
+        (r) =>
+          r.id.toLowerCase().includes(q) ||
+          r.orderId.toLowerCase().includes(q) ||
+          r.seller.toLowerCase().includes(q) ||
+          r.buyer.toLowerCase().includes(q) ||
+          r.comment.toLowerCase().includes(q) ||
+          r.commentSummary.toLowerCase().includes(q),
+      );
+    }
     const q = search.trim().toLowerCase();
     return reviews.filter((r) => {
       if (queue === 'flagged' && !(r.flagged || r.status === 'Under review')) return false;
@@ -119,14 +218,19 @@ export function ReviewsPage() {
         r.commentSummary.toLowerCase().includes(q)
       );
     });
-  }, [reviews, queue, search]);
+  }, [reviews, queue, search, liveMode]);
 
   const listWindow = useListWindow(rows);
 
   const selected = reviews.find((r) => r.id === selectedId) ?? null;
-  const selectedFlash = selected ? overrides[selected.id]?.flash : null;
+  const selectedFlash = selected
+    ? liveMode
+      ? flashById[selected.id]
+      : overrides[selected.id]?.flash
+    : null;
   const commentAlreadyHidden =
-    selected?.status === 'Hidden' || Boolean(selected && overrides[selected.id]?.commentHidden);
+    selected?.status === 'Hidden' ||
+    Boolean(selected && overrides[selected.id]?.commentHidden);
 
   function patchReview(id: string, next: ReviewOverride) {
     setOverrides((current) => ({
@@ -135,7 +239,7 @@ export function ReviewsPage() {
     }));
   }
 
-  function appendHistory(review: MockReview, entry: MockReview['history'][number]): MockReview['history'] {
+  function appendHistory(review: AdminReviewDto, entry: AdminReviewDto['history'][number]): AdminReviewDto['history'] {
     return [entry, ...(overrides[review.id]?.history ?? review.history)];
   }
 
@@ -152,8 +256,52 @@ export function ReviewsPage() {
     return session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
   }
 
+  async function runLiveAction(kind: ConfirmKind, reason: string) {
+    if (!selected || !kind || !liveMode) return;
+    setActionBusy(true);
+    try {
+      let detail: { review: AdminReviewDto };
+      if (kind === 'note') detail = await noteAdminReview(selected.id, reason);
+      else if (kind === 'escalate') detail = await escalateAdminReview(selected.id, reason);
+      else if (kind === 'hide') detail = await hideAdminReview(selected.id, reason);
+      else return;
+
+      applyDetail(detail);
+      setFlashById((c) => ({ ...c, [selected.id]: `${selected.id} updated` }));
+      show(
+        kind === 'hide'
+          ? `Hidden comment on ${selected.id}`
+          : kind === 'escalate'
+            ? 'Escalated for review'
+            : 'Internal note saved',
+      );
+      setConfirm(null);
+      await loadLive();
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Action failed');
+      setConfirm(null);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   const reviewDesktopCols =
     'grid-cols-[84px_minmax(0,0.85fr)_minmax(0,0.85fr)_88px_56px_minmax(0,1.4fr)_118px] items-center py-3';
+
+  const chipCounts = liveMode
+    ? {
+        flagged: liveCounts.flagged,
+        reported: liveCounts.reported,
+        eligibility: liveCounts.eligibility,
+        with_comment: liveCounts.with_comment,
+      }
+    : {
+        flagged: flaggedCount,
+        reported: undefined as number | undefined,
+        eligibility: undefined as number | undefined,
+        with_comment: undefined as number | undefined,
+      };
 
   return (
     <>
@@ -171,18 +319,32 @@ export function ReviewsPage() {
                 value={queue}
                 onChange={(id) => setQueue(id as QueueFilter)}
                 options={[
-                  { id: 'flagged', label: 'Flagged', count: flaggedCount },
-                  { id: 'all', label: 'All reviews' },
-                  { id: 'reported', label: 'Reported' },
-                  { id: 'eligibility', label: 'Eligibility anomaly' },
-                  { id: 'with_comment', label: 'With comment' },
+                  { id: 'flagged', label: 'Flagged', count: chipCounts.flagged },
+                  { id: 'all', label: 'All reviews', count: liveMode ? liveCounts.all : undefined },
+                  { id: 'reported', label: 'Reported', count: chipCounts.reported },
+                  { id: 'eligibility', label: 'Eligibility anomaly', count: chipCounts.eligibility },
+                  { id: 'with_comment', label: 'With comment', count: chipCounts.with_comment },
                 ]}
               />
               {banner}
+              {liveMode && loadError ? (
+                <Alert className="rounded-[5px] border-risk bg-risk-bg">
+                  <AlertTitle className="text-[12px] font-semibold text-risk">Could not load</AlertTitle>
+                  <AlertDescription className="text-[12px] text-body">
+                    {loadError}{' '}
+                    <button type="button" className="font-semibold text-plum underline" onClick={() => void loadLive()}>
+                      Retry
+                    </button>
+                  </AlertDescription>
+                </Alert>
+              ) : null}
             </div>
 
             <div ref={listWindow.scrollRef} className="min-h-0 flex-1 overflow-auto">
-              {rows.length === 0 ? (
+              {liveMode && loading && rows.length === 0 ? (
+                <div className="px-4 py-10 text-center text-[12.5px] text-body">Loading reviews…</div>
+              ) : null}
+              {!loading && rows.length === 0 ? (
                 <EmptyState
                   title={queue === 'flagged' ? 'No flagged reviews' : 'No reviews match'}
                   description="Try a different filter or search."
@@ -282,14 +444,23 @@ export function ReviewsPage() {
                   </Alert>
                 ) : null}
 
-                <AiAdvisory
-                  kind="SUMMARY"
-                  recommendation={
-                    selected.aiNextStep ? <>Recommended: {selected.aiNextStep}</> : undefined
-                  }
-                >
-                  {selected.aiSummary}
-                </AiAdvisory>
+                {selected.aiUnavailable ? (
+                  <Alert className="rounded-[5px] border-border-soft bg-[#f3ede6]">
+                    <AlertTitle className="text-[12px] text-espresso">AI assistance unavailable</AlertTitle>
+                    <AlertDescription className="text-[11.5px] text-body">
+                      Review eligibility and comment text manually. Policy classification is not modelled yet.
+                    </AlertDescription>
+                  </Alert>
+                ) : (
+                  <AiAdvisory
+                    kind="SUMMARY"
+                    recommendation={
+                      selected.aiNextStep ? <>Recommended: {selected.aiNextStep}</> : undefined
+                    }
+                  >
+                    {selected.aiSummary}
+                  </AiAdvisory>
+                )}
 
                 <div>
                   <div className="mb-2 flex items-center justify-between gap-2">
@@ -428,6 +599,7 @@ export function ReviewsPage() {
                     type="button"
                     variant="outline"
                     size="sm"
+                    disabled={actionBusy}
                     onClick={() => {
                       setNoteDraft('');
                       setConfirm('note');
@@ -435,12 +607,24 @@ export function ReviewsPage() {
                   >
                     Add internal note
                   </Button>
+                  {!selected.reported && selected.status !== 'Hidden' ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={actionBusy}
+                      onClick={() => setConfirm('escalate')}
+                    >
+                      Escalate for review
+                    </Button>
+                  ) : null}
                   {canHide && selected.hasComment && !commentAlreadyHidden ? (
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
                       className="border-risk text-risk hover:bg-risk-bg"
+                      disabled={actionBusy}
                       onClick={() => setConfirm('hide')}
                     >
                       Hide comment — rating retained
@@ -448,7 +632,7 @@ export function ReviewsPage() {
                   ) : null}
                   {selected.reported ? (
                     <Button type="button" variant="outline" size="sm" asChild>
-                      <Link to="/reports">Open report</Link>
+                      <Link to="/reports">Open reports</Link>
                     </Button>
                   ) : null}
                 </div>
@@ -480,6 +664,10 @@ export function ReviewsPage() {
             { label: 'Audit entry', value: 'Created on confirm' },
           ]}
           onConfirm={(reason) => {
+            if (liveMode) {
+              void runLiveAction('hide', reason);
+              return;
+            }
             const stamp = stampNow();
             const by = actorLabel();
             patchReview(selected.id, {
@@ -499,6 +687,44 @@ export function ReviewsPage() {
         />
       ) : null}
 
+      {confirm === 'escalate' && selected ? (
+        <ConfirmActionDialog
+          open
+          onOpenChange={(o) => !o && setConfirm(null)}
+          title={`Escalate ${selected.id}?`}
+          description="Marks this review Under review for Trust & Safety follow-up. Buyers and sellers are not notified."
+          confirmLabel="Escalate"
+          reasonLabel="Reason (required, recorded)"
+          reasonPlaceholder="Why this needs deeper review…"
+          metaRows={[
+            { label: 'Affected object', value: `Review ${selected.id}` },
+            { label: 'Audit entry', value: 'Created on confirm' },
+          ]}
+          onConfirm={(reason) => {
+            if (liveMode) {
+              void runLiveAction('escalate', reason);
+              return;
+            }
+            const stamp = stampNow();
+            const by = actorLabel();
+            patchReview(selected.id, {
+              status: 'Under review',
+              flagged: true,
+              reported: true,
+              flash: `Escalated · ${by} · ${stamp}`,
+              history: appendHistory(selected, {
+                id: `esc-${Date.now()}`,
+                at: stamp,
+                title: 'Escalated for review',
+                detail: `${by} · ${reason}`,
+              }),
+            });
+            show('Escalated for review');
+            setConfirm(null);
+          }}
+        />
+      ) : null}
+
       {confirm === 'note' && selected ? (
         <ConfirmActionDialog
           open
@@ -510,6 +736,10 @@ export function ReviewsPage() {
           reasonPlaceholder="Context for the next reviewer…"
           defaultReason={noteDraft}
           onConfirm={(reason) => {
+            if (liveMode) {
+              void runLiveAction('note', reason);
+              return;
+            }
             const stamp = stampNow();
             const by = actorLabel();
             patchReview(selected.id, {

@@ -15,5 +15,5 @@ local.properties
 # Bundle artifacts
 *.jsbundle
 
-# Firebase (keep out of VCS; copy locally for builds)
-app/google-services.json
+# Firebase config: ignored via frontend/.gitignore for VCS;
+# frontend/.easignore intentionally includes it for EAS Build uploads.

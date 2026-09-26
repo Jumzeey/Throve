@@ -15,13 +15,26 @@ import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { formatNaira, mockListings, type MockListing } from '@/data/mock';
+import {
+  approveAdminListing,
+  escalateAdminListing,
+  fetchAdminListing,
+  fetchAdminListings,
+  hideAdminListing,
+  noteAdminListing,
+  rejectAdminListing,
+  restoreAdminListing,
+  type AdminListingDto,
+  type AdminListingHistoryEvent,
+} from '@/api/listings';
 import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
-import { ApiError, apiFetch } from '@/lib/api';
+import { ApiError } from '@/lib/api';
 import { canAct, ROLE_LABELS } from '@/lib/roles';
 import { Lock } from 'lucide-react';
+import { formatNaira } from '@/lib/format';
+import type { AdminListing } from '@/types/domain';
 
 type ConfirmKind = 'remove' | 'restore' | 'note' | 'escalate' | 'approve' | 'reject' | null;
 type QueueFilter =
@@ -35,27 +48,7 @@ type QueueFilter =
   | 'hidden'
   | 'removed';
 
-type ApiListing = {
-  id: string;
-  title: string;
-  brand: string;
-  price: number;
-  size: string;
-  condition: string;
-  department: string;
-  category: string;
-  seller: string;
-  status: string;
-  description: string;
-  shipping: string;
-  photoCount: number;
-  photoUrls: string[];
-  createdAt: string;
-  colour?: string;
-  reviewSubmittedAt?: string;
-  reviewReason?: string;
-  reviewedAt?: string;
-};
+type ApiListing = AdminListingDto;
 
 type ListingRow = {
   id: string;
@@ -77,14 +70,13 @@ type ListingRow = {
   reviewReason?: string;
   reviewSubmittedAt?: string;
   flagged?: boolean;
-  linkedReports: MockListing['linkedReports'];
-  history: MockListing['history'];
+  linkedReports: AdminListing['linkedReports'];
+  history: AdminListing['history'];
   aiSignal?: string;
   aiPriority?: string;
   aiNextStep?: string;
   reservedOrderId?: string | null;
   activeOrderId?: string | null;
-  source: 'live' | 'mock';
 };
 
 type ListingOverride = {
@@ -131,7 +123,17 @@ function isFlagged(l: ListingRow) {
   return Boolean(l.flagged) || l.reports > 0;
 }
 
-function fromApi(item: ApiListing): ListingRow {
+function mapApiHistory(events: AdminListingHistoryEvent[]): ListingRow['history'] {
+  return events.map((event) => ({
+    id: event.id,
+    at: event.at,
+    title: event.title,
+    detail: event.detail,
+    tone: event.tone,
+  }));
+}
+
+function fromApi(item: ApiListing, history?: AdminListingHistoryEvent[]): ListingRow {
   return {
     id: item.id,
     title: item.title,
@@ -152,48 +154,19 @@ function fromApi(item: ApiListing): ListingRow {
     reviewReason: item.reviewReason,
     reviewSubmittedAt: item.reviewSubmittedAt,
     linkedReports: [],
-    history: item.reviewSubmittedAt
-      ? [
-          {
-            id: `sub-${item.id}`,
-            at: item.reviewSubmittedAt.slice(0, 16).replace('T', ' '),
-            title: 'Submitted for review',
-            detail: 'Seller published · awaiting Trust & Safety',
-          },
-        ]
-      : [],
+    history: history
+      ? mapApiHistory(history)
+      : item.reviewSubmittedAt
+        ? [
+            {
+              id: `sub-${item.id}`,
+              at: item.reviewSubmittedAt.slice(0, 16).replace('T', ' '),
+              title: 'Submitted for review',
+              detail: 'Seller published · awaiting Trust & Safety',
+            },
+          ]
+        : [],
     aiSignal: 'Pre-publish review queue. Check photos, category fit, prohibited items, and pricing signals.',
-    source: 'live',
-  };
-}
-
-function fromMock(item: MockListing): ListingRow {
-  return {
-    id: item.id,
-    title: item.title,
-    seller: item.seller,
-    department: item.department,
-    category: item.category,
-    condition: item.condition,
-    price: item.price,
-    status: item.status,
-    statusLabel: item.status,
-    reports: item.reports,
-    photoCount: item.photoCount,
-    photoUrls: [],
-    description: item.description,
-    brand: item.brand,
-    colour: item.colour,
-    updatedAt: item.updatedAt,
-    flagged: item.flagged,
-    linkedReports: item.linkedReports,
-    history: item.history,
-    aiSignal: item.aiSignal,
-    aiPriority: item.aiPriority,
-    aiNextStep: item.aiNextStep,
-    reservedOrderId: item.reservedOrderId,
-    activeOrderId: item.activeOrderId,
-    source: 'mock',
   };
 }
 
@@ -225,11 +198,8 @@ export function ListingsPage() {
     setLoadError(null);
     try {
       const queue = filter === 'reported' ? 'all' : filter;
-      const q = encodeURIComponent(search.trim());
-      const data = await apiFetch<{ listings: ApiListing[]; counts: { pending: number } }>(
-        `/admin/listings?queue=${queue}&q=${q}`,
-      );
-      const mapped = data.listings.map(fromApi);
+      const data = await fetchAdminListings(queue, search);
+      const mapped = data.listings.map((item) => fromApi(item));
       setLiveListings(mapped);
       setPendingCount(data.counts.pending ?? 0);
     } catch (err) {
@@ -240,34 +210,58 @@ export function ListingsPage() {
     }
   }, [liveMode, filter, search]);
 
+  const applyDetail = useCallback(
+    (detail: { listing: ApiListing; history: AdminListingHistoryEvent[] }, flash?: string | null) => {
+      const row = fromApi(detail.listing, detail.history);
+      setLiveListings((current) => {
+        const idx = current.findIndex((item) => item.id === row.id);
+        if (idx === -1) return [row, ...current];
+        const next = [...current];
+        next[idx] = row;
+        return next;
+      });
+      setOverrides((current) => {
+        const prev = current[row.id];
+        return {
+          ...current,
+          [row.id]: {
+            flash: flash === undefined ? prev?.flash ?? null : flash,
+            history: row.history,
+            status: row.status,
+          },
+        };
+      });
+    },
+    [],
+  );
+
+  const loadSelectedDetail = useCallback(
+    async (id: string) => {
+      if (!liveMode) return;
+      try {
+        const detail = await fetchAdminListing(id);
+        applyDetail(detail);
+      } catch {
+        // Keep list row; history stays synthetic until retry
+      }
+    },
+    [applyDetail, liveMode],
+  );
+
   useEffect(() => {
     if (!liveMode) {
       setLoading(false);
       setLoadError(null);
       setLiveListings([]);
-      setPendingCount(reportedCount(mockListings.map(fromMock)));
+      setPendingCount(0);
       return;
     }
     void loadLive();
   }, [liveMode, loadLive]);
 
-  const baseListings = useMemo(() => {
-    if (liveMode) return liveListings;
-    return mockListings.map(fromMock);
-  }, [liveMode, liveListings]);
-
-  const flagged = useMemo(() => baseListings.filter(isFlagged).length, [baseListings]);
-
-  const demoPendingCount = useMemo(
-    () => baseListings.filter((l) => isPendingStatus(l.status)).length,
-    [baseListings],
-  );
-
   usePageChrome({
     title: 'Listings',
-    subtitle: liveMode
-      ? `${pendingCount} pending review · moderation: Trust & Safety and Super Admin`
-      : `${demoPendingCount} pending review · ${flagged} flagged · demo data`,
+    subtitle: `${pendingCount} pending review · moderation: Trust & Safety and Super Admin`,
     search,
     onSearchChange: setSearch,
     searchPlaceholder: 'Listing, title or seller',
@@ -276,7 +270,7 @@ export function ListingsPage() {
 
   const listings = useMemo(
     () =>
-      baseListings.map((l) => {
+      liveListings.map((l) => {
         const o = overrides[l.id];
         if (!o) return l;
         return {
@@ -286,36 +280,13 @@ export function ListingsPage() {
           history: o.history ?? l.history,
         };
       }),
-    [baseListings, overrides],
+    [liveListings, overrides],
   );
 
   const rows = useMemo(() => {
-    if (liveMode) {
-      // Server already filtered by queue; apply local dept + reported only when needed
-      const q = search.trim().toLowerCase();
-      return listings.filter((l) => {
-        if (filter === 'reported' && !isFlagged(l)) return false;
-        if (dept !== 'all' && l.department.toLowerCase() !== dept) return false;
-        if (!q) return true;
-        return (
-          l.title.toLowerCase().includes(q) ||
-          l.id.toLowerCase().includes(q) ||
-          l.seller.toLowerCase().includes(q)
-        );
-      });
-    }
     const q = search.trim().toLowerCase();
     return listings.filter((l) => {
-      if (filter === 'pending' && l.status.toLowerCase() !== 'pending_review' && l.status !== 'Pending review') {
-        return false;
-      }
-      if (filter === 'rejected' && l.status.toLowerCase() !== 'rejected') return false;
       if (filter === 'reported' && !isFlagged(l)) return false;
-      if (filter === 'available' && l.status !== 'Available' && l.status !== 'available') return false;
-      if (filter === 'reserved' && l.status !== 'Reserved' && l.status !== 'reserved') return false;
-      if (filter === 'sold' && l.status !== 'Sold' && l.status !== 'sold') return false;
-      if (filter === 'hidden' && l.status !== 'Hidden' && l.status !== 'hidden') return false;
-      if (filter === 'removed' && l.status !== 'Removed' && l.status !== 'removed') return false;
       if (dept !== 'all' && l.department.toLowerCase() !== dept) return false;
       if (!q) return true;
       return (
@@ -324,9 +295,9 @@ export function ListingsPage() {
         l.seller.toLowerCase().includes(q)
       );
     });
-  }, [listings, filter, dept, search, liveMode]);
+  }, [listings, filter, dept, search]);
 
-  const [selectedId, setSelectedId] = useBleedSelection(rows[0]?.id ?? listings[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useBleedSelection(null);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -334,6 +305,11 @@ export function ListingsPage() {
       setSelectedId(null);
     }
   }, [listings, selectedId, setSelectedId]);
+
+  useEffect(() => {
+    if (!liveMode || !selectedId) return;
+    void loadSelectedDetail(selectedId);
+  }, [liveMode, selectedId, loadSelectedDetail]);
 
   const listWindow = useListWindow(rows);
 
@@ -347,95 +323,70 @@ export function ListingsPage() {
     selected?.status === 'hidden';
   const isPending = selected ? isPendingStatus(selected.status) : false;
 
-  function patchListing(id: string, next: ListingOverride) {
-    setOverrides((current) => ({
-      ...current,
-      [id]: { ...current[id], ...next },
-    }));
-  }
-
-  function appendHistory(listing: ListingRow, entry: ListingRow['history'][number]): ListingRow['history'] {
-    return [entry, ...(overrides[listing.id]?.history ?? listing.history)];
-  }
-
-  async function approveSelected() {
+  async function runLiveAction(
+    action: () => Promise<{ listing: ApiListing; history: AdminListingHistoryEvent[] }>,
+    successMessage: string,
+    flash?: string | null,
+  ) {
     if (!selected) return;
-    if (liveMode) {
-      setActionBusy(true);
-      try {
-        await apiFetch(`/admin/listings/${selected.id}/approve`, { method: 'POST', body: '{}' });
-        show(`Approved ${selected.id} · now live`);
-        setConfirm(null);
-        await loadLive();
-      } catch (err) {
-        show(err instanceof Error ? err.message : 'Approve failed');
-      } finally {
-        setActionBusy(false);
-      }
-      return;
+    setActionBusy(true);
+    try {
+      const detail = await action();
+      applyDetail(detail, flash ?? null);
+      show(successMessage);
+      setConfirm(null);
+      await loadLive();
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Action failed');
+    } finally {
+      setActionBusy(false);
     }
-    const stamp = new Date().toLocaleString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-    const by = session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
-    patchListing(selected.id, {
-      status: 'Available',
-      flash: `${selected.id} approved · now live`,
-      history: appendHistory(selected, {
-        id: `ap-${Date.now()}`,
-        at: stamp,
-        title: 'Approved · now live',
-        detail: by,
-        tone: 'ok',
-      }),
-    });
-    show(`Approved ${selected.id}`);
-    setConfirm(null);
+  }
+
+  async function approveSelected(reason?: string) {
+    if (!selected || !liveMode) return;
+    const note = reason?.trim();
+    await runLiveAction(
+      () => approveAdminListing(selected.id, note && note.length >= 3 ? note : undefined),
+      `Approved ${selected.id} · now live`,
+      `${selected.id} approved · now live`,
+    );
   }
 
   async function rejectSelected(reason: string) {
-    if (!selected) return;
-    if (liveMode) {
-      setActionBusy(true);
-      try {
-        await apiFetch(`/admin/listings/${selected.id}/reject`, {
-          method: 'POST',
-          body: JSON.stringify({ reason }),
-        });
-        show(`Rejected ${selected.id}`);
-        setConfirm(null);
-        await loadLive();
-      } catch (err) {
-        show(err instanceof Error ? err.message : 'Reject failed');
-      } finally {
-        setActionBusy(false);
-      }
-      return;
-    }
-    const stamp = new Date().toLocaleString('en-GB', {
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-    const by = session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
-    patchListing(selected.id, {
-      status: 'Rejected',
-      flash: `${selected.id} rejected · needs changes`,
-      history: appendHistory(selected, {
-        id: `rj-${Date.now()}`,
-        at: stamp,
-        title: 'Rejected · needs changes',
-        detail: `${by} · ${reason}`,
-        tone: 'danger',
-      }),
-    });
-    show(`Rejected ${selected.id}`);
-    setConfirm(null);
+    if (!selected || !liveMode) return;
+    await runLiveAction(() => rejectAdminListing(selected.id, reason), `Rejected ${selected.id}`);
   }
+
+  async function hideSelected(reason: string) {
+    if (!selected || !liveMode) return;
+    await runLiveAction(
+      () => hideAdminListing(selected.id, reason),
+      `Removed ${selected.id}`,
+      `${selected.id} hidden from marketplace`,
+    );
+  }
+
+  async function restoreSelected(reason: string) {
+    if (!selected || !liveMode) return;
+    await runLiveAction(() => restoreAdminListing(selected.id, reason), `Restored ${selected.id}`, null);
+  }
+
+  async function noteSelected(reason: string) {
+    if (!selected || !liveMode) return;
+    await runLiveAction(() => noteAdminListing(selected.id, reason), 'Internal note saved');
+  }
+
+  async function escalateSelected(reason: string) {
+    if (!selected || !liveMode) return;
+    await runLiveAction(
+      () => escalateAdminListing(selected.id, reason),
+      isSupport ? 'Escalated to T&S' : 'Seller risk escalated',
+    );
+  }
+
+  const flaggedCount = useMemo(() => listings.filter(isFlagged).length, [listings]);
 
   const listingDesktopCols =
     'grid-cols-[88px_minmax(0,1.4fr)_100px_118px_88px_108px_64px] items-center py-3';
@@ -452,18 +403,13 @@ export function ListingsPage() {
         list={
           <>
             <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
-              {liveMode ? (
-                <div className="text-[10px] font-semibold tracking-[0.12em] text-muted-2 uppercase">
-                  Live queue · staff API
-                </div>
-              ) : null}
               <FilterChips
                 value={filter}
                 onChange={(id) => setFilter(id as QueueFilter)}
                 options={[
-                  { id: 'pending', label: 'Pending review', count: liveMode ? pendingCount : demoPendingCount },
+                  { id: 'pending', label: 'Pending review', count: pendingCount },
                   { id: 'rejected', label: 'Rejected' },
-                  { id: 'reported', label: 'Reported', count: flagged || undefined },
+                  { id: 'reported', label: 'Reported', count: flaggedCount || undefined },
                   { id: 'all', label: 'All listings' },
                   { id: 'available', label: 'Available' },
                   { id: 'reserved', label: 'Reserved' },
@@ -845,6 +791,7 @@ export function ListingsPage() {
                     type="button"
                     variant="outline"
                     size="sm"
+                    disabled={actionBusy}
                     onClick={() => {
                       setNoteDraft('');
                       setConfirm('note');
@@ -856,27 +803,30 @@ export function ListingsPage() {
                     type="button"
                     variant="outline"
                     size="sm"
+                    disabled={actionBusy}
                     onClick={() => setConfirm('escalate')}
                   >
                     {isSupport ? 'Escalate to T&S' : 'Escalate seller risk'}
                   </Button>
                 </div>
 
-                {!liveMode && canModerate && !isRemovedOrHidden ? (
+                {canModerate && !isRemovedOrHidden ? (
                   <Button
                     type="button"
                     variant="outline"
                     className="mt-2.5 w-full border-risk text-risk hover:bg-risk-bg"
+                    disabled={actionBusy}
                     onClick={() => setConfirm('remove')}
                   >
                     Remove from public marketplace — requires reason
                   </Button>
                 ) : null}
 
-                {!liveMode && canRestore && isRemovedOrHidden ? (
+                {canRestore && isRemovedOrHidden ? (
                   <Button
                     type="button"
                     className="mt-2.5 w-full"
+                    disabled={actionBusy}
                     onClick={() => setConfirm('restore')}
                   >
                     Restore visibility — requires reason
@@ -898,8 +848,8 @@ export function ListingsPage() {
           reasonLabel="Optional note (not required)"
           reasonPlaceholder="Optional internal context…"
           reasonOptional
-          onConfirm={() => {
-            void approveSelected();
+          onConfirm={(reason) => {
+            void approveSelected(reason);
           }}
         />
       ) : null}
@@ -923,38 +873,19 @@ export function ListingsPage() {
       {confirm === 'remove' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title={`Remove ${selected.id} from the public marketplace?`}
           description={
             hasActiveTx
               ? `Warning: reserved order may be in progress. Visibility change does not cancel the order.`
               : 'The listing will no longer be publicly available.'
           }
-          confirmLabel="Remove from marketplace"
+          confirmLabel={actionBusy ? 'Removing…' : 'Remove from marketplace'}
           destructive
           reasonLabel="Reason (required, recorded)"
           reasonPlaceholder="Potential prohibited item — pending Trust & Safety assessment"
           onConfirm={(reason) => {
-            const stamp = new Date().toLocaleString('en-GB', {
-              day: '2-digit',
-              month: 'short',
-              hour: '2-digit',
-              minute: '2-digit',
-            });
-            const by = session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
-            patchListing(selected.id, {
-              status: 'Removed',
-              flash: `${selected.id} · ${by} · ${stamp}`,
-              history: appendHistory(selected, {
-                id: `rm-${Date.now()}`,
-                at: stamp,
-                title: 'Removed from public marketplace',
-                detail: `${by} · ${reason}`,
-                tone: 'danger',
-              }),
-            });
-            show(`Removed ${selected.id}`);
-            setConfirm(null);
+            void hideSelected(reason);
           }}
         />
       ) : null}
@@ -962,33 +893,14 @@ export function ListingsPage() {
       {confirm === 'restore' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title={`Restore visibility for ${selected.id}?`}
           description="The listing will become publicly available again."
-          confirmLabel="Restore visibility"
+          confirmLabel={actionBusy ? 'Restoring…' : 'Restore visibility'}
           reasonLabel="Reason (required, recorded)"
           reasonPlaceholder="Seller provided provenance / reports dismissed…"
           onConfirm={(reason) => {
-            const stamp = new Date().toLocaleString('en-GB', {
-              day: '2-digit',
-              month: 'short',
-              hour: '2-digit',
-              minute: '2-digit',
-            });
-            const by = session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
-            patchListing(selected.id, {
-              status: 'Available',
-              flash: null,
-              history: appendHistory(selected, {
-                id: `rs-${Date.now()}`,
-                at: stamp,
-                title: 'Visibility restored',
-                detail: `${by} · ${reason}`,
-                tone: 'ok',
-              }),
-            });
-            show(`Restored ${selected.id}`);
-            setConfirm(null);
+            void restoreSelected(reason);
           }}
         />
       ) : null}
@@ -996,31 +908,15 @@ export function ListingsPage() {
       {confirm === 'note' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title="Add internal note"
           description={`Note stays on ${selected.id}. Sellers and buyers never see this.`}
-          confirmLabel="Save note"
+          confirmLabel={actionBusy ? 'Saving…' : 'Save note'}
           reasonLabel="Internal note"
           reasonPlaceholder="Context for the next reviewer…"
           defaultReason={noteDraft}
           onConfirm={(reason) => {
-            const stamp = new Date().toLocaleString('en-GB', {
-              day: '2-digit',
-              month: 'short',
-              hour: '2-digit',
-              minute: '2-digit',
-            });
-            const by = session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
-            patchListing(selected.id, {
-              history: appendHistory(selected, {
-                id: `nt-${Date.now()}`,
-                at: stamp,
-                title: 'Internal note added',
-                detail: `${by} · ${reason}`,
-              }),
-            });
-            show('Internal note saved');
-            setConfirm(null);
+            void noteSelected(reason);
           }}
         />
       ) : null}
@@ -1028,35 +924,18 @@ export function ListingsPage() {
       {confirm === 'escalate' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title={isSupport ? 'Escalate to Trust & Safety' : 'Escalate seller risk'}
           description={
             isSupport
               ? `Route ${selected.id} / @${selected.seller} to Trust & Safety for enforcement review.`
               : `Raise seller risk on @${selected.seller} linked to ${selected.id}.`
           }
-          confirmLabel="Escalate"
+          confirmLabel={actionBusy ? 'Escalating…' : 'Escalate'}
           reasonLabel="Escalation reason"
           reasonPlaceholder="Why this needs elevated review…"
           onConfirm={(reason) => {
-            const stamp = new Date().toLocaleString('en-GB', {
-              day: '2-digit',
-              month: 'short',
-              hour: '2-digit',
-              minute: '2-digit',
-            });
-            const by = session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
-            patchListing(selected.id, {
-              history: appendHistory(selected, {
-                id: `es-${Date.now()}`,
-                at: stamp,
-                title: isSupport ? 'Escalated to Trust & Safety' : 'Seller risk escalated',
-                detail: `${by} · ${reason}`,
-                tone: 'warn',
-              }),
-            });
-            show(isSupport ? 'Escalated to T&S' : 'Seller risk escalated');
-            setConfirm(null);
+            void escalateSelected(reason);
           }}
         />
       ) : null}

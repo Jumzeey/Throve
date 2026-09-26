@@ -1,9 +1,19 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  executeAdminRefund,
+  fetchAdminRefund,
+  fetchAdminRefunds,
+  noteAdminRefund,
+  retryAdminRefund,
+  verifyAdminRefund,
+  type AdminRefundDto,
+} from '@/api/refunds';
 import { useAuth, roleLabel } from '@/auth/AuthContext';
 import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
-import { EmptyState } from '@/components/admin/empty-state';
+import { EmptyState, ErrorState } from '@/components/admin/empty-state';
+import { ListSkeleton } from '@/components/admin/loading-skeleton';
 import { ExpandableListHeader, ExpandableListRow } from '@/components/admin/expandable-list-row';
 import { FilterChips } from '@/components/admin/filter-chips';
 import { CopyableId } from '@/components/admin/copyable-id';
@@ -13,33 +23,34 @@ import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { formatNaira, mockRefunds, type MockRefund } from '@/data/mock';
 import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
+import { ApiError } from '@/lib/api';
 import { canAct, ROLE_LABELS } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 import { Lock } from 'lucide-react';
+import { formatNaira } from '@/lib/format';
 
 type QueueFilter = 'awaiting' | 'ready' | 'processing' | 'completed' | 'uncertain';
 type ConfirmKind = 'execute' | 'note' | 'retry' | null;
 type DeliveryChoice = 'include' | 'exclude' | null;
 
 type RefundOverride = {
-  status?: MockRefund['status'];
-  deliveryStatus?: MockRefund['deliveryStatus'];
+  status?: AdminRefundDto['status'];
+  deliveryStatus?: AdminRefundDto['deliveryStatus'];
   totalFinal?: number;
   totalLabel?: string;
-  history?: MockRefund['history'];
+  history?: AdminRefundDto['history'];
   flash?: string | null;
   processingAt?: string;
   processingBy?: string;
   completedAt?: string;
   completedBy?: string;
   needsDeliveryDetermination?: boolean;
-  recordStale?: MockRefund['recordStale'] | null;
+  recordStale?: AdminRefundDto['recordStale'] | null;
 };
 
-function statusTone(s: MockRefund['status']): StatusTone {
+function statusTone(s: AdminRefundDto['status']): StatusTone {
   if (s === 'Awaiting Finance') return 'hold';
   if (s === 'Ready to execute') return 'plum';
   if (s === 'Processing') return 'neutral';
@@ -48,7 +59,7 @@ function statusTone(s: MockRefund['status']): StatusTone {
   return 'neutral';
 }
 
-function linkedPath(kind: MockRefund['linkedRecords'][number]['kind']) {
+function linkedPath(kind: AdminRefundDto['linkedRecords'][number]['kind']) {
   if (kind === 'dispute') return '/disputes';
   if (kind === 'order') return '/orders';
   if (kind === 'payment') return '/payments';
@@ -57,24 +68,88 @@ function linkedPath(kind: MockRefund['linkedRecords'][number]['kind']) {
 
 export function RefundsPage() {
   const { session } = useAuth();
+  const liveMode = Boolean(session?.accessToken);
   const { banner, show } = useToast();
   const [queue, setQueue] = useState<QueueFilter>('awaiting');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useBleedSelection(mockRefunds[0]?.id ?? null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
   const [overrides, setOverrides] = useState<Record<string, RefundOverride>>({});
   const [deliveryChoice, setDeliveryChoice] = useState<Record<string, DeliveryChoice>>({});
   const [noteDraft, setNoteDraft] = useState('');
   const [alreadyDone, setAlreadyDone] = useState<string | null>(null);
+  const [liveRefunds, setLiveRefunds] = useState<AdminRefundDto[]>([]);
+  const [liveCounts, setLiveCounts] = useState({
+    awaiting: 0,
+    ready: 0,
+    processing: 0,
+    completed: 0,
+    uncertain: 0,
+  });
+  const [loading, setLoading] = useState(liveMode);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
 
   const canExecute = session ? canAct(session.role, 'execute_refund') : false;
   const isTs = session?.role === 'trust_safety';
   const isSupport = session?.role === 'support';
   const showAmounts = !isTs && !isSupport;
 
+  const loadLive = useCallback(async () => {
+    if (!liveMode) return;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await fetchAdminRefunds(queue, search);
+      setLiveRefunds(data.refunds);
+      setLiveCounts(data.counts);
+    } catch (err) {
+      setLoadError(err instanceof ApiError ? err.message : 'Could not load refunds');
+    } finally {
+      setLoading(false);
+    }
+  }, [liveMode, queue, search]);
+
+  const applyDetail = useCallback((detail: { refund: AdminRefundDto }) => {
+    setLiveRefunds((current) => {
+      const idx = current.findIndex((r) => r.id === detail.refund.id);
+      if (idx === -1) return [detail.refund, ...current];
+      const next = [...current];
+      next[idx] = detail.refund;
+      return next;
+    });
+    setOverrides((current) => {
+      const next = { ...current };
+      delete next[detail.refund.id];
+      return next;
+    });
+  }, []);
+
+  const loadSelectedDetail = useCallback(
+    async (id: string) => {
+      if (!liveMode) return;
+      try {
+        const detail = await fetchAdminRefund(id);
+        applyDetail(detail);
+      } catch {
+        // keep list row
+      }
+    },
+    [applyDetail, liveMode],
+  );
+
+  useEffect(() => {
+    if (!liveMode) {
+      setLoading(false);
+      setLoadError(null);
+      setLiveRefunds([]);
+      return;
+    }
+    void loadLive();
+  }, [liveMode, loadLive]);
+
   const refunds = useMemo(
     () =>
-      mockRefunds.map((r) => {
+      liveRefunds.map((r) => {
         const o = overrides[r.id];
         if (!o) return r;
         return {
@@ -93,14 +168,14 @@ export function RefundsPage() {
           recordStale: o.recordStale === null ? undefined : (o.recordStale ?? r.recordStale),
         };
       }),
-    [overrides],
+    [liveRefunds, overrides],
   );
 
-  const awaitingCount = refunds.filter((r) => r.status === 'Awaiting Finance').length;
+  const awaitingCount = liveCounts.awaiting;
 
   usePageChrome({
     title: 'Refunds',
-    subtitle: `${awaitingCount} awaiting Finance · origins: approved cancellation or buyer-win dispute only`,
+    subtitle: `${awaitingCount} awaiting Finance · ledger execute (no live PSP yet)`,
     search,
     onSearchChange: setSearch,
     searchPlaceholder: 'Refund, order or buyer',
@@ -109,21 +184,27 @@ export function RefundsPage() {
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return refunds.filter((r) => {
-      if (queue === 'awaiting' && r.status !== 'Awaiting Finance') return false;
-      if (queue === 'ready' && r.status !== 'Ready to execute') return false;
-      if (queue === 'processing' && r.status !== 'Processing') return false;
-      if (queue === 'completed' && r.status !== 'Completed') return false;
-      if (queue === 'uncertain' && r.status !== 'Status uncertain' && r.status !== 'Failed') return false;
-      if (!q) return true;
-      return (
+    if (!q) return refunds;
+    return refunds.filter(
+      (r) =>
         r.id.toLowerCase().includes(q) ||
         r.orderId.toLowerCase().includes(q) ||
         r.buyer.toLowerCase().includes(q) ||
-        r.origin.toLowerCase().includes(q)
-      );
-    });
-  }, [refunds, queue, search]);
+        r.origin.toLowerCase().includes(q),
+    );
+  }, [refunds, search]);
+
+  const [selectedId, setSelectedId] = useBleedSelection(null);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    if (!refunds.some((r) => r.id === selectedId)) setSelectedId(null);
+  }, [refunds, selectedId, setSelectedId]);
+
+  useEffect(() => {
+    if (!liveMode || !selectedId) return;
+    void loadSelectedDetail(selectedId);
+  }, [liveMode, selectedId, loadSelectedDetail]);
 
   const listWindow = useListWindow(rows);
 
@@ -159,7 +240,7 @@ export function RefundsPage() {
     }));
   }
 
-  function appendHistory(refund: MockRefund, entry: MockRefund['history'][number]) {
+  function appendHistory(refund: AdminRefundDto, entry: AdminRefundDto['history'][number]) {
     return [...(overrides[refund.id]?.history ?? refund.history), entry];
   }
 
@@ -176,7 +257,7 @@ export function RefundsPage() {
     return session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
   }
 
-  function displayTotal(r: MockRefund) {
+  function displayTotal(r: AdminRefundDto) {
     if (r.totalLabel === 'Not final' && (!deliveryChoice[r.id] || r.deliveryStatus === 'in_question')) {
       if (deliveryChoice[r.id]) {
         const t =
@@ -188,7 +269,67 @@ export function RefundsPage() {
       return 'Not final';
     }
     if (r.totalFinal != null) return formatNaira(r.totalFinal);
+    if (r.totalLabel === 'Not final') return 'Not final';
+    const n = Number(r.totalLabel);
+    if (!Number.isNaN(n) && r.totalLabel.trim() !== '') return formatNaira(n);
     return r.totalLabel;
+  }
+
+  async function executeSelected(reason: string, isRetry: boolean) {
+    if (!selected || !liveMode) return;
+    setActionBusy(true);
+    try {
+      const includeDelivery =
+        choice === 'include' ? true : choice === 'exclude' ? false : undefined;
+      const detail = isRetry
+        ? await retryAdminRefund(selected.id, reason)
+        : await executeAdminRefund(selected.id, reason, includeDelivery);
+      applyDetail(detail);
+      show(isRetry ? `Retry submitted · ${selected.id}` : `Processing ${selected.id}`);
+      setConfirm(null);
+      await loadLive();
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Execute failed';
+      if (message.toLowerCase().includes('already')) {
+        setAlreadyDone(message);
+      }
+      show(message);
+      setConfirm(null);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function noteSelected(reason: string) {
+    if (!selected || !liveMode) return;
+    setActionBusy(true);
+    try {
+      const detail = await noteAdminRefund(selected.id, reason);
+      applyDetail(detail);
+      show('Internal note saved');
+      setConfirm(null);
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Note failed');
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function verifySelected() {
+    if (!selected || !liveMode) return;
+    setActionBusy(true);
+    try {
+      const detail = await verifyAdminRefund(selected.id);
+      applyDetail(detail);
+      show(`Provider status checked · ${selected.id}`);
+      await loadLive();
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Verify failed');
+    } finally {
+      setActionBusy(false);
+    }
   }
 
   const refundDesktopCols =
@@ -206,22 +347,51 @@ export function RefundsPage() {
         list={
           <>
             <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
+              {liveMode ? (
+                <div className="text-[10px] font-semibold tracking-[0.12em] text-muted-2 uppercase">
+                  Live queue · staff API
+                </div>
+              ) : null}
               <FilterChips
                 value={queue}
                 onChange={(id) => setQueue(id as QueueFilter)}
                 options={[
                   { id: 'awaiting', label: 'Awaiting Finance', count: awaitingCount },
-                  { id: 'ready', label: 'Ready to execute' },
-                  { id: 'processing', label: 'Processing' },
-                  { id: 'completed', label: 'Completed' },
-                  { id: 'uncertain', label: 'Failed · uncertain' },
+                  {
+                    id: 'ready',
+                    label: 'Ready to execute',
+                    count: liveMode ? liveCounts.ready : undefined,
+                  },
+                  {
+                    id: 'processing',
+                    label: 'Processing',
+                    count: liveMode ? liveCounts.processing : undefined,
+                  },
+                  {
+                    id: 'completed',
+                    label: 'Completed',
+                    count: liveMode ? liveCounts.completed : undefined,
+                  },
+                  {
+                    id: 'uncertain',
+                    label: 'Failed · uncertain',
+                    count: liveMode ? liveCounts.uncertain : undefined,
+                  },
                 ]}
               />
               {banner}
             </div>
 
             <div ref={listWindow.scrollRef} className="min-h-0 flex-1 overflow-auto">
-              {rows.length === 0 ? (
+              {loading ? <ListSkeleton rows={6} /> : null}
+              {!loading && loadError && liveMode ? (
+                <ErrorState
+                  title="Could not load refunds"
+                  description={loadError}
+                  onRetry={() => void loadLive()}
+                />
+              ) : null}
+              {!loading && !(loadError && liveMode) && rows.length === 0 ? (
                 <EmptyState
                   title="No refunds match this filter"
                   description="Origins are approved cancellations or buyer-win disputes only."
@@ -233,7 +403,7 @@ export function RefundsPage() {
                 />
               ) : null}
 
-              {rows.length > 0 ? (
+              {!loading && !(loadError && liveMode) && rows.length > 0 ? (
                 <>
                   <ExpandableListHeader
                     desktopClassName={refundDesktopCols}
@@ -630,7 +800,14 @@ export function RefundsPage() {
                       </AlertDescription>
                     </Alert>
                     <div className="flex flex-col gap-2">
-                      <Button type="button" variant="outline" size="sm" className="border-risk text-risk">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="border-risk text-risk"
+                        disabled={actionBusy || !liveMode}
+                        onClick={() => void verifySelected()}
+                      >
                         Verify provider status
                       </Button>
                       <Button type="button" variant="outline" size="sm" disabled>
@@ -724,7 +901,7 @@ export function RefundsPage() {
                       <Button
                         type="button"
                         className="w-full bg-[#3e2b36] text-panel hover:bg-[#2f2029]"
-                        disabled={selected.status === 'Processing'}
+                        disabled={selected.status === 'Processing' || actionBusy}
                         onClick={() => {
                           if (selected.status === 'Completed') {
                             setAlreadyDone(
@@ -791,10 +968,10 @@ export function RefundsPage() {
       {(confirm === 'execute' || confirm === 'retry') && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title={`Execute refund ${selected.id}?`}
           description="Review the buyer, order and components before execution. The amount is derived by policy and cannot be edited."
-          confirmLabel="Execute refund"
+          confirmLabel={actionBusy ? 'Executing…' : 'Execute refund'}
           destructive
           requireCheckbox
           checkboxLabel="I have reviewed the buyer, order and components for this refund."
@@ -818,43 +995,16 @@ export function RefundsPage() {
                       : 0),
               ),
             },
-            { label: 'Environment', value: 'Test — simulated refund, no real money' },
+            {
+              label: 'Environment',
+              value: liveMode
+                ? 'Ledger execute — simulate auto-completes; no live PSP refund yet'
+                : 'Test — simulated refund, no real money',
+            },
             { label: 'Audit entry', value: 'Created on confirm' },
           ]}
           onConfirm={(reason) => {
-            if (selected.status === 'Completed') {
-              setAlreadyDone(
-                `Executed by ${selected.completedBy} at ${selected.completedAt}. Your submission was not applied — no second refund was sent.`,
-              );
-              setConfirm(null);
-              return;
-            }
-            const stamp = stampNow();
-            const by = actorLabel();
-            const total =
-              derivedTotal ||
-              selected.totalFinal ||
-              selected.itemAmount +
-                (selected.buyerProtectionIncluded ? selected.buyerProtectionAmount : 0) +
-                (choice === 'include' || selected.deliveryStatus === 'include' ? selected.deliveryAmount : 0);
-            patchRefund(selected.id, {
-              status: 'Processing',
-              deliveryStatus: choice ?? selected.deliveryStatus,
-              needsDeliveryDetermination: false,
-              totalFinal: total,
-              totalLabel: formatNaira(total),
-              processingAt: stamp,
-              processingBy: session?.name ?? 'Staff',
-              flash: `Submitted to provider · ${stamp}`,
-              history: appendHistory(selected, {
-                id: `ex-${Date.now()}`,
-                at: stamp,
-                title: confirm === 'retry' ? 'Retry submitted to provider' : 'Submitted to the provider',
-                detail: `${by} · ${reason}`,
-              }),
-            });
-            show(`Processing ${selected.id}`);
-            setConfirm(null);
+            void executeSelected(reason, confirm === 'retry');
           }}
         />
       ) : null}
@@ -862,27 +1012,15 @@ export function RefundsPage() {
       {confirm === 'note' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title="Add internal note"
           description={`Note stays on ${selected.id}. Buyers never see this.`}
-          confirmLabel="Save note"
+          confirmLabel={actionBusy ? 'Saving…' : 'Save note'}
           reasonLabel="Internal note"
           reasonPlaceholder="Context for the next reviewer…"
           defaultReason={noteDraft}
           onConfirm={(reason) => {
-            const stamp = stampNow();
-            const by = actorLabel();
-            patchRefund(selected.id, {
-              flash: `Note saved · ${stamp}`,
-              history: appendHistory(selected, {
-                id: `nt-${Date.now()}`,
-                at: stamp,
-                title: 'Internal note added',
-                detail: `${by} · ${reason}`,
-              }),
-            });
-            show('Internal note saved');
-            setConfirm(null);
+            void noteSelected(reason);
           }}
         />
       ) : null}

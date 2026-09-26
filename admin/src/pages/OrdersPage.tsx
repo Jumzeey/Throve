@@ -1,5 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  escalateAdminOrder,
+  fetchAdminOrder,
+  fetchAdminOrders,
+  noteAdminOrder,
+  type AdminOrderCounts,
+  type AdminOrderDto,
+} from '@/api/orders';
 import { useAuth, roleLabel } from '@/auth/AuthContext';
 import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
@@ -14,11 +22,12 @@ import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { formatNaira, mockOrders, type MockOrder, type MockOrderFlag } from '@/data/mock';
 import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
+import { ApiError } from '@/lib/api';
 import { ROLE_LABELS } from '@/lib/roles';
 import { Lock } from 'lucide-react';
+import { formatNaira } from '@/lib/format';
 
 type QueueFilter =
   | 'needs_assistance'
@@ -31,11 +40,21 @@ type QueueFilter =
 type ConfirmKind = 'note' | 'escalate' | null;
 
 type OrderOverride = {
-  timeline?: MockOrder['timeline'];
+  timeline?: AdminOrderDto['timeline'];
   flash?: string | null;
 };
 
-const FLAG_META: Record<MockOrderFlag, { label: string; tone: StatusTone }> = {
+const emptyCounts: AdminOrderCounts = {
+  needs_assistance: 0,
+  paid: 0,
+  awaiting_dispatch: 0,
+  in_transit: 0,
+  delivered: 0,
+  completed: 0,
+  cancelled: 0,
+};
+
+const FLAG_META: Record<AdminOrderDtoFlag, { label: string; tone: StatusTone }> = {
   dispute: { label: 'Dispute', tone: 'risk' },
   hold: { label: 'Hold', tone: 'hold' },
   cancellable: { label: 'Cancellable', tone: 'plum' },
@@ -44,7 +63,7 @@ const FLAG_META: Record<MockOrderFlag, { label: string; tone: StatusTone }> = {
   verify: { label: 'Verify', tone: 'hold' },
 };
 
-function statusTone(s: MockOrder['status']): StatusTone {
+function statusTone(s: AdminOrderDto['status']): StatusTone {
   if (s === 'Completed') return 'clear';
   if (s === 'Disputed' || s === 'Cancelled') return 'risk';
   if (s === 'Delivered' || s === 'In transit') return 'neutral';
@@ -52,11 +71,11 @@ function statusTone(s: MockOrder['status']): StatusTone {
   return 'neutral';
 }
 
-function paymentTone(s: MockOrder['paymentStatus']): StatusTone {
+function paymentTone(s: AdminOrderDto['paymentStatus']): StatusTone {
   return s === 'Uncertain' ? 'hold' : 'clear';
 }
 
-function linkedPath(kind: MockOrder['linkedRecords'][number]['kind']) {
+function linkedPath(kind: AdminOrderDto['linkedRecords'][number]['kind']) {
   if (kind === 'dispute') return '/disputes';
   if (kind === 'payment') return '/payments';
   if (kind === 'payout') return '/payouts';
@@ -65,7 +84,7 @@ function linkedPath(kind: MockOrder['linkedRecords'][number]['kind']) {
 }
 
 function linkedActionLabel(
-  kind: MockOrder['linkedRecords'][number]['kind'],
+  kind: AdminOrderDto['linkedRecords'][number]['kind'],
   financeOnly: boolean | undefined,
   canSeeFinanceIds: boolean,
 ) {
@@ -80,13 +99,19 @@ function linkedActionLabel(
 
 export function OrdersPage() {
   const { session } = useAuth();
+  const liveMode = Boolean(session?.accessToken);
   const { banner, show } = useToast();
   const [queue, setQueue] = useState<QueueFilter>('needs_assistance');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useBleedSelection(mockOrders[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useBleedSelection(null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
   const [overrides, setOverrides] = useState<Record<string, OrderOverride>>({});
   const [noteDraft, setNoteDraft] = useState('');
+  const [liveOrders, setLiveOrders] = useState<AdminOrderDto[]>([]);
+  const [liveCounts, setLiveCounts] = useState<AdminOrderCounts>(emptyCounts);
+  const [loading, setLoading] = useState(liveMode);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
 
   const role = session?.role;
   const isSupport = role === 'support';
@@ -100,21 +125,74 @@ export function OrdersPage() {
   const showDeliveryContext = !isFinance;
   const showDeliveryArea = isTsOrSuper || isSupport;
 
+  const loadLive = useCallback(async () => {
+    if (!liveMode) return;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await fetchAdminOrders(queue, search);
+      setLiveOrders(data.orders);
+      setLiveCounts(data.counts);
+    } catch (err) {
+      setLoadError(err instanceof ApiError ? err.message : 'Could not load orders');
+    } finally {
+      setLoading(false);
+    }
+  }, [liveMode, queue, search]);
+
+  const applyDetail = useCallback((detail: { order: AdminOrderDto }) => {
+    setLiveOrders((current) => {
+      const idx = current.findIndex((o) => o.id === detail.order.id);
+      if (idx === -1) return [detail.order, ...current];
+      const next = [...current];
+      next[idx] = detail.order;
+      return next;
+    });
+    setOverrides((current) => {
+      const next = { ...current };
+      delete next[detail.order.id];
+      return next;
+    });
+  }, []);
+
+  const loadSelectedDetail = useCallback(
+    async (id: string) => {
+      if (!liveMode) return;
+      try {
+        const detail = await fetchAdminOrder(id);
+        applyDetail(detail);
+      } catch {
+        // keep list row
+      }
+    },
+    [applyDetail, liveMode],
+  );
+
+  useEffect(() => {
+    if (!liveMode) {
+      setLoading(false);
+      setLoadError(null);
+      setLiveOrders([]);
+      return;
+    }
+    void loadLive();
+  }, [liveMode, loadLive]);
+
   const orders = useMemo(
     () =>
-      mockOrders.map((o) => {
+      liveOrders.map((o) => {
         const ov = overrides[o.id];
         if (!ov?.timeline) return o;
         return { ...o, timeline: ov.timeline };
       }),
-    [overrides],
+    [liveOrders, overrides],
   );
 
-  const needsAssistanceCount = orders.filter((o) => o.needsAssistance).length;
+  const needsAssistanceCount = liveCounts.needs_assistance;
 
   usePageChrome({
     title: 'Orders',
-    subtitle: `${needsAssistanceCount} orders needing assistance · read-only lifecycle · no status override`,
+    subtitle: `${needsAssistanceCount} needing assistance · read-only lifecycle · note / escalate only`,
     search,
     onSearchChange: setSearch,
     searchPlaceholder: 'Order, buyer or seller',
@@ -123,26 +201,41 @@ export function OrdersPage() {
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return orders.filter((o) => {
-      if (queue === 'needs_assistance' && !o.needsAssistance) return false;
-      if (queue !== 'needs_assistance' && o.status !== queue) return false;
-      if (!q) return true;
-      return (
+    if (!q) return orders;
+    return orders.filter(
+      (o) =>
         o.id.toLowerCase().includes(q) ||
         o.listing.toLowerCase().includes(q) ||
         o.listingId.toLowerCase().includes(q) ||
         o.buyer.toLowerCase().includes(q) ||
         o.seller.toLowerCase().includes(q) ||
-        o.paymentId.toLowerCase().includes(q)
-      );
-    });
-  }, [orders, queue, search]);
+        o.paymentId.toLowerCase().includes(q),
+    );
+  }, [orders, search]);
+
+  useEffect(() => {
+    if (!liveMode || !selectedId) return;
+    void loadSelectedDetail(selectedId);
+  }, [liveMode, selectedId, loadSelectedDetail]);
+
+  useEffect(() => {
+    if (!liveMode || selectedId) return;
+    if (rows[0]) setSelectedId(rows[0].id);
+  }, [liveMode, rows, selectedId, setSelectedId]);
 
   const selected = orders.find((o) => o.id === selectedId) ?? null;
   const selectedFlash = selected ? overrides[selected.id]?.flash : null;
-  const refundPending = selected?.refundId && selected.flags.includes('refund') && selected.status === 'Cancelled';
-  const refundCompleted = selected?.refundId === 'REF-3298';
-  const payoutEligible = selected?.status === 'Completed' && selected.flags.includes('payout');
+  const refundLabel =
+    selected?.linkedRecords.find((r) => r.kind === 'refund')?.label?.toLowerCase() ?? '';
+  const refundPending = Boolean(
+    selected?.refundId &&
+      (refundLabel.includes('awaiting') ||
+        refundLabel === 'ready' ||
+        refundLabel === 'processing' ||
+        refundLabel === 'uncertain'),
+  );
+  const refundCompleted = Boolean(selected?.refundId && refundLabel === 'completed');
+  const payoutEligible = Boolean(selected?.status === 'Completed' && selected.flags.includes('payout'));
 
   const listWindow = useListWindow(rows);
 
@@ -153,7 +246,7 @@ export function OrdersPage() {
     }));
   }
 
-  function appendTimeline(order: MockOrder, entry: MockOrder['timeline'][number]): MockOrder['timeline'] {
+  function appendTimeline(order: AdminOrderDto, entry: AdminOrderDto['timeline'][number]): AdminOrderDto['timeline'] {
     return [...(overrides[order.id]?.timeline ?? order.timeline), entry];
   }
 
@@ -168,6 +261,41 @@ export function OrdersPage() {
 
   function actorLabel() {
     return session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
+  }
+
+  async function runNote(reason: string) {
+    if (!selected || !liveMode) return;
+    setActionBusy(true);
+    try {
+      const detail = await noteAdminOrder(selected.id, reason);
+      applyDetail(detail);
+      show('Internal note saved');
+      setConfirm(null);
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Could not save note');
+      setConfirm(null);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function runEscalate(reason: string) {
+    if (!selected || !liveMode) return;
+    setActionBusy(true);
+    try {
+      const detail = await escalateAdminOrder(selected.id, reason);
+      applyDetail(detail);
+      show('Order escalated');
+      setConfirm(null);
+      await loadLive();
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Could not escalate');
+      setConfirm(null);
+    } finally {
+      setActionBusy(false);
+    }
   }
 
   const orderDesktopCols =
@@ -190,19 +318,53 @@ export function OrdersPage() {
                 onChange={(id) => setQueue(id as QueueFilter)}
                 options={[
                   { id: 'needs_assistance', label: 'Needs assistance', count: needsAssistanceCount },
-                  { id: 'Paid', label: 'Paid' },
-                  { id: 'Awaiting dispatch', label: 'Awaiting dispatch' },
-                  { id: 'In transit', label: 'In transit' },
-                  { id: 'Delivered', label: 'Delivered' },
-                  { id: 'Completed', label: 'Completed' },
-                  { id: 'Cancelled', label: 'Cancelled' },
+                  {
+                    id: 'Paid',
+                    label: 'Paid',
+                    count: liveMode ? liveCounts.paid : undefined,
+                  },
+                  {
+                    id: 'Awaiting dispatch',
+                    label: 'Awaiting dispatch',
+                    count: liveMode ? liveCounts.awaiting_dispatch : undefined,
+                  },
+                  {
+                    id: 'In transit',
+                    label: 'In transit',
+                    count: liveMode ? liveCounts.in_transit : undefined,
+                  },
+                  {
+                    id: 'Delivered',
+                    label: 'Delivered',
+                    count: liveMode ? liveCounts.delivered : undefined,
+                  },
+                  {
+                    id: 'Completed',
+                    label: 'Completed',
+                    count: liveMode ? liveCounts.completed : undefined,
+                  },
+                  {
+                    id: 'Cancelled',
+                    label: 'Cancelled',
+                    count: liveMode ? liveCounts.cancelled : undefined,
+                  },
                 ]}
               />
               {banner}
+              {liveMode && loadError ? (
+                <Alert className="rounded-[5px] border-risk-border bg-risk-bg">
+                  <AlertTitle className="text-[12px] text-risk">Could not load</AlertTitle>
+                  <AlertDescription className="text-[11.5px] text-risk">{loadError}</AlertDescription>
+                </Alert>
+              ) : null}
             </div>
 
             <div ref={listWindow.scrollRef} className="min-h-0 flex-1 overflow-auto">
-              {rows.length === 0 ? (
+              {loading && liveMode ? (
+                <p className="px-4 py-8 text-[12.5px] text-body">Loading orders…</p>
+              ) : null}
+
+              {!loading && !(loadError && liveMode) && rows.length === 0 ? (
                 <EmptyState
                   title="No orders match this filter"
                   description={
@@ -218,7 +380,7 @@ export function OrdersPage() {
                 />
               ) : null}
 
-              {rows.length > 0 ? (
+              {!loading && !(loadError && liveMode) && rows.length > 0 ? (
                 <>
                   <ExpandableListHeader
                     desktopClassName={orderDesktopCols}
@@ -371,14 +533,16 @@ export function OrdersPage() {
                   </Alert>
                 ) : null}
 
-                <AiAdvisory
-                  kind="SUMMARY"
-                  recommendation={
-                    selected.aiNextStep ? <>Recommended next step: {selected.aiNextStep}.</> : undefined
-                  }
-                >
-                  {selected.aiSummary}
-                </AiAdvisory>
+                {selected.aiSummary ? (
+                  <AiAdvisory
+                    kind="SUMMARY"
+                    recommendation={
+                      selected.aiNextStep ? <>Recommended next step: {selected.aiNextStep}.</> : undefined
+                    }
+                  >
+                    {selected.aiSummary}
+                  </AiAdvisory>
+                ) : null}
 
                 <div className="overflow-hidden rounded-[8px] border border-[#ebe3da]">
                   <div className="flex gap-3 p-3">
@@ -718,6 +882,7 @@ export function OrdersPage() {
                     type="button"
                     variant="outline"
                     size="sm"
+                    disabled={actionBusy}
                     onClick={() => {
                       setNoteDraft('');
                       setConfirm('note');
@@ -729,6 +894,7 @@ export function OrdersPage() {
                     type="button"
                     variant="outline"
                     size="sm"
+                    disabled={actionBusy}
                     onClick={() => setConfirm('escalate')}
                   >
                     Escalate
@@ -747,27 +913,15 @@ export function OrdersPage() {
       {confirm === 'note' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title="Add internal note"
           description={`Note stays on ${selected.id}. Buyers and sellers never see this.`}
-          confirmLabel="Save note"
+          confirmLabel={actionBusy ? 'Saving…' : 'Save note'}
           reasonLabel="Internal note"
           reasonPlaceholder="Context for the next reviewer…"
           defaultReason={noteDraft}
           onConfirm={(reason) => {
-            const stamp = stampNow();
-            const by = actorLabel();
-            patchOrder(selected.id, {
-              flash: `Note saved · ${stamp}`,
-              timeline: appendTimeline(selected, {
-                id: `nt-${Date.now()}`,
-                at: stamp,
-                title: 'Internal note added',
-                detail: `${by} · ${reason}`,
-              }),
-            });
-            show('Internal note saved');
-            setConfirm(null);
+            void runNote(reason);
           }}
         />
       ) : null}
@@ -775,27 +929,14 @@ export function OrdersPage() {
       {confirm === 'escalate' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title="Escalate order"
           description={`Raise ${selected.id} for elevated review. This does not change order status or money.`}
-          confirmLabel="Escalate"
+          confirmLabel={actionBusy ? 'Escalating…' : 'Escalate'}
           reasonLabel="Escalation reason"
           reasonPlaceholder="Why this needs elevated review…"
           onConfirm={(reason) => {
-            const stamp = stampNow();
-            const by = actorLabel();
-            patchOrder(selected.id, {
-              flash: `Escalated · ${stamp}`,
-              timeline: appendTimeline(selected, {
-                id: `es-${Date.now()}`,
-                at: stamp,
-                title: 'Order escalated',
-                detail: `${by} · ${reason}`,
-                tone: 'warn',
-              }),
-            });
-            show('Order escalated');
-            setConfirm(null);
+            void runEscalate(reason);
           }}
         />
       ) : null}

@@ -1,9 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  executeAdminPayout,
+  fetchAdminPayout,
+  fetchAdminPayouts,
+  holdAdminPayout,
+  noteAdminPayout,
+  releaseAdminPayout,
+  retryAdminPayout,
+  verifyAdminPayout,
+  type AdminPayoutDto,
+} from '@/api/payouts';
 import { useAuth, roleLabel } from '@/auth/AuthContext';
 import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
-import { EmptyState } from '@/components/admin/empty-state';
+import { EmptyState, ErrorState } from '@/components/admin/empty-state';
+import { ListSkeleton } from '@/components/admin/loading-skeleton';
 import { ExpandableListHeader, ExpandableListRow } from '@/components/admin/expandable-list-row';
 import { FilterChips } from '@/components/admin/filter-chips';
 import { CopyableId } from '@/components/admin/copyable-id';
@@ -13,12 +25,13 @@ import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { formatNaira, mockPayouts, type MockPayout } from '@/data/mock';
 import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
+import { ApiError } from '@/lib/api';
 import { canAct, ROLE_LABELS } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 import { Check, Lock, X } from 'lucide-react';
+import { formatNaira } from '@/lib/format';
 
 type QueueFilter =
   | 'eligible'
@@ -28,12 +41,12 @@ type QueueFilter =
   | 'failed'
   | 'paid'
   | 'not_eligible';
-type ConfirmKind = 'process' | 'hold' | 'release' | 'note' | 'maintain' | null;
+type ConfirmKind = 'process' | 'hold' | 'release' | 'note' | 'maintain' | 'retry' | null;
 
 type PayoutOverride = {
-  status?: MockPayout['status'];
+  status?: AdminPayoutDto['status'];
   headerStatus?: string;
-  history?: MockPayout['history'];
+  history?: AdminPayoutDto['history'];
   flash?: string | null;
   holdReason?: string;
   processingAt?: string;
@@ -42,7 +55,7 @@ type PayoutOverride = {
   paidBy?: string;
 };
 
-function statusTone(s: MockPayout['status']): StatusTone {
+function statusTone(s: AdminPayoutDto['status']): StatusTone {
   if (s === 'Eligible') return 'plum';
   if (s === 'On Hold' || s === 'Verification required') return 'hold';
   if (s === 'Processing') return 'neutral';
@@ -51,7 +64,7 @@ function statusTone(s: MockPayout['status']): StatusTone {
   return 'neutral';
 }
 
-function verificationTone(v: MockPayout['verification']): StatusTone {
+function verificationTone(v: AdminPayoutDto['verification']): StatusTone {
   if (v === 'Approved') return 'clear';
   if (v === 'Pending') return 'hold';
   return 'neutral';
@@ -59,14 +72,27 @@ function verificationTone(v: MockPayout['verification']): StatusTone {
 
 export function PayoutsPage() {
   const { session } = useAuth();
+  const liveMode = Boolean(session?.accessToken);
   const { banner, show } = useToast();
   const [queue, setQueue] = useState<QueueFilter>('eligible');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useBleedSelection(mockPayouts[0]?.id ?? null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
   const [overrides, setOverrides] = useState<Record<string, PayoutOverride>>({});
   const [noteDraft, setNoteDraft] = useState('');
   const [actionInvalid, setActionInvalid] = useState<string | null>(null);
+  const [livePayouts, setLivePayouts] = useState<AdminPayoutDto[]>([]);
+  const [liveCounts, setLiveCounts] = useState({
+    eligible: 0,
+    on_hold: 0,
+    verification: 0,
+    processing: 0,
+    failed: 0,
+    paid: 0,
+    not_eligible: 0,
+  });
+  const [loading, setLoading] = useState(liveMode);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
 
   const canExecute = session ? canAct(session.role, 'execute_payout') : false;
   const canHold = session ? canAct(session.role, 'hold_payout') : false;
@@ -74,9 +100,62 @@ export function PayoutsPage() {
   const isSupport = session?.role === 'support';
   const showAmounts = !isTs && !isSupport;
 
+  const loadLive = useCallback(async () => {
+    if (!liveMode) return;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await fetchAdminPayouts(queue, search);
+      setLivePayouts(data.payouts);
+      setLiveCounts(data.counts);
+    } catch (err) {
+      setLoadError(err instanceof ApiError ? err.message : 'Could not load payouts');
+    } finally {
+      setLoading(false);
+    }
+  }, [liveMode, queue, search]);
+
+  const applyDetail = useCallback((detail: { payout: AdminPayoutDto }) => {
+    setLivePayouts((current) => {
+      const idx = current.findIndex((p) => p.id === detail.payout.id);
+      if (idx === -1) return [detail.payout, ...current];
+      const next = [...current];
+      next[idx] = detail.payout;
+      return next;
+    });
+    setOverrides((current) => {
+      const next = { ...current };
+      delete next[detail.payout.id];
+      return next;
+    });
+  }, []);
+
+  const loadSelectedDetail = useCallback(
+    async (id: string) => {
+      if (!liveMode) return;
+      try {
+        const detail = await fetchAdminPayout(id);
+        applyDetail(detail);
+      } catch {
+        // keep list row
+      }
+    },
+    [applyDetail, liveMode],
+  );
+
+  useEffect(() => {
+    if (!liveMode) {
+      setLoading(false);
+      setLoadError(null);
+      setLivePayouts([]);
+      return;
+    }
+    void loadLive();
+  }, [liveMode, loadLive]);
+
   const payouts = useMemo(
     () =>
-      mockPayouts.map((p) => {
+      livePayouts.map((p) => {
         const o = overrides[p.id];
         if (!o) return p;
         return {
@@ -91,21 +170,21 @@ export function PayoutsPage() {
           paidBy: o.paidBy ?? p.paidBy,
         };
       }),
-    [overrides],
+    [livePayouts, overrides],
   );
 
-  const eligibleCount = payouts.filter((p) => p.status === 'Eligible').length;
-  const holdCount = payouts.filter((p) => p.status === 'On Hold').length;
-  const verifyCount = payouts.filter((p) => p.status === 'Verification required').length;
-  const processingCount = payouts.filter((p) => p.status === 'Processing').length;
-  const failedCount = payouts.filter((p) => p.status === 'Failed').length;
+  const eligibleCount = liveCounts.eligible;
+  const holdCount = liveCounts.on_hold;
+  const verifyCount = liveCounts.verification;
+  const processingCount = liveCounts.processing;
+  const failedCount = liveCounts.failed;
   const eligibleTotal = payouts
     .filter((p) => p.status === 'Eligible')
     .reduce((sum, p) => sum + p.net, 0);
 
   usePageChrome({
     title: 'Payouts',
-    subtitle: `${eligibleCount} eligible · ${holdCount} On Hold · ${failedCount} failed · execution authority: Finance`,
+    subtitle: `${eligibleCount} eligible · ${holdCount} On Hold · ledger execute (no live PSP yet)`,
     search,
     onSearchChange: setSearch,
     searchPlaceholder: 'Payout, order or seller',
@@ -114,22 +193,26 @@ export function PayoutsPage() {
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return payouts.filter((p) => {
-      if (queue === 'eligible' && p.status !== 'Eligible') return false;
-      if (queue === 'on_hold' && p.status !== 'On Hold') return false;
-      if (queue === 'verification' && p.status !== 'Verification required') return false;
-      if (queue === 'processing' && p.status !== 'Processing') return false;
-      if (queue === 'failed' && p.status !== 'Failed') return false;
-      if (queue === 'paid' && p.status !== 'Paid out') return false;
-      if (queue === 'not_eligible' && p.status !== 'Not yet eligible') return false;
-      if (!q) return true;
-      return (
+    if (!q) return payouts;
+    return payouts.filter(
+      (p) =>
         p.id.toLowerCase().includes(q) ||
         p.seller.toLowerCase().includes(q) ||
-        p.orderId.toLowerCase().includes(q)
-      );
-    });
-  }, [payouts, queue, search]);
+        p.orderId.toLowerCase().includes(q),
+    );
+  }, [payouts, search]);
+
+  const [selectedId, setSelectedId] = useBleedSelection(null);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    if (!payouts.some((p) => p.id === selectedId)) setSelectedId(null);
+  }, [payouts, selectedId, setSelectedId]);
+
+  useEffect(() => {
+    if (!liveMode || !selectedId) return;
+    void loadSelectedDetail(selectedId);
+  }, [liveMode, selectedId, loadSelectedDetail]);
 
   const listWindow = useListWindow(rows);
 
@@ -143,7 +226,7 @@ export function PayoutsPage() {
     }));
   }
 
-  function appendHistory(payout: MockPayout, entry: MockPayout['history'][number]) {
+  function appendHistory(payout: AdminPayoutDto, entry: AdminPayoutDto['history'][number]) {
     return [...(overrides[payout.id]?.history ?? payout.history), entry];
   }
 
@@ -160,7 +243,7 @@ export function PayoutsPage() {
     return session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
   }
 
-  function tryProcess(payout: MockPayout) {
+  function tryProcess(payout: AdminPayoutDto) {
     if (payout.status === 'On Hold' || payout.disputeId) {
       setActionInvalid(
         'A dispute was opened on this order. The payout returned to On Hold. Your process request was not executed.',
@@ -169,6 +252,93 @@ export function PayoutsPage() {
       return;
     }
     setConfirm('process');
+  }
+
+  async function processSelected(reason: string, isRetry = false) {
+    if (!selected || !liveMode) return;
+    setActionBusy(true);
+    try {
+      const detail = isRetry
+        ? await retryAdminPayout(selected.id, reason)
+        : await executeAdminPayout(selected.id, reason);
+      applyDetail(detail);
+      show(`Processed ${selected.id}`);
+      setConfirm(null);
+      await loadLive();
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Process failed');
+      setConfirm(null);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function holdSelected(reason: string) {
+    if (!selected || !liveMode) return;
+    setActionBusy(true);
+    try {
+      const detail = await holdAdminPayout(selected.id, reason);
+      applyDetail(detail);
+      show(`Hold placed · ${selected.id}`);
+      setConfirm(null);
+      await loadLive();
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Hold failed');
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function releaseSelected(reason: string) {
+    if (!selected || !liveMode) return;
+    setActionBusy(true);
+    try {
+      const detail = await releaseAdminPayout(selected.id, reason);
+      applyDetail(detail);
+      show(`Hold released · ${selected.id}`);
+      setConfirm(null);
+      await loadLive();
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Release failed');
+      setConfirm(null);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function verifySelected() {
+    if (!selected || !liveMode) return;
+    setActionBusy(true);
+    try {
+      const detail = await verifyAdminPayout(selected.id);
+      applyDetail(detail);
+      show(`Provider status checked · ${selected.id}`);
+      await loadLive();
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Status check failed');
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function noteSelected(reason: string) {
+    if (!selected || !liveMode) return;
+    setActionBusy(true);
+    try {
+      const detail = await noteAdminPayout(selected.id, reason);
+      applyDetail(detail);
+      show('Internal note saved');
+      setConfirm(null);
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Note failed');
+    } finally {
+      setActionBusy(false);
+    }
   }
 
   const payoutDesktopCols =
@@ -186,6 +356,11 @@ export function PayoutsPage() {
         list={
           <>
             <div className="space-y-3 border-b border-[#e7dcd2] px-4 py-4">
+              {liveMode ? (
+                <div className="text-[10px] font-semibold tracking-[0.12em] text-muted-2 uppercase">
+                  Live queue · staff API
+                </div>
+              ) : null}
               <div className="flex flex-wrap items-center gap-2">
                 <FilterChips
                   value={queue}
@@ -210,7 +385,15 @@ export function PayoutsPage() {
             </div>
 
             <div ref={listWindow.scrollRef} className="min-h-0 flex-1 overflow-auto">
-              {rows.length === 0 ? (
+              {loading ? <ListSkeleton rows={6} /> : null}
+              {!loading && loadError && liveMode ? (
+                <ErrorState
+                  title="Could not load payouts"
+                  description={loadError}
+                  onRetry={() => void loadLive()}
+                />
+              ) : null}
+              {!loading && !(loadError && liveMode) && rows.length === 0 ? (
                 <EmptyState
                   title="Nothing in this filter"
                   description={
@@ -226,7 +409,7 @@ export function PayoutsPage() {
                 />
               ) : null}
 
-              {rows.length > 0 ? (
+              {!loading && !(loadError && liveMode) && rows.length > 0 ? (
                 <>
                   <ExpandableListHeader
                     desktopClassName={payoutDesktopCols}
@@ -504,6 +687,17 @@ export function PayoutsPage() {
                     <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#e7dcd2]">
                       <div className="h-full w-1/2 rounded-full bg-plum" />
                     </div>
+                    {canExecute && liveMode ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="mt-3"
+                        disabled={actionBusy}
+                        onClick={() => void verifySelected()}
+                      >
+                        Check provider status
+                      </Button>
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -645,15 +839,26 @@ export function PayoutsPage() {
                       <Button
                         type="button"
                         className="w-full bg-[#3e2b36] text-panel hover:bg-[#2f2029]"
+                        disabled={actionBusy}
                         onClick={() => tryProcess(selected)}
                       >
                         Process payout — review & confirm
                       </Button>
                     ) : null}
 
-                    {selected.status === 'On Hold' ? (
-                      <Button type="button" variant="outline" size="sm" disabled>
-                        Release hold — unavailable until case closes
+                    {canHold && selected.status === 'On Hold' ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={actionBusy}
+                        onClick={() => {
+                          setConfirm('release');
+                        }}
+                      >
+                        {liveMode
+                          ? 'Release hold — review & confirm'
+                          : 'Release hold — unavailable until case closes'}
                       </Button>
                     ) : null}
 
@@ -663,6 +868,7 @@ export function PayoutsPage() {
                           type="button"
                           variant="outline"
                           size="sm"
+                          disabled={actionBusy}
                           onClick={() => setConfirm('hold')}
                         >
                           Place hold
@@ -672,6 +878,7 @@ export function PayoutsPage() {
                         type="button"
                         variant="outline"
                         size="sm"
+                        disabled={actionBusy}
                         onClick={() => {
                           setNoteDraft('');
                           setConfirm('note');
@@ -696,10 +903,10 @@ export function PayoutsPage() {
       {confirm === 'process' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title={`Process payout ${selected.id}`}
           description="Confirm the seller net amount and the eligibility checks before executing. The amount is calculated by Throve and cannot be edited here."
-          confirmLabel="Process payout"
+          confirmLabel={actionBusy ? 'Processing…' : 'Process payout'}
           requireCheckbox
           checkboxLabel="I have reviewed the eligibility checks for this payout."
           reasonLabel="Context / reason recorded"
@@ -709,35 +916,17 @@ export function PayoutsPage() {
             { label: 'Seller', value: `@${selected.seller} · verification approved` },
             { label: 'Order', value: `${selected.orderId} · Completed` },
             { label: 'Net payout', value: formatNaira(selected.net) },
-            { label: 'Destination', value: selected.destinationMasked },
-            { label: 'Environment', value: 'Test — simulated payout, no real money' },
+            { label: 'Destination', value: selected.destinationMasked ?? 'Not on file' },
+            {
+              label: 'Environment',
+              value: liveMode
+                ? 'Ledger execute — simulate auto-completes; no live PSP transfer yet'
+                : 'Test — simulated payout, no real money',
+            },
             { label: 'Audit entry', value: 'Created on confirm' },
           ]}
           onConfirm={(reason) => {
-            if (selected.status !== 'Eligible') {
-              setActionInvalid(
-                'A dispute was opened on this order. The payout returned to On Hold. Your process request was not executed.',
-              );
-              setConfirm(null);
-              return;
-            }
-            const stamp = stampNow();
-            const by = actorLabel();
-            patchPayout(selected.id, {
-              status: 'Processing',
-              headerStatus: 'Processing',
-              processingAt: stamp,
-              processingBy: session?.name ?? 'Staff',
-              flash: `Submitted to provider · ${stamp}`,
-              history: appendHistory(selected, {
-                id: `proc-${Date.now()}`,
-                at: stamp,
-                title: 'Submitted to provider',
-                detail: `${by} · ${reason}`,
-              }),
-            });
-            show(`Processing ${selected.id}`);
-            setConfirm(null);
+            void processSelected(reason, false);
           }}
         />
       ) : null}
@@ -745,29 +934,29 @@ export function PayoutsPage() {
       {confirm === 'hold' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title={`Place hold on ${selected.id}`}
           description="Hold stops payout execution until Trust & Safety or Finance clears the case."
-          confirmLabel="Place hold"
+          confirmLabel={actionBusy ? 'Holding…' : 'Place hold'}
           reasonLabel="Internal hold reason"
           reasonPlaceholder="Why this payout must wait…"
           onConfirm={(reason) => {
-            const stamp = stampNow();
-            const by = actorLabel();
-            patchPayout(selected.id, {
-              status: 'On Hold',
-              headerStatus: 'On Hold',
-              holdReason: reason,
-              flash: `Hold placed · ${stamp}`,
-              history: appendHistory(selected, {
-                id: `hold-${Date.now()}`,
-                at: stamp,
-                title: 'Hold placed',
-                detail: `${by} · ${reason}`,
-              }),
-            });
-            show(`Hold placed on ${selected.id}`);
-            setConfirm(null);
+            void holdSelected(reason);
+          }}
+        />
+      ) : null}
+
+      {confirm === 'release' && selected ? (
+        <ConfirmActionDialog
+          open
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
+          title={`Release hold on ${selected.id}`}
+          description="Returns the payout to Eligible or Verification required. Blocked while a dispute is still open."
+          confirmLabel={actionBusy ? 'Releasing…' : 'Release hold'}
+          reasonLabel="Release reason"
+          reasonPlaceholder="Why this hold can be cleared…"
+          onConfirm={(reason) => {
+            void releaseSelected(reason);
           }}
         />
       ) : null}
@@ -775,31 +964,21 @@ export function PayoutsPage() {
       {(confirm === 'note' || confirm === 'maintain') && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title={confirm === 'maintain' ? 'Maintain hold' : 'Add internal note'}
           description={
             confirm === 'maintain'
               ? `Keep hold on ${selected.id}. Sellers see only the safe hold wording.`
               : `Note stays on ${selected.id}. Sellers never see this.`
           }
-          confirmLabel={confirm === 'maintain' ? 'Maintain hold' : 'Save note'}
+          confirmLabel={
+            actionBusy ? 'Saving…' : confirm === 'maintain' ? 'Maintain hold' : 'Save note'
+          }
           reasonLabel={confirm === 'maintain' ? 'Case note' : 'Internal note'}
           reasonPlaceholder="Context for the next reviewer…"
           defaultReason={noteDraft}
           onConfirm={(reason) => {
-            const stamp = stampNow();
-            const by = actorLabel();
-            patchPayout(selected.id, {
-              flash: confirm === 'maintain' ? `Hold maintained · ${stamp}` : `Note saved · ${stamp}`,
-              history: appendHistory(selected, {
-                id: `nt-${Date.now()}`,
-                at: stamp,
-                title: confirm === 'maintain' ? 'Hold maintained' : 'Internal note added',
-                detail: `${by} · ${reason}`,
-              }),
-            });
-            show(confirm === 'maintain' ? 'Hold maintained' : 'Internal note saved');
-            setConfirm(null);
+            void noteSelected(reason);
           }}
         />
       ) : null}

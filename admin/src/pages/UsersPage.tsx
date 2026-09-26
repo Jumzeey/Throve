@@ -1,5 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Lock } from 'lucide-react';
+import {
+  approveHostAdminUser,
+  banAdminUser,
+  escalateAdminUser,
+  fetchAdminUser,
+  fetchAdminUsers,
+  noteAdminUser,
+  recommendBanAdminUser,
+  restrictAdminUser,
+  suspendAdminUser,
+  type AdminUserCounts,
+  type AdminUserDto,
+} from '@/api/users';
 import { useAuth } from '@/auth/AuthContext';
 import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
@@ -13,28 +26,29 @@ import { ListSkeleton } from '@/components/admin/loading-skeleton';
 import { StatusBadge } from '@/components/admin/status-badge';
 import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { mockUsers, type MockUser } from '@/data/mock';
 import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
+import { ApiError } from '@/lib/api';
 import { canAct, canViewPayoutFields, ROLE_LABELS } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 
-function statusTone(s: MockUser['status']) {
+function statusTone(s: AdminUserDto['status']) {
   if (s === 'Active') return 'clear' as const;
   if (s === 'Restricted') return 'hold' as const;
   if (s === 'Deactivated') return 'neutral' as const;
   return 'risk' as const;
 }
 
-function payoutTone(u: MockUser) {
+function payoutTone(u: AdminUserDto) {
   if (!u.seller) return null;
   if (u.kycStatus === 'Verified' && u.payoutVerified) return 'clear' as const;
   if (u.kycStatus === 'Pending') return 'hold' as const;
   return 'risk' as const;
 }
 
-function payoutLabel(u: MockUser) {
+function payoutLabel(u: AdminUserDto) {
   if (!u.seller) return 'Not applicable';
   if (u.kycStatus === 'Verified' && u.payoutVerified) return 'Approved';
   if (u.kycStatus === 'Pending') return 'Pending';
@@ -48,68 +62,132 @@ function initials(name: string) {
   return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase();
 }
 
-function isHighRisk(u: MockUser) {
+function isHighRisk(u: AdminUserDto) {
   return u.flags >= 3 || u.relatedReports.length >= 3 || u.relatedDisputes.length >= 2;
 }
 
 type ConfirmKind = 'note' | 'escalate' | 'restrict' | 'suspend' | 'ban' | 'approve_host' | null;
 
+const emptyCounts: AdminUserCounts = {
+  all: 0,
+  flagged: 0,
+  restricted: 0,
+  sellers: 0,
+  hosts: 0,
+  kyc: 0,
+};
+
 export function UsersPage() {
   const { session } = useAuth();
+  const liveMode = Boolean(session?.accessToken);
   const { banner, show } = useToast();
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useBleedSelection(mockUsers[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useBleedSelection(null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(liveMode);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
   const [dismissedStale, setDismissedStale] = useState<Record<string, boolean>>({});
+  const [liveUsers, setLiveUsers] = useState<AdminUserDto[]>([]);
+  const [liveCounts, setLiveCounts] = useState<AdminUserCounts>(emptyCounts);
+
+  const role = session?.role;
+  const isSuper = role === 'super_admin';
+  const isTrust = role === 'trust_safety';
+  const isSupport = role === 'support';
+  const canRestrict = role ? canAct(role, 'restrict_user') : false;
+  const canSuspend = role ? canAct(role, 'suspend_user') : false;
+  const canRecommendBan = role ? canAct(role, 'recommend_ban') : false;
+  const canBan = role ? canAct(role, 'ban_user') : false;
+  const canEnforce = canRestrict || canSuspend || canRecommendBan || canBan;
+  const canApproveHost = role ? canAct(role, 'approve_live_host') : false;
+  const seePayout = role ? canViewPayoutFields(role) : false;
+
+  const loadLive = useCallback(async () => {
+    if (!liveMode) return;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await fetchAdminUsers(filter, search);
+      setLiveUsers(data.users);
+      setLiveCounts(data.counts);
+    } catch (err) {
+      setLoadError(err instanceof ApiError ? err.message : 'Could not load users');
+    } finally {
+      setLoading(false);
+    }
+  }, [liveMode, filter, search]);
+
+  const applyDetail = useCallback((detail: { user: AdminUserDto }) => {
+    setLiveUsers((current) => {
+      const idx = current.findIndex((u) => u.id === detail.user.id);
+      if (idx === -1) return [detail.user, ...current];
+      const next = [...current];
+      next[idx] = detail.user;
+      return next;
+    });
+  }, []);
+
+  const loadSelectedDetail = useCallback(
+    async (id: string) => {
+      if (!liveMode) return;
+      try {
+        const detail = await fetchAdminUser(id);
+        applyDetail(detail);
+      } catch {
+        // keep list row
+      }
+    },
+    [applyDetail, liveMode],
+  );
+
+  useEffect(() => {
+    if (!liveMode) {
+      setLoading(false);
+      setLoadError(null);
+      setLiveUsers([]);
+      return;
+    }
+    void loadLive();
+  }, [liveMode, loadLive]);
+
+  const users = liveUsers;
 
   usePageChrome({
     title: 'Users',
-    subtitle: 'Account investigation · 12,481 accounts',
+    subtitle: `${liveCounts.all} accounts · enforcement + host controls`,
     search,
     onSearchChange: setSearch,
     searchPlaceholder: 'Search username, email, or user ID…',
     bleed: true,
   });
 
-  const role = session?.role;
-  const isSuper = role === 'super_admin';
-  const isTrust = role === 'trust_safety';
-  const isSupport = role === 'support';
-  const canEnforce = role ? canAct(role, 'suspend_user') : false;
-  const canApproveHost = role ? canAct(role, 'approve_live_host') : false;
-  const seePayout = role ? canViewPayoutFields(role) : false;
-
-  useEffect(() => {
-    setLoading(true);
-    const id = window.setTimeout(() => setLoading(false), 320);
-    return () => window.clearTimeout(id);
-  }, [filter, search]);
-
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return mockUsers.filter((u) => {
-      if (filter === 'flagged' && u.flags <= 0) return false;
-      if (filter === 'restricted' && !(u.status === 'Restricted' || u.status === 'Suspended')) return false;
-      if (filter === 'sellers' && !u.seller) return false;
-      if (filter === 'hosts' && u.liveHost === 'None') return false;
-      if (filter === 'kyc' && !(u.kycStatus === 'Pending' || u.kycStatus === 'Failed' || u.kycStatus === 'Rejected')) {
-        return false;
-      }
-      if (!q) return true;
-      return (
+    if (!q) return users;
+    return users.filter(
+      (u) =>
         u.username.toLowerCase().includes(q) ||
         u.name.toLowerCase().includes(q) ||
         u.email.toLowerCase().includes(q) ||
-        u.id.toLowerCase().includes(q)
-      );
-    });
-  }, [filter, search]);
+        u.id.toLowerCase().includes(q),
+    );
+  }, [search, users]);
+
+  useEffect(() => {
+    if (!liveMode || !selectedId) return;
+    void loadSelectedDetail(selectedId);
+  }, [liveMode, selectedId, loadSelectedDetail]);
+
+  useEffect(() => {
+    if (!liveMode || selectedId) return;
+    if (rows[0]) setSelectedId(rows[0].id);
+  }, [liveMode, rows, selectedId, setSelectedId]);
 
   const listWindow = useListWindow(rows);
 
-  const selected = mockUsers.find((u) => u.id === selectedId) ?? null;
+  const selected = users.find((u) => u.id === selectedId) ?? null;
   const showStale = Boolean(selected?.recordStale && !dismissedStale[selected.id]);
   const actionsLabel = role ? ROLE_LABELS[role] : 'Staff';
 
@@ -150,6 +228,34 @@ export function UsersPage() {
     },
   };
 
+  async function runConfirm(reason: string) {
+    if (!selected || !confirm || !liveMode) return;
+
+    setActionBusy(true);
+    try {
+      let detail: { user: AdminUserDto };
+      if (confirm === 'note') detail = await noteAdminUser(selected.id, reason);
+      else if (confirm === 'escalate') detail = await escalateAdminUser(selected.id, reason);
+      else if (confirm === 'restrict') detail = await restrictAdminUser(selected.id, reason);
+      else if (confirm === 'suspend') detail = await suspendAdminUser(selected.id, reason);
+      else if (confirm === 'approve_host') detail = await approveHostAdminUser(selected.id, reason);
+      else if (confirm === 'ban' && isSuper) detail = await banAdminUser(selected.id, reason);
+      else if (confirm === 'ban') detail = await recommendBanAdminUser(selected.id, reason);
+      else return;
+
+      applyDetail(detail);
+      show(`${confirmCopy[confirm].label} · @${selected.username}`);
+      setConfirm(null);
+      await loadLive();
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Action failed');
+      setConfirm(null);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   return (
     <>
       <BleedSplit
@@ -179,6 +285,13 @@ export function UsersPage() {
         </div>
 
         {banner}
+
+        {liveMode && loadError ? (
+          <Alert className="rounded-[5px] border-risk-border bg-risk-bg">
+            <AlertTitle className="text-[12px] text-risk">Could not load</AlertTitle>
+            <AlertDescription className="text-[11.5px] text-risk">{loadError}</AlertDescription>
+          </Alert>
+        ) : null}
 
         {loading ? (
           <div className="overflow-hidden rounded-[6px] border border-[#e7dcd2] bg-panel">
@@ -572,42 +685,56 @@ export function UsersPage() {
                 >
                   {isSupport ? 'Escalate to T&S' : 'Escalate'}
                 </Button>
-                {canApproveHost && selected.liveHost === 'Pending' ? (
-                  <Button className="col-span-2 h-auto py-2.5 text-[12px] font-semibold" onClick={() => setConfirm('approve_host')}>
+                {canApproveHost && (selected.liveHost === 'Pending' || (liveMode && selected.liveHost === 'None')) ? (
+                  <Button
+                    className="col-span-2 h-auto py-2.5 text-[12px] font-semibold"
+                    disabled={actionBusy || selected.liveHost === 'Approved'}
+                    onClick={() => setConfirm('approve_host')}
+                  >
                     Approve live host
                   </Button>
                 ) : null}
                 {canEnforce ? (
                   <>
-                    <Button
-                      variant="outline"
-                      className="h-auto border-[#b4762a] py-2.5 text-[12px] font-semibold text-[#8a5a15]"
-                      onClick={() => setConfirm('restrict')}
-                      disabled={Boolean(selected.actionAlreadyApplied)}
-                    >
-                      Restrict account
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className="h-auto border-[#b4762a] py-2.5 text-[12px] font-semibold text-[#8a5a15]"
-                      onClick={() => setConfirm('suspend')}
-                      disabled={Boolean(selected.actionAlreadyApplied) || selected.status === 'Suspended'}
-                    >
-                      Suspend account
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        'col-span-2 h-auto py-2.5 text-[12px] font-semibold',
-                        isSuper
-                          ? 'border-[#9e2b2b] bg-[#f7ecec] text-[#8a2323]'
-                          : 'border-dashed border-[#9e2b2b] text-[#8a2323]',
-                      )}
-                      onClick={() => setConfirm('ban')}
-                      disabled={selected.status === 'Banned'}
-                    >
-                      {isSuper ? 'Permanently ban — requires confirmation' : 'Recommend permanent ban'}
-                    </Button>
+                    {canRestrict ? (
+                      <Button
+                        variant="outline"
+                        className="h-auto border-[#b4762a] py-2.5 text-[12px] font-semibold text-[#8a5a15]"
+                        onClick={() => setConfirm('restrict')}
+                        disabled={actionBusy || Boolean(selected.actionAlreadyApplied) || selected.status === 'Restricted'}
+                      >
+                        Restrict account
+                      </Button>
+                    ) : null}
+                    {canSuspend ? (
+                      <Button
+                        variant="outline"
+                        className="h-auto border-[#b4762a] py-2.5 text-[12px] font-semibold text-[#8a5a15]"
+                        onClick={() => setConfirm('suspend')}
+                        disabled={
+                          actionBusy ||
+                          Boolean(selected.actionAlreadyApplied) ||
+                          selected.status === 'Suspended'
+                        }
+                      >
+                        Suspend account
+                      </Button>
+                    ) : null}
+                    {canBan || canRecommendBan ? (
+                      <Button
+                        variant="outline"
+                        className={cn(
+                          'col-span-2 h-auto py-2.5 text-[12px] font-semibold',
+                          isSuper
+                            ? 'border-[#9e2b2b] bg-[#f7ecec] text-[#8a2323]'
+                            : 'border-dashed border-[#9e2b2b] text-[#8a2323]',
+                        )}
+                        onClick={() => setConfirm('ban')}
+                        disabled={actionBusy || selected.status === 'Banned'}
+                      >
+                        {isSuper ? 'Permanently ban — requires confirmation' : 'Recommend permanent ban'}
+                      </Button>
+                    ) : null}
                   </>
                 ) : null}
               </div>
@@ -629,10 +756,10 @@ export function UsersPage() {
       {confirm && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title={confirmCopy[confirm].title}
           description={confirmCopy[confirm].description}
-          confirmLabel={confirmCopy[confirm].label}
+          confirmLabel={actionBusy ? 'Working…' : confirmCopy[confirm].label}
           destructive={confirm === 'ban' || confirm === 'suspend'}
           requireCheckbox={confirm === 'ban' || confirm === 'suspend'}
           checkboxLabel={
@@ -653,8 +780,7 @@ export function UsersPage() {
               : undefined
           }
           onConfirm={(reason) => {
-            show(`${confirmCopy[confirm].label} recorded for @${selected.username} · ${reason.slice(0, 40)}`);
-            setConfirm(null);
+            void runConfirm(reason);
           }}
         />
       ) : null}

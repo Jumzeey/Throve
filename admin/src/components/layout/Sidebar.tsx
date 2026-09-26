@@ -15,8 +15,9 @@ import {
   Users,
   Wallet,
 } from 'lucide-react';
+import type { AdminOpsBadges } from '@/api/ops';
+import { useOpsBadges } from '@/hooks/use-ops-badges';
 import { useAuth, roleLabel } from '../../auth/AuthContext';
-import { mockBadgeCounts } from '../../data/mock';
 import {
   canAccess,
   navSectionsFor,
@@ -69,19 +70,24 @@ function routeIcon(route: AdminRoute, role: AdminRole) {
   return icons[route];
 }
 
-const BADGES: Partial<Record<AdminRoute, number>> = {
-  listings: mockBadgeCounts.listings,
-  reports: mockBadgeCounts.reports,
-  live: mockBadgeCounts.live,
-  disputes: mockBadgeCounts.disputes,
-  orders: mockBadgeCounts.orders,
-  payments: mockBadgeCounts.payments,
-  refunds: mockBadgeCounts.refunds,
-  payouts: mockBadgeCounts.payouts,
-};
+function badgesFromCounts(counts: AdminOpsBadges): Partial<Record<AdminRoute, number>> {
+  return {
+    listings: counts.listings,
+    reports: counts.reports,
+    live: counts.live,
+    disputes: counts.disputes,
+    orders: counts.orders,
+    payments: counts.payments,
+    refunds: counts.refunds,
+    payouts: counts.payouts,
+  };
+}
 
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const { session, signOut } = useAuth();
+  const { badges: badgeCounts } = useOpsBadges();
+  const badges = badgesFromCounts(badgeCounts);
+
   if (!session) return null;
 
   const sections = navSectionsFor(session.role)
@@ -137,9 +143,9 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
                           />
                           <span className="truncate">{routeLabel(route, session.role)}</span>
                         </span>
-                        {BADGES[route] ? (
+                        {badges[route] ? (
                           <span className="rounded-[3px] bg-gold px-1.5 py-0.5 text-[10.5px] font-semibold tabular-nums text-[#241c1a]">
-                            {BADGES[route]}
+                            {badges[route]}
                           </span>
                         ) : null}
                       </>

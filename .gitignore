@@ -61,3 +61,6 @@ Hi-Fi with images/
 branch_structure.json
 temp_auto_push.bat
 temp_interactive_push.bat
+
+# Contains staff credentials; keep local
+supabase/seed-staff.sql

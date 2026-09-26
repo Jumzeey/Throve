@@ -613,12 +613,12 @@ export default function CheckoutOrderScreen() {
                 <View style={styles.verifyCard}>
                   <Text style={styles.disputeTitle}>Payout verification required</Text>
                   <Text style={styles.disputeBody}>
-                    Complete your identity and bank verification before any payout can be released.
+                    Add and verify your bank account before this payout can be released.
                   </Text>
                   <Button
-                    label="Complete verification"
+                    label="Add payout account"
                     variant="secondary"
-                    onPress={() => router.push('/profile/settings')}
+                    onPress={() => router.push('/profile/payout-account')}
                   />
                 </View>
               ) : null}

@@ -1,7 +1,20 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth, roleLabel } from '@/auth/AuthContext';
 import { useBleedSelection } from '@/hooks/use-bleed-selection';
+import {
+  actionTakenAdminReport,
+  assignAdminReport,
+  associateAdminReport,
+  closeAdminReport,
+  dismissAdminReport,
+  escalateAdminReport,
+  fetchAdminReport,
+  fetchAdminReports,
+  noteAdminReport,
+  type AdminReportCounts,
+  type AdminReportDto,
+} from '@/api/reports';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
 import { EmptyState } from '@/components/admin/empty-state';
@@ -15,10 +28,10 @@ import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { mockReports, type MockReport } from '@/data/mock';
 import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
-import { ROLE_LABELS } from '@/lib/roles';
+import { ApiError } from '@/lib/api';
+import { canAct, ROLE_LABELS } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 import { Lock } from 'lucide-react';
 
@@ -30,16 +43,27 @@ type QueueFilter =
   | 'action_taken'
   | 'closed'
   | 'assigned_me';
-type ConfirmKind = 'close' | 'escalate' | 'associate' | 'note' | null;
+type ConfirmKind = 'close' | 'escalate' | 'associate' | 'note' | 'assign' | 'dismiss' | 'action_taken' | null;
 
 type ReportOverride = {
-  status?: MockReport['status'];
-  history?: MockReport['history'];
+  status?: AdminReportDto['status'];
+  history?: AdminReportDto['history'];
   flash?: string | null;
   assigned?: string;
 };
 
-function statusTone(s: MockReport['status']): StatusTone {
+const emptyCounts: AdminReportCounts = {
+  all: 0,
+  open: 0,
+  high: 0,
+  repeat: 0,
+  escalated: 0,
+  action_taken: 0,
+  closed: 0,
+  assigned_me: 0,
+};
+
+function statusTone(s: AdminReportDto['status']): StatusTone {
   if (s === 'New') return 'hold';
   if (s === 'Under review') return 'neutral';
   if (s === 'Escalated') return 'plum';
@@ -48,38 +72,106 @@ function statusTone(s: MockReport['status']): StatusTone {
   return 'neutral';
 }
 
-function aiTone(p: MockReport['aiPriority']): StatusTone {
+function aiTone(p: AdminReportDto['aiPriority']): StatusTone {
   if (p === 'High') return 'risk';
   if (p === 'Medium') return 'hold';
   return 'neutral';
 }
 
-function moduleFor(route: MockReport['route']) {
+function moduleFor(route: AdminReportDto['route']) {
   if (route === 'Listing') return { to: '/listings', label: 'Listings', act: 'Act in Listings' };
   if (route === 'User') return { to: '/users', label: 'Users', act: 'Act in Users' };
   return { to: '/live', label: 'Live', act: 'Act in Live' };
 }
 
-function isOpenStatus(s: MockReport['status']) {
+function isOpenStatus(s: AdminReportDto['status']) {
   return s === 'New' || s === 'Under review';
 }
 
 export function ReportsPage() {
   const { session } = useAuth();
+  const liveMode = Boolean(session?.accessToken);
   const { banner, show } = useToast();
   const [queue, setQueue] = useState<QueueFilter>('open');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useBleedSelection(mockReports[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useBleedSelection(null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
   const [overrides, setOverrides] = useState<Record<string, ReportOverride>>({});
   const [noteDraft, setNoteDraft] = useState('');
+  const [loading, setLoading] = useState(liveMode);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [liveReports, setLiveReports] = useState<AdminReportDto[]>([]);
+  const [liveCounts, setLiveCounts] = useState<AdminReportCounts>(emptyCounts);
+  const [flashById, setFlashById] = useState<Record<string, string>>({});
 
   const isSupport = session?.role === 'support';
   const canEnforce = session?.role === 'super_admin' || session?.role === 'trust_safety';
+  const canClose = session?.role ? canAct(session.role, 'close_report') : false;
+  const canDismiss = session?.role ? canAct(session.role, 'dismiss_report') : false;
+  const canActionTaken = session?.role ? canAct(session.role, 'mark_report_action_taken') : false;
 
-  const reports = useMemo(
+  const loadLive = useCallback(async () => {
+    if (!liveMode) return;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await fetchAdminReports(queue, search);
+      setLiveReports(data.reports);
+      setLiveCounts(data.counts);
+    } catch (err) {
+      setLoadError(err instanceof ApiError ? err.message : 'Could not load reports');
+    } finally {
+      setLoading(false);
+    }
+  }, [liveMode, queue, search]);
+
+  const applyDetail = useCallback((detail: { report: AdminReportDto }) => {
+    setLiveReports((current) => {
+      const idx = current.findIndex((r) => r.id === detail.report.id);
+      if (idx === -1) return [detail.report, ...current];
+      const next = [...current];
+      next[idx] = detail.report;
+      return next;
+    });
+  }, []);
+
+  const loadSelectedDetail = useCallback(
+    async (id: string) => {
+      if (!liveMode) return;
+      try {
+        const detail = await fetchAdminReport(id);
+        applyDetail(detail);
+      } catch {
+        // keep list row
+      }
+    },
+    [applyDetail, liveMode],
+  );
+
+  useEffect(() => {
+    if (!liveMode) {
+      setLoading(false);
+      setLoadError(null);
+      setLiveReports([]);
+      return;
+    }
+    void loadLive();
+  }, [liveMode, loadLive]);
+
+  useEffect(() => {
+    if (!liveMode || !selectedId) return;
+    void loadSelectedDetail(selectedId);
+  }, [liveMode, selectedId, loadSelectedDetail]);
+
+  useEffect(() => {
+    if (!liveMode || selectedId) return;
+    if (liveReports[0]) setSelectedId(liveReports[0].id);
+  }, [liveMode, liveReports, selectedId, setSelectedId]);
+
+  const reports: AdminReportDto[] = useMemo(
     () =>
-      mockReports.map((r) => {
+      liveReports.map((r) => {
         const o = overrides[r.id];
         if (!o) return r;
         return {
@@ -89,16 +181,24 @@ export function ReportsPage() {
           assigned: o.assigned ?? r.assigned,
         };
       }),
-    [overrides],
+    [liveReports, overrides],
   );
 
-  const awaiting = reports.filter((r) => isOpenStatus(r.status)).length;
-  const linked = reports.filter((r) => r.linkedReports.length > 0).length;
-  const assignedToMeCount = reports.filter((r) => r.assignedToMe || r.assigned === session?.name).length;
+  const awaiting = liveMode
+    ? liveCounts.open
+    : reports.filter((r) => isOpenStatus(r.status)).length;
+  const linked = liveMode
+    ? liveCounts.repeat
+    : reports.filter((r) => r.linkedReports.length > 0).length;
+  const assignedToMeCount = liveMode
+    ? liveCounts.assigned_me
+    : reports.filter((r) => r.assignedToMe || r.assigned === session?.name).length;
 
   usePageChrome({
     title: 'Reports',
-    subtitle: `${awaiting} awaiting review · ${linked} linked · routes: user · listing · Live · Live comment`,
+    subtitle: liveMode
+      ? `${awaiting} awaiting review · ${linked} linked · routes: user · listing · Live · Live comment`
+      : `${awaiting} awaiting review · ${linked} linked · routes: user · listing · Live · Live comment`,
     search,
     onSearchChange: setSearch,
     searchPlaceholder: 'Report, object or username',
@@ -106,10 +206,27 @@ export function ReportsPage() {
   });
 
   const rows = useMemo(() => {
+    if (liveMode) {
+      // Server already filtered by queue; light client search for snappy typing
+      const q = search.trim().toLowerCase();
+      if (!q) return reports;
+      return reports.filter(
+        (r) =>
+          r.id.toLowerCase().includes(q) ||
+          r.reason.toLowerCase().includes(q) ||
+          r.target.toLowerCase().includes(q) ||
+          r.objectTitle.toLowerCase().includes(q) ||
+          r.objectMeta.toLowerCase().includes(q) ||
+          r.reporter.toLowerCase().includes(q) ||
+          r.category.toLowerCase().includes(q),
+      );
+    }
     const q = search.trim().toLowerCase();
     return reports.filter((r) => {
       if (queue === 'open' && !isOpenStatus(r.status)) return false;
-      if (queue === 'high' && r.aiPriority !== 'High') return false;
+      if (queue === 'high' && r.aiPriority !== 'High' && !(r.status === 'Escalated' || r.linkedReports.length >= 2)) {
+        return false;
+      }
       if (queue === 'repeat' && !(r.isRepeat || r.linkedReports.length >= 2)) return false;
       if (queue === 'escalated' && r.status !== 'Escalated') return false;
       if (queue === 'action_taken' && r.status !== 'Action taken') return false;
@@ -126,12 +243,16 @@ export function ReportsPage() {
         r.category.toLowerCase().includes(q)
       );
     });
-  }, [reports, queue, search, session?.name]);
+  }, [reports, queue, search, session?.name, liveMode]);
 
   const listWindow = useListWindow(rows);
 
   const selected = reports.find((r) => r.id === selectedId) ?? null;
-  const selectedFlash = selected ? overrides[selected.id]?.flash : null;
+  const selectedFlash = selected
+    ? liveMode
+      ? flashById[selected.id]
+      : overrides[selected.id]?.flash
+    : null;
   const mod = selected ? moduleFor(selected.route) : null;
 
   function patchReport(id: string, next: ReportOverride) {
@@ -141,7 +262,7 @@ export function ReportsPage() {
     }));
   }
 
-  function appendHistory(report: MockReport, entry: MockReport['history'][number]): MockReport['history'] {
+  function appendHistory(report: AdminReportDto, entry: AdminReportDto['history'][number]): AdminReportDto['history'] {
     return [entry, ...(overrides[report.id]?.history ?? report.history)];
   }
 
@@ -158,9 +279,54 @@ export function ReportsPage() {
     return session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
   }
 
+  async function runLiveAction(kind: ConfirmKind, reason: string) {
+    if (!selected || !kind || !liveMode) return;
+    setActionBusy(true);
+    try {
+      let detail: { report: AdminReportDto };
+      if (kind === 'note') detail = await noteAdminReport(selected.id, reason);
+      else if (kind === 'escalate') detail = await escalateAdminReport(selected.id, reason);
+      else if (kind === 'assign') detail = await assignAdminReport(selected.id, reason);
+      else if (kind === 'close') detail = await closeAdminReport(selected.id, reason);
+      else if (kind === 'dismiss') detail = await dismissAdminReport(selected.id, reason);
+      else if (kind === 'action_taken') detail = await actionTakenAdminReport(selected.id, reason);
+      else if (kind === 'associate') detail = await associateAdminReport(selected.id, reason);
+      else return;
+
+      applyDetail(detail);
+      setFlashById((c) => ({ ...c, [selected.id]: `${selected.id} updated` }));
+      show(`Updated ${selected.id}`);
+      setConfirm(null);
+      await loadLive();
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Action failed');
+      setConfirm(null);
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   const reportDesktopCols =
     'grid-cols-[88px_92px_minmax(0,1.35fr)_minmax(0,1fr)_52px_100px_108px] items-center py-3';
 
+  const chipCounts = liveMode
+    ? {
+        open: liveCounts.open,
+        high: liveCounts.high,
+        repeat: liveCounts.repeat,
+        escalated: liveCounts.escalated,
+        action_taken: liveCounts.action_taken,
+        closed: liveCounts.closed,
+      }
+    : {
+        open: awaiting,
+        high: undefined as number | undefined,
+        repeat: undefined as number | undefined,
+        escalated: undefined as number | undefined,
+        action_taken: undefined as number | undefined,
+        closed: undefined as number | undefined,
+      };
   return (
     <>
       <BleedSplit
@@ -178,12 +344,12 @@ export function ReportsPage() {
                   value={queue}
                   onChange={(id) => setQueue(id as QueueFilter)}
                   options={[
-                    { id: 'open', label: 'New & under review', count: awaiting },
-                    { id: 'high', label: 'High priority' },
-                    { id: 'repeat', label: 'Repeat reports' },
-                    { id: 'escalated', label: 'Escalated' },
-                    { id: 'action_taken', label: 'Action taken' },
-                    { id: 'closed', label: 'Closed' },
+                    { id: 'open', label: 'New & under review', count: chipCounts.open },
+                    { id: 'high', label: 'High priority', count: chipCounts.high },
+                    { id: 'repeat', label: 'Repeat reports', count: chipCounts.repeat },
+                    { id: 'escalated', label: 'Escalated', count: chipCounts.escalated },
+                    { id: 'action_taken', label: 'Action taken', count: chipCounts.action_taken },
+                    { id: 'closed', label: 'Closed', count: chipCounts.closed },
                   ]}
                 />
                 <button
@@ -200,6 +366,15 @@ export function ReportsPage() {
                 </button>
               </div>
               {banner}
+              {liveMode && loadError ? (
+                <Alert className="mt-3 rounded-[5px] border-risk-border bg-risk-bg">
+                  <AlertTitle className="text-[12px] text-risk">Could not load</AlertTitle>
+                  <AlertDescription className="text-[11.5px] text-risk">{loadError}</AlertDescription>
+                </Alert>
+              ) : null}
+              {loading ? (
+                <p className="mt-2 text-[11.5px] text-body">Loading reports…</p>
+              ) : null}
             </div>
 
             <div ref={listWindow.scrollRef} className="min-h-0 flex-1 overflow-auto">
@@ -482,6 +657,7 @@ export function ReportsPage() {
                     type="button"
                     variant="outline"
                     size="sm"
+                    disabled={actionBusy}
                     onClick={() => {
                       setNoteDraft('');
                       setConfirm('note');
@@ -489,12 +665,22 @@ export function ReportsPage() {
                   >
                     Add internal note
                   </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={actionBusy || selected.status === 'Closed'}
+                    onClick={() => setConfirm('assign')}
+                  >
+                    Assign to me
+                  </Button>
                   {canEnforce ? (
                     <>
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
+                        disabled={actionBusy}
                         onClick={() => setConfirm('associate')}
                       >
                         Associate record
@@ -503,26 +689,51 @@ export function ReportsPage() {
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={selected.status === 'Closed'}
+                        disabled={actionBusy || selected.status === 'Closed'}
                         onClick={() => setConfirm('escalate')}
                       >
                         Escalate
                       </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={selected.status === 'Closed'}
-                        onClick={() => setConfirm('close')}
-                      >
-                        Close after review
-                      </Button>
+                      {canActionTaken ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={actionBusy || selected.status === 'Action taken' || selected.status === 'Closed'}
+                          onClick={() => setConfirm('action_taken')}
+                        >
+                          Mark action taken
+                        </Button>
+                      ) : null}
+                      {canDismiss ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={actionBusy || selected.status === 'Closed'}
+                          onClick={() => setConfirm('dismiss')}
+                        >
+                          Dismiss
+                        </Button>
+                      ) : null}
+                      {canClose ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={actionBusy || selected.status === 'Closed'}
+                          onClick={() => setConfirm('close')}
+                        >
+                          Close after review
+                        </Button>
+                      ) : null}
                     </>
                   ) : (
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
+                      disabled={actionBusy}
                       onClick={() => setConfirm('escalate')}
                     >
                       Escalate to T&S
@@ -549,10 +760,10 @@ export function ReportsPage() {
       {confirm === 'close' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title={`Close ${selected.id} after review?`}
           description="Closing records the outcome on this report. It does not change listing, user or Live enforcement state by itself."
-          confirmLabel="Close report"
+          confirmLabel={actionBusy ? 'Working…' : 'Close report'}
           reasonLabel="Outcome & reason (required)"
           reasonPlaceholder="No policy breach found — listing description matched the photographs."
           metaRows={[
@@ -561,6 +772,10 @@ export function ReportsPage() {
             { label: 'Audit entry', value: 'Created on confirm' },
           ]}
           onConfirm={(reason) => {
+            if (liveMode) {
+              void runLiveAction('close', reason);
+              return;
+            }
             const stamp = stampNow();
             const by = actorLabel();
             patchReport(selected.id, {
@@ -580,20 +795,124 @@ export function ReportsPage() {
         />
       ) : null}
 
+      {confirm === 'dismiss' && selected ? (
+        <ConfirmActionDialog
+          open
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
+          title={`Dismiss ${selected.id}?`}
+          description="Dismiss when the report is not actionable. Same closed queue as close."
+          confirmLabel={actionBusy ? 'Working…' : 'Dismiss report'}
+          reasonLabel="Dismissal reason"
+          reasonPlaceholder="Why this report is being dismissed…"
+          onConfirm={(reason) => {
+            if (liveMode) {
+              void runLiveAction('dismiss', reason);
+              return;
+            }
+            const stamp = stampNow();
+            const by = actorLabel();
+            patchReport(selected.id, {
+              status: 'Closed',
+              flash: `${selected.id} dismissed`,
+              history: appendHistory(selected, {
+                id: `di-${Date.now()}`,
+                at: stamp,
+                title: 'Dismissed',
+                detail: `${by} · ${reason}`,
+                tone: 'ok',
+              }),
+            });
+            show(`Dismissed ${selected.id}`);
+            setConfirm(null);
+          }}
+        />
+      ) : null}
+
+      {confirm === 'action_taken' && selected ? (
+        <ConfirmActionDialog
+          open
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
+          title={`Mark action taken on ${selected.id}?`}
+          description="Records that enforcement was completed in Users, Listings, or Live."
+          confirmLabel={actionBusy ? 'Working…' : 'Mark action taken'}
+          reasonLabel="What action was taken"
+          reasonPlaceholder="Suspended seller · hid listing · ended live…"
+          onConfirm={(reason) => {
+            if (liveMode) {
+              void runLiveAction('action_taken', reason);
+              return;
+            }
+            const stamp = stampNow();
+            const by = actorLabel();
+            patchReport(selected.id, {
+              status: 'Action taken',
+              flash: `${selected.id} action taken`,
+              history: appendHistory(selected, {
+                id: `at-${Date.now()}`,
+                at: stamp,
+                title: 'Action taken',
+                detail: `${by} · ${reason}`,
+                tone: 'ok',
+              }),
+            });
+            show(`Action taken · ${selected.id}`);
+            setConfirm(null);
+          }}
+        />
+      ) : null}
+
+      {confirm === 'assign' && selected ? (
+        <ConfirmActionDialog
+          open
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
+          title={`Assign ${selected.id} to you?`}
+          description="Self-assign moves New reports into Under review."
+          confirmLabel={actionBusy ? 'Working…' : 'Assign to me'}
+          reasonLabel="Note (optional context)"
+          reasonPlaceholder="Picking this up for triage…"
+          reasonOptional
+          onConfirm={(reason) => {
+            if (liveMode) {
+              void runLiveAction('assign', reason || 'Self-assigned');
+              return;
+            }
+            const stamp = stampNow();
+            const by = actorLabel();
+            patchReport(selected.id, {
+              status: selected.status === 'New' ? 'Under review' : selected.status,
+              assigned: session?.name ?? 'Me',
+              flash: `${selected.id} assigned`,
+              history: appendHistory(selected, {
+                id: `asg-${Date.now()}`,
+                at: stamp,
+                title: 'Assigned',
+                detail: `${by} · ${reason || 'Self-assigned'}`,
+              }),
+            });
+            show(`Assigned ${selected.id}`);
+            setConfirm(null);
+          }}
+        />
+      ) : null}
+
       {confirm === 'escalate' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title={isSupport ? 'Escalate to Trust & Safety' : `Escalate ${selected.id}?`}
           description={
             isSupport
               ? `Route ${selected.id} to Trust & Safety for enforcement review.`
               : `Raise priority on ${selected.id} / ${selected.target}.`
           }
-          confirmLabel="Escalate"
+          confirmLabel={actionBusy ? 'Working…' : 'Escalate'}
           reasonLabel="Escalation reason"
           reasonPlaceholder="Why this needs elevated review…"
           onConfirm={(reason) => {
+            if (liveMode) {
+              void runLiveAction('escalate', reason);
+              return;
+            }
             const stamp = stampNow();
             const by = actorLabel();
             patchReport(selected.id, {
@@ -616,13 +935,17 @@ export function ReportsPage() {
       {confirm === 'associate' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title={`Associate a record with ${selected.id}?`}
           description="Link another report, order or user record to this case. Sellers and buyers never see this association."
-          confirmLabel="Associate"
+          confirmLabel={actionBusy ? 'Working…' : 'Associate'}
           reasonLabel="Record reference + note"
           reasonPlaceholder="RPT-#### or ORD-#### · why it belongs on this case…"
           onConfirm={(reason) => {
+            if (liveMode) {
+              void runLiveAction('associate', reason);
+              return;
+            }
             const stamp = stampNow();
             const by = actorLabel();
             patchReport(selected.id, {
@@ -643,14 +966,18 @@ export function ReportsPage() {
       {confirm === 'note' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title="Add internal note"
           description={`Note stays on ${selected.id}. Sellers and buyers never see this.`}
-          confirmLabel="Save note"
+          confirmLabel={actionBusy ? 'Working…' : 'Save note'}
           reasonLabel="Internal note"
           reasonPlaceholder="Context for the next reviewer…"
           defaultReason={noteDraft}
           onConfirm={(reason) => {
+            if (liveMode) {
+              void runLiveAction('note', reason);
+              return;
+            }
             const stamp = stampNow();
             const by = actorLabel();
             patchReport(selected.id, {

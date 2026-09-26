@@ -361,7 +361,7 @@ export default function LiveViewerScreen() {
     try {
       await apiFetch(`/live/sessions/${activeSession.id}/report`, {
         method: 'POST',
-        body: JSON.stringify({ kind: 'user' }),
+        body: JSON.stringify({ kind: 'user', targetUsername: comment.user }),
       });
       showEdgeToast(`Reported @${comment.user}`);
     } catch {
@@ -432,6 +432,7 @@ export default function LiveViewerScreen() {
         body: JSON.stringify({
           kind,
           listingId: kind === 'listing' ? pinnedProduct?.listingId ?? null : null,
+          targetUsername: kind === 'user' ? activeSession.host : undefined,
         }),
       });
       setNote(

@@ -1,7 +1,16 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth, roleLabel } from '@/auth/AuthContext';
 import { useBleedSelection } from '@/hooks/use-bleed-selection';
+import {
+  endAdminLive,
+  escalateAdminLive,
+  fetchAdminLiveSession,
+  fetchAdminLiveSessions,
+  noteAdminLive,
+  type AdminLiveCounts,
+  type AdminLiveDto,
+} from '@/api/live';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
 import { ConfirmActionDialog } from '@/components/admin/confirm-action-dialog';
 import { EmptyState } from '@/components/admin/empty-state';
@@ -13,80 +22,161 @@ import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { formatNaira, mockLive, type MockLive } from '@/data/mock';
 import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
+import { ApiError } from '@/lib/api';
 import { canAct } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 import { Lock } from 'lucide-react';
+import { formatNaira } from '@/lib/format';
 
 type QueueFilter = 'live' | 'upcoming' | 'ended' | 'incidents';
 type ConfirmKind = 'end' | 'note' | 'escalate' | null;
 
 type LiveOverride = {
-  status?: MockLive['status'];
-  timeline?: MockLive['timeline'];
+  status?: AdminLiveDto['status'];
+  timeline?: AdminLiveDto['timeline'];
   flash?: string | null;
   endedByPlatform?: boolean;
+  actionTaken?: boolean;
 };
 
-function statusTone(s: MockLive['status']): StatusTone {
+const emptyCounts: AdminLiveCounts = {
+  all: 0,
+  live: 0,
+  upcoming: 0,
+  ended: 0,
+  incidents: 0,
+};
+
+function statusTone(s: AdminLiveDto['status']): StatusTone {
   if (s === 'Live') return 'risk';
   if (s === 'Upcoming') return 'hold';
   if (s === 'Incident') return 'risk';
   return 'neutral';
 }
 
-function aiTone(p: MockLive['aiPriority']): StatusTone {
+function aiTone(p: AdminLiveDto['aiPriority']): StatusTone {
   if (p === 'High') return 'risk';
   if (p === 'Medium') return 'plum';
   return 'neutral';
 }
 
-function hasIncidents(s: MockLive) {
+function hasIncidents(s: AdminLiveDto) {
   return s.reports > 0 || s.linkedIncidents.length > 0 || s.status === 'Incident';
 }
 
-function isActiveLive(s: MockLive) {
+function isBroadcasting(s: AdminLiveDto) {
+  if (typeof s.broadcasting === 'boolean') return s.broadcasting;
   return s.status === 'Live';
 }
 
-function listTime(s: MockLive) {
+function isActiveLive(s: AdminLiveDto) {
+  return isBroadcasting(s as AdminLiveDto);
+}
+
+function listTime(s: AdminLiveDto) {
   return s.timeLabel ?? s.startedAt;
 }
 
 export function LivePage() {
   const { session } = useAuth();
+  const liveMode = Boolean(session?.accessToken);
   const { banner, show } = useToast();
   const [queue, setQueue] = useState<QueueFilter>('live');
   const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useBleedSelection(mockLive[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useBleedSelection(null);
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
   const [overrides, setOverrides] = useState<Record<string, LiveOverride>>({});
   const [noteDraft, setNoteDraft] = useState('');
+  const [loading, setLoading] = useState(liveMode);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [liveSessions, setLiveSessions] = useState<AdminLiveDto[]>([]);
+  const [liveCounts, setLiveCounts] = useState<AdminLiveCounts>(emptyCounts);
+  const [flashById, setFlashById] = useState<Record<string, string>>({});
 
   const canEnd = session ? canAct(session.role, 'end_live') : false;
   const isSupport = session?.role === 'support';
   const isFinance = session?.role === 'finance';
   const canPlatformAct = canEnd && !isSupport && !isFinance;
 
-  const sessions = useMemo(
+  const loadLive = useCallback(async () => {
+    if (!liveMode) return;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await fetchAdminLiveSessions(queue, search);
+      setLiveSessions(data.sessions);
+      setLiveCounts(data.counts);
+    } catch (err) {
+      setLoadError(err instanceof ApiError ? err.message : 'Could not load live sessions');
+    } finally {
+      setLoading(false);
+    }
+  }, [liveMode, queue, search]);
+
+  const applyDetail = useCallback((detail: { session: AdminLiveDto }) => {
+    setLiveSessions((current) => {
+      const idx = current.findIndex((s) => s.id === detail.session.id);
+      if (idx === -1) return [detail.session, ...current];
+      const next = [...current];
+      next[idx] = detail.session;
+      return next;
+    });
+  }, []);
+
+  const loadSelectedDetail = useCallback(
+    async (id: string) => {
+      if (!liveMode) return;
+      try {
+        const detail = await fetchAdminLiveSession(id);
+        applyDetail(detail);
+      } catch {
+        // keep list row
+      }
+    },
+    [applyDetail, liveMode],
+  );
+
+  useEffect(() => {
+    if (!liveMode) {
+      setLoading(false);
+      setLoadError(null);
+      setLiveSessions([]);
+      return;
+    }
+    void loadLive();
+  }, [liveMode, loadLive]);
+
+  useEffect(() => {
+    if (!liveMode || !selectedId) return;
+    void loadSelectedDetail(selectedId);
+  }, [liveMode, selectedId, loadSelectedDetail]);
+
+  useEffect(() => {
+    if (!liveMode || selectedId) return;
+    if (liveSessions[0]) setSelectedId(liveSessions[0].id);
+  }, [liveMode, liveSessions, selectedId, setSelectedId]);
+
+  const sessions: AdminLiveDto[] = useMemo(
     () =>
-      mockLive.map((s) => {
+      liveSessions.map((s) => {
         const o = overrides[s.id];
         if (!o) return s;
         return {
           ...s,
           status: o.status ?? s.status,
           timeline: o.timeline ?? s.timeline,
+          actionTaken: o.actionTaken ?? s.actionTaken,
         };
       }),
-    [overrides],
+    [liveSessions, overrides],
   );
 
-  const liveCount = sessions.filter(isActiveLive).length;
-  const upcomingCount = sessions.filter((s) => s.status === 'Upcoming').length;
-  const incidentCount = sessions.filter(hasIncidents).length;
+  const liveCount = liveCounts.live;
+  const upcomingCount = liveCounts.upcoming;
+  const incidentCount = liveCounts.incidents;
 
   usePageChrome({
     title: 'Live',
@@ -98,6 +188,19 @@ export function LivePage() {
   });
 
   const rows = useMemo(() => {
+    if (liveMode) {
+      const q = search.trim().toLowerCase();
+      if (!q) return sessions;
+      return sessions.filter(
+        (s) =>
+          s.id.toLowerCase().includes(q) ||
+          s.title.toLowerCase().includes(q) ||
+          s.host.toLowerCase().includes(q) ||
+          s.linkedIncidents.some(
+            (i) => i.id.toLowerCase().includes(q) || (i.target ?? '').toLowerCase().includes(q),
+          ),
+      );
+    }
     const q = search.trim().toLowerCase();
     return sessions.filter((s) => {
       if (queue === 'live' && !isActiveLive(s)) return false;
@@ -112,15 +215,26 @@ export function LivePage() {
         s.linkedIncidents.some((i) => i.id.toLowerCase().includes(q) || (i.target ?? '').toLowerCase().includes(q))
       );
     });
-  }, [sessions, queue, search]);
+  }, [sessions, queue, search, liveMode]);
 
   const listWindow = useListWindow(rows);
 
   const selected = sessions.find((s) => s.id === selectedId) ?? null;
-  const selectedFlash = selected ? overrides[selected.id]?.flash : null;
-  const selectedEndedByPlatform = selected ? Boolean(overrides[selected.id]?.endedByPlatform) : false;
-  const alreadyEnded =
-    selected?.status === 'Ended' || selected?.status === 'Incident' || selectedEndedByPlatform;
+  const selectedFlash = selected
+    ? liveMode
+      ? flashById[selected.id]
+      : overrides[selected.id]?.flash
+    : null;
+  const selectedEndedByPlatform = selected
+    ? liveMode
+      ? Boolean(selected.actionTaken)
+      : Boolean(overrides[selected.id]?.endedByPlatform)
+    : false;
+  const alreadyEnded = selected
+    ? liveMode
+      ? !isBroadcasting(selected)
+      : selected.status === 'Ended' || selected.status === 'Incident' || selectedEndedByPlatform
+    : false;
   const primaryViewer =
     selected?.flaggedComments[0]?.user ?? selected?.linkedIncidents[0]?.target ?? selected?.host;
 
@@ -131,7 +245,7 @@ export function LivePage() {
     }));
   }
 
-  function appendTimeline(session: MockLive, entry: MockLive['timeline'][number]): MockLive['timeline'] {
+  function appendTimeline(session: AdminLiveDto, entry: AdminLiveDto['timeline'][number]): AdminLiveDto['timeline'] {
     return [entry, ...(overrides[session.id]?.timeline ?? session.timeline)];
   }
 
@@ -146,6 +260,36 @@ export function LivePage() {
 
   function actorLabel() {
     return session ? `${session.name} (${roleLabel(session.role)})` : 'Staff';
+  }
+
+  async function runLiveAction(kind: ConfirmKind, reason: string) {
+    if (!selected || !kind || !liveMode) return;
+    setActionBusy(true);
+    try {
+      let detail: { session: AdminLiveDto };
+      if (kind === 'note') detail = await noteAdminLive(selected.id, reason);
+      else if (kind === 'escalate') detail = await escalateAdminLive(selected.id, reason);
+      else if (kind === 'end') detail = await endAdminLive(selected.id, reason);
+      else return;
+
+      applyDetail(detail);
+      setFlashById((c) => ({
+        ...c,
+        [selected.id]:
+          kind === 'end'
+            ? `${actorLabel()} · reason recorded · audit entry created`
+            : `${selected.id} updated`,
+      }));
+      show(kind === 'end' ? `Ended ${selected.id}` : kind === 'escalate' ? 'Session risk escalated' : 'Internal note saved');
+      setConfirm(null);
+      await loadLive();
+      await loadSelectedDetail(selected.id);
+    } catch (err) {
+      show(err instanceof Error ? err.message : 'Action failed');
+      setConfirm(null);
+    } finally {
+      setActionBusy(false);
+    }
   }
 
   function platformSafetyActions(opts: { compact?: boolean; className?: string }) {
@@ -167,6 +311,7 @@ export function LivePage() {
             variant="outline"
             size="sm"
             className="justify-start border-[#d9bfcf] bg-panel"
+            disabled={actionBusy}
             onClick={() => {
               setNoteDraft('');
               setConfirm('note');
@@ -188,6 +333,7 @@ export function LivePage() {
             variant="outline"
             size="sm"
             className="justify-start border-hold-border bg-panel text-[#8a5a15]"
+            disabled={actionBusy}
             onClick={() => setConfirm('escalate')}
           >
             {isSupport ? 'Escalate to T&S' : 'Escalate session risk'}
@@ -198,6 +344,7 @@ export function LivePage() {
               variant="outline"
               size="sm"
               className="justify-start border-risk text-risk hover:bg-risk-bg"
+              disabled={actionBusy}
               onClick={() => setConfirm('end')}
             >
               End Live for platform safety — requires reason
@@ -240,11 +387,18 @@ export function LivePage() {
               options={[
                 { id: 'live', label: 'Live now', count: liveCount },
                 { id: 'upcoming', label: 'Upcoming', count: upcomingCount },
-                { id: 'ended', label: 'Ended' },
+                { id: 'ended', label: 'Ended', count: liveMode ? liveCounts.ended : undefined },
                 { id: 'incidents', label: 'With incidents', count: incidentCount },
               ]}
             />
             {banner}
+            {liveMode && loadError ? (
+              <Alert className="rounded-[5px] border-risk-border bg-risk-bg">
+                <AlertTitle className="text-[12px] text-risk">Could not load</AlertTitle>
+                <AlertDescription className="text-[11.5px] text-risk">{loadError}</AlertDescription>
+              </Alert>
+            ) : null}
+            {loading ? <p className="text-[11.5px] text-body">Loading sessions…</p> : null}
           </div>
 
           <div ref={listWindow.scrollRef} className="min-h-0 flex-1 overflow-auto">
@@ -431,7 +585,11 @@ export function LivePage() {
 
                     {alreadyEnded && !selectedFlash ? (
                       <Alert className="rounded-[5px] border-hold-border bg-hold-bg">
-                        <AlertTitle className="text-[12px] text-[#8a5a15]">Session ended by the host</AlertTitle>
+                        <AlertTitle className="text-[12px] text-[#8a5a15]">
+                          {selected.actionTaken
+                            ? 'Session ended by Trust & Safety'
+                            : 'Session ended by the host'}
+                        </AlertTitle>
                         <AlertDescription className="text-[11.5px] text-[#8a5a15]">
                           End Live is no longer valid — the session is no longer active.
                         </AlertDescription>
@@ -675,10 +833,10 @@ export function LivePage() {
       {confirm === 'end' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title={`End ${selected.id} for platform safety?`}
           description="Ending the session stops the broadcast for the host and viewers. It does not change orders, payments or payouts."
-          confirmLabel="End Live"
+          confirmLabel={actionBusy ? 'Working…' : 'End Live'}
           destructive
           requireCheckbox
           checkboxLabel="I have reviewed this session and understand this cannot be undone."
@@ -686,7 +844,10 @@ export function LivePage() {
           reasonPlaceholder="Serious safety concern in the session that host and appointed moderators have not contained."
           metaRows={[
             { label: 'Affected object', value: `Session ${selected.id}` },
-            { label: 'AI assistance', value: 'Signal reviewed by admin' },
+            {
+              label: 'AI assistance',
+              value: selected.aiUnavailable ? 'Unavailable · manual review' : 'Signal reviewed by admin',
+            },
             { label: 'Audit entry', value: 'Created on confirm' },
           ]}
           onConfirm={(reason) => {
@@ -695,11 +856,16 @@ export function LivePage() {
               setConfirm(null);
               return;
             }
+            if (liveMode) {
+              void runLiveAction('end', reason);
+              return;
+            }
             const stamp = stampNow();
             const by = actorLabel();
             patchSession(selected.id, {
               status: 'Ended',
               endedByPlatform: true,
+              actionTaken: true,
               flash: `${by} · ${stamp} · reason recorded · audit entry created`,
               timeline: appendTimeline(selected, {
                 id: `end-${Date.now()}`,
@@ -718,14 +884,18 @@ export function LivePage() {
       {confirm === 'note' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title="Add internal note"
           description={`Note stays on ${selected.id}. Hosts and viewers never see this.`}
-          confirmLabel="Save note"
+          confirmLabel={actionBusy ? 'Working…' : 'Save note'}
           reasonLabel="Internal note"
           reasonPlaceholder="Context for the next reviewer…"
           defaultReason={noteDraft}
           onConfirm={(reason) => {
+            if (liveMode) {
+              void runLiveAction('note', reason);
+              return;
+            }
             const stamp = stampNow();
             const by = actorLabel();
             patchSession(selected.id, {
@@ -745,20 +915,25 @@ export function LivePage() {
       {confirm === 'escalate' && selected ? (
         <ConfirmActionDialog
           open
-          onOpenChange={(o) => !o && setConfirm(null)}
+          onOpenChange={(o) => !o && !actionBusy && setConfirm(null)}
           title={isSupport ? 'Escalate to Trust & Safety' : 'Escalate session risk'}
           description={
             isSupport
               ? `Route ${selected.id} / @${selected.host} to Trust & Safety for platform review.`
               : `Raise session risk on ${selected.id} linked to @${selected.host}.`
           }
-          confirmLabel="Escalate"
+          confirmLabel={actionBusy ? 'Working…' : 'Escalate'}
           reasonLabel="Escalation reason"
           reasonPlaceholder="Why this needs elevated review…"
           onConfirm={(reason) => {
+            if (liveMode) {
+              void runLiveAction('escalate', reason);
+              return;
+            }
             const stamp = stampNow();
             const by = actorLabel();
             patchSession(selected.id, {
+              status: selected.status === 'Live' ? 'Incident' : selected.status,
               timeline: appendTimeline(selected, {
                 id: `es-${Date.now()}`,
                 at: stamp,

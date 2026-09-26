@@ -1,0 +1,56 @@
+# EAS upload ignore — mirrors gitignore, but includes Firebase config
+# needed for native builds (gitignored so it is not in VCS).
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native secrets / signing (do not upload keystores)
+.kotlin/
+*.orig.*
+*.jks
+*.keystore
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Service account keys
+**/firebase-service-account.json
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files
+.env
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# Android local / IDE (from android/.gitignore)
+android/build/
+android/.idea
+android/.gradle
+android/local.properties
+android/*.iml
+android/*.hprof
+android/.cxx/
+android/**/*.jsbundle
+
+# Docs not needed for the binary
+docs/

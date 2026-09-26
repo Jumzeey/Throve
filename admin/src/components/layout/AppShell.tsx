@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { PageHeader } from '@/components/admin/page-header';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
+import { OpsBadgesProvider } from '@/hooks/use-ops-badges';
 import { Sidebar, SidebarNav } from './Sidebar';
 import { ShellChromeProvider, useShellChrome } from './shell-chrome';
 
@@ -48,20 +49,22 @@ export function AppShell() {
 
   return (
     <ShellChromeProvider>
-      <div className="fixed inset-0 flex overflow-hidden bg-sidebar">
-        <Sidebar />
-        <Sheet open={navOpen} onOpenChange={setNavOpen}>
-          <SheetContent
-            side="left"
-            showCloseButton
-            className="w-[280px] max-w-[85vw] gap-0 border-r-0 bg-sidebar p-0 text-panel sm:max-w-[280px]"
-          >
-            <SheetTitle className="sr-only">Navigation</SheetTitle>
-            <SidebarNav onNavigate={() => setNavOpen(false)} />
-          </SheetContent>
-        </Sheet>
-        <ShellMain onOpenNav={() => setNavOpen(true)} />
-      </div>
+      <OpsBadgesProvider>
+        <div className="fixed inset-0 flex overflow-hidden bg-sidebar">
+          <Sidebar />
+          <Sheet open={navOpen} onOpenChange={setNavOpen}>
+            <SheetContent
+              side="left"
+              showCloseButton
+              className="w-[280px] max-w-[85vw] gap-0 border-r-0 bg-sidebar p-0 text-panel sm:max-w-[280px]"
+            >
+              <SheetTitle className="sr-only">Navigation</SheetTitle>
+              <SidebarNav onNavigate={() => setNavOpen(false)} />
+            </SheetContent>
+          </Sheet>
+          <ShellMain onOpenNav={() => setNavOpen(true)} />
+        </div>
+      </OpsBadgesProvider>
     </ShellChromeProvider>
   );
 }

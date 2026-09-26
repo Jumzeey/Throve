@@ -1,7 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/auth/AuthContext';
 import { useBleedSelection } from '@/hooks/use-bleed-selection';
+import {
+  fetchAdminAuditEvent,
+  fetchAdminAuditEvents,
+  type AdminAuditCounts,
+  type AdminAuditDto,
+} from '@/api/audit';
 import { AiAdvisory } from '@/components/admin/ai-advisory';
 import { EmptyState } from '@/components/admin/empty-state';
 import { ExpandableListHeader, ExpandableListRow } from '@/components/admin/expandable-list-row';
@@ -13,23 +19,25 @@ import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { mockAudit, type MockAudit } from '@/data/mock';
 import { useListWindow } from '@/hooks/use-list-window';
 import { useToast } from '@/hooks/use-toast';
+import { ApiError } from '@/lib/api';
 import { ROLE_LABELS, type AdminRole } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 import { Lock } from 'lucide-react';
 
 type DateFilter = '7d' | '30d' | 'all';
-type ModuleFilter = 'all' | MockAudit['module'];
-type ResultFilter = 'all' | MockAudit['result'];
+type ModuleFilter = 'all' | AdminAuditDto['module'];
+type ResultFilter = 'all' | AdminAuditDto['result'];
 type RoleFilter = 'all' | string;
 
-function resultTone(r: MockAudit['result']): StatusTone {
+const emptyCounts: AdminAuditCounts = { all: 0, completed: 0, denied: 0 };
+
+function resultTone(r: AdminAuditDto['result']): StatusTone {
   return r === 'Completed' ? 'clear' : 'risk';
 }
 
-function sensitivityTone(s: MockAudit['sensitivity']): StatusTone {
+function sensitivityTone(s: AdminAuditDto['sensitivity']): StatusTone {
   if (s === 'High') return 'risk';
   if (s === 'Medium') return 'hold';
   if (s === 'Access') return 'gold';
@@ -77,6 +85,7 @@ function roleScopeCopy(role: AdminRole) {
 
 export function AuditPage() {
   const { session } = useAuth();
+  const liveMode = Boolean(session?.accessToken);
   const { banner, show } = useToast();
   const [dateFilter, setDateFilter] = useState<DateFilter>('7d');
   const [moduleFilter, setModuleFilter] = useState<ModuleFilter>('all');
@@ -84,46 +93,87 @@ export function AuditPage() {
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
   const [search, setSearch] = useState('');
   const [copied, setCopied] = useState(false);
+  const [loading, setLoading] = useState(liveMode);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [liveEvents, setLiveEvents] = useState<AdminAuditDto[]>([]);
+  const [liveCounts, setLiveCounts] = useState<AdminAuditCounts>(emptyCounts);
 
   const role = (session?.role ?? 'support') as AdminRole;
   const isSuper = role === 'super_admin';
   const scope = roleScopeCopy(role);
 
-  const visibleEvents = useMemo(
-    () => mockAudit.filter((a) => a.visibility[role] != null),
-    [role],
-  );
+  const loadLive = useCallback(async () => {
+    if (!liveMode) return;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await fetchAdminAuditEvents({
+        date: dateFilter,
+        module: moduleFilter,
+        result: resultFilter,
+        actorRole: roleFilter,
+        q: search,
+      });
+      setLiveEvents(data.events);
+      setLiveCounts(data.counts);
+    } catch (err) {
+      setLoadError(err instanceof ApiError ? err.message : 'Could not load audit log');
+    } finally {
+      setLoading(false);
+    }
+  }, [liveMode, dateFilter, moduleFilter, resultFilter, roleFilter, search]);
+
+  const applyDetail = useCallback((detail: { event: AdminAuditDto }) => {
+    setLiveEvents((current) => {
+      const idx = current.findIndex((e) => e.id === detail.event.id);
+      if (idx === -1) return [detail.event, ...current];
+      const next = [...current];
+      next[idx] = detail.event;
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!liveMode) {
+      setLoading(false);
+      setLoadError(null);
+      setLiveEvents([]);
+      return;
+    }
+    void loadLive();
+  }, [liveMode, loadLive]);
+
+  const visibleEvents = liveEvents;
 
   usePageChrome({
     title: 'Audit log',
-    subtitle: 'Sensitive admin actions and access events — read-only record',
+    subtitle: `${liveCounts.all} events in scope · read-only record`,
     search,
     onSearchChange: setSearch,
     searchPlaceholder: 'Admin, record or reference',
     bleed: true,
   });
 
-  const rows = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return visibleEvents.filter((a) => {
-      if (moduleFilter !== 'all' && a.module !== moduleFilter) return false;
-      if (resultFilter !== 'all' && a.result !== resultFilter) return false;
-      if (roleFilter !== 'all' && a.role !== roleFilter) return false;
-      // Demo: "Last 7 days" keeps seeded Aug rows; "all" same set; empty demo handled separately
-      if (dateFilter === '30d' && a.id === 'AUD-118070') return false;
-      if (!q) return true;
-      return (
-        a.id.toLowerCase().includes(q) ||
-        a.actor.toLowerCase().includes(q) ||
-        a.action.toLowerCase().includes(q) ||
-        a.recordId.toLowerCase().includes(q) ||
-        a.module.toLowerCase().includes(q) ||
-        (a.recordSub?.toLowerCase().includes(q) ?? false)
-      );
-    });
-  }, [visibleEvents, moduleFilter, resultFilter, roleFilter, dateFilter, search]);
+  const rows = useMemo(() => visibleEvents, [visibleEvents]);
 
-  const [selectedId, setSelectedId] = useBleedSelection(rows[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useBleedSelection(null);
+
+  useEffect(() => {
+    if (!liveMode || !selectedId) return;
+    void (async () => {
+      try {
+        const detail = await fetchAdminAuditEvent(selectedId);
+        applyDetail(detail);
+      } catch {
+        // keep list row
+      }
+    })();
+  }, [liveMode, selectedId, applyDetail]);
+
+  useEffect(() => {
+    if (!liveMode || selectedId) return;
+    if (rows[0]) setSelectedId(rows[0].id);
+  }, [liveMode, rows, selectedId, setSelectedId]);
 
   const listWindow = useListWindow(rows);
 
@@ -215,6 +265,13 @@ export function AuditPage() {
                 />
               </div>
               {banner}
+              {liveMode && loadError ? (
+                <Alert className="rounded-[5px] border-risk-border bg-risk-bg">
+                  <AlertTitle className="text-[12px] text-risk">Could not load</AlertTitle>
+                  <AlertDescription className="text-[11.5px] text-risk">{loadError}</AlertDescription>
+                </Alert>
+              ) : null}
+              {loading ? <p className="text-[11.5px] text-body">Loading audit events…</p> : null}
               {!isSuper && scope ? (
                 <Alert className="rounded-[5px] border-dashed border-[#d4c8bc] bg-transparent">
                   <Lock className="size-3.5 text-body" />
@@ -546,7 +603,7 @@ export function AuditPage() {
                             type="button"
                             className="text-[11px] font-semibold text-plum hover:underline"
                             onClick={() => {
-                              const match = mockAudit.find((a) => a.id === ev.id);
+                              const match = visibleEvents.find((a) => a.id === ev.id);
                               if (match && match.visibility[role]) setSelectedId(match.id);
                               else show(`${ev.openLabel} · ${ev.id}`);
                             }}

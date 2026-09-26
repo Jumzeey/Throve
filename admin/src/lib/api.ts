@@ -5,6 +5,7 @@ import {
   writeTokens,
   type AuthGateReason,
 } from './session';
+import { invalidateOpsBadges } from './ops-badges-invalidate';
 
 declare const __THROVE_API_URL__: string;
 
@@ -25,6 +26,15 @@ export class ApiError extends Error {
 }
 
 let refreshInFlight: Promise<string | null> | null = null;
+
+const MUTATING = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
+
+function shouldInvalidateOpsBadges(path: string, method: string) {
+  if (!MUTATING.has(method.toUpperCase())) return false;
+  if (!path.startsWith('/admin/')) return false;
+  if (path.startsWith('/admin/ops/badges') || path.startsWith('/admin/ops/dashboard')) return false;
+  return true;
+}
 
 function redirectToLogin(reason: AuthGateReason) {
   setAuthGateReason(reason);
@@ -94,6 +104,8 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = 
   const token = isPublicAuth ? null : getAccessToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
+  const method = (init.method ?? 'GET').toUpperCase();
+
   let res: Response;
   try {
     res = await fetch(`${API_URL}${path}`, { ...init, headers });
@@ -120,6 +132,9 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = 
   }
 
   if (res.status === 204) {
+    if (res.ok && shouldInvalidateOpsBadges(path, method)) {
+      invalidateOpsBadges();
+    }
     return null as T;
   }
 
@@ -141,6 +156,10 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = 
         ? String((payload as { code: string }).code)
         : undefined;
     throw new ApiError(message, code, res.status);
+  }
+
+  if (shouldInvalidateOpsBadges(path, method)) {
+    invalidateOpsBadges();
   }
 
   return (payload ?? null) as T;

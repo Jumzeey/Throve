@@ -1,3 +1,5 @@
+import type { PaymentsProvider } from './provider.js';
+
 const FLW_BASE = process.env.FLW_BASE_URL ?? 'https://api.flutterwave.com/v3';
 
 export type FlutterwaveInitInput = {
@@ -92,3 +94,36 @@ export function flutterwaveWebhookVerified(signature: string | undefined) {
   if (!secretHash) return false;
   return Boolean(signature && signature === secretHash);
 }
+
+function notConfigured(operation: string, endpoint: string): never {
+  throw new Error(`Flutterwave ${operation} is not configured yet (${endpoint})`);
+}
+
+/**
+ * Payout / refund operations. Stubbed until live keys are available; see
+ * backend/docs/payments-go-live.md for the endpoints to implement.
+ */
+export const flutterwaveProvider: PaymentsProvider = {
+  name: 'flutterwave',
+  async listBanks() {
+    return notConfigured('bank list', 'GET /banks/NG');
+  },
+  async resolveAccount() {
+    return notConfigured('account resolve', 'POST /accounts/resolve');
+  },
+  async createRecipient() {
+    return notConfigured('beneficiary create', 'POST /beneficiaries');
+  },
+  async transfer() {
+    return notConfigured('transfer', 'POST /transfers');
+  },
+  async transferStatus() {
+    return notConfigured('transfer status', 'GET /transfers/:id');
+  },
+  async refund() {
+    return notConfigured('refund', 'POST /transactions/:id/refund');
+  },
+  async refundStatus() {
+    return notConfigured('refund status', 'GET /refunds/:id');
+  },
+};
