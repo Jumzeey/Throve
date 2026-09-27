@@ -397,13 +397,20 @@ async function loadDisputeWindow() {
   const { data, error } = await service
     .from('order_disputes')
     .select(
-      'id, order_id, status, reason, seller_response, evidence_urls, created_at, buyer_id, seller_id, admin_decision',
+      'id, order_id, status, reason, seller_response, evidence_urls, created_at, decision, orders(buyer_id, seller_id)',
     )
     .in('status', [...OPEN_DISPUTE])
     .order('created_at', { ascending: true })
     .limit(QUEUE_CAP);
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []).map(withOrderParties);
+}
+
+// order_disputes has no buyer/seller columns; they come from the parent order.
+function withOrderParties<T extends { orders?: unknown }>(row: T) {
+  const { orders, ...rest } = row;
+  const order = (Array.isArray(orders) ? orders[0] : orders) as { buyer_id?: string; seller_id?: string } | null;
+  return { ...rest, buyer_id: order?.buyer_id ?? null, seller_id: order?.seller_id ?? null };
 }
 
 async function loadUsernameMap(ids: string[]) {
@@ -806,8 +813,8 @@ async function countDecidedNeedsContact(): Promise<number> {
   const service = createServiceClient();
   const { data, error } = await service
     .from('order_disputes')
-    .select('id, admin_decision, status, updated_at')
-    .not('admin_decision', 'is', null)
+    .select('id, decision, status, updated_at')
+    .not('decision', 'is', null)
     .order('updated_at', { ascending: false })
     .limit(100);
   if (error) {
@@ -820,10 +827,10 @@ async function countDecidedNeedsContact(): Promise<number> {
 
 async function buildSupportRows(staffUserId: string): Promise<OpsSupportRow[]> {
   const service = createServiceClient();
-  const [{ data: disputes }, { data: reports }] = await Promise.all([
+  const [{ data: disputeRows }, { data: reports }] = await Promise.all([
     service
       .from('order_disputes')
-      .select('id, order_id, status, buyer_id, admin_decision, created_at')
+      .select('id, order_id, status, decision, created_at, orders(buyer_id, seller_id)')
       .in('status', [...OPEN_DISPUTE])
       .order('created_at', { ascending: false })
       .limit(15),
@@ -836,18 +843,19 @@ async function buildSupportRows(staffUserId: string): Promise<OpsSupportRow[]> {
       .limit(10),
   ]);
 
-  const buyerIds = [...new Set((disputes ?? []).map((d) => String(d.buyer_id)))];
+  const disputes = (disputeRows ?? []).map(withOrderParties);
+  const buyerIds = [...new Set(disputes.map((d) => String(d.buyer_id)))];
   const names = await loadUsernameMap(buyerIds);
   const rows: OpsSupportRow[] = [];
 
-  for (const d of disputes ?? []) {
+  for (const d of disputes) {
     const buyer = names.get(String(d.buyer_id)) ?? 'unknown';
-    const decided = Boolean(d.admin_decision);
+    const decided = Boolean(d.decision);
     rows.push({
       id: String(d.id).slice(0, 8).toUpperCase(),
       party: `@${buyer} · ORD-${String(d.order_id).slice(0, 5)}`,
       status: decided
-        ? `Decision made — ${String(d.admin_decision)}`
+        ? `Decision made — ${String(d.decision)}`
         : String(d.status) === 'under_review'
           ? 'Under review by Trust & Safety'
           : 'Open dispute',
