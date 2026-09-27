@@ -1,0 +1,20 @@
+{
+  "name": "throve-promo-video",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare-assets": "node prepare.mjs",
+    "studio": "npm run prepare-assets && remotion studio src/index.ts",
+    "render": "npm run prepare-assets && remotion render src/index.ts ThrovePromo ../../assets/store/video/throve-promo-1080p.mp4 && remotion still src/index.ts ThrovePromo ../../assets/store/video/throve-promo-poster.png --frame=870"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.529",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "remotion": "4.0.529"
+  },
+  "devDependencies": {
+    "@types/react": "~19.1.0",
+    "typescript": "~5.9.2"
+  }
+}

@@ -13,7 +13,9 @@
     "postinstall": "node ./scripts/patch-livekit-webrtc-shim.js",
     "update:preview": "npx eas-cli@latest update --channel preview --environment preview",
     "update:production": "npx eas-cli@latest update --channel production --environment production",
-    "brand:assets": "swift scripts/brand-assets.swift"
+    "brand:assets": "swift scripts/brand-assets.swift",
+    "store:screenshots": "npm --prefix scripts/store-screenshots install && npm --prefix scripts/store-screenshots run render",
+    "promo:video": "npm --prefix scripts/promo-video install && npm --prefix scripts/promo-video run render"
   },
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^13.0.0",
