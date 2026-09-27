@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 
-const EFFECTIVE_DATE = 'August 18, 2026';
+const EFFECTIVE_DATE = 'September 27, 2026';
 
 export default function PrivacyPolicyScreen() {
   const insets = useSafeAreaInsets();
@@ -43,11 +43,17 @@ export default function PrivacyPolicyScreen() {
           between users about products and offers.
         </Text>
 
-        <Text style={styles.h3}>Orders (simulated for prototype)</Text>
+        <Text style={styles.h3}>Orders and payments</Text>
         <Text style={styles.p}>
-          This prototype uses simulated checkout and does not collect or process real payment
-          card/bank information. We may store order details for the purpose of showing the order
-          lifecycle inside the App.
+          When you buy, we process order details such as items, amounts, and delivery information.
+          Card and bank payments are processed by our payment provider, Flutterwave; Throve does not
+          receive or store your full card details.
+        </Text>
+
+        <Text style={styles.h3}>Seller payouts</Text>
+        <Text style={styles.p}>
+          If you sell, we collect your bank name, account number, and account name so we can verify
+          the account and pay out your earnings.
         </Text>
 
         <Text style={styles.h3}>Reviews and ratings</Text>
@@ -63,6 +69,7 @@ export default function PrivacyPolicyScreen() {
         <Text style={styles.listItem}>• enabling login and account features</Text>
         <Text style={styles.listItem}>• showing products, seller profiles, and order details</Text>
         <Text style={styles.listItem}>• enabling offers, messaging, and review submission</Text>
+        <Text style={styles.listItem}>• processing payments, refunds, and seller payouts</Text>
         <Text style={styles.listItem}>• operating live shopping sessions (where applicable)</Text>
 
         <Text style={styles.h2}>4. Sharing of information</Text>
@@ -71,7 +78,8 @@ export default function PrivacyPolicyScreen() {
           the App and provide its features.
         </Text>
         <Text style={styles.p}>
-          For this prototype, we do not process real payments.
+          We share payment and payout details with Flutterwave only to process payments, refunds, and
+          seller payouts, and to meet fraud-prevention and legal requirements.
         </Text>
 
         <Text style={styles.h2}>5. Data retention</Text>
@@ -95,11 +103,6 @@ export default function PrivacyPolicyScreen() {
         <Text style={styles.h2}>8. Contact us</Text>
         <Text style={styles.p}>
           For privacy questions, contact: <Text style={styles.mono}>privacy@throve.app</Text>
-        </Text>
-
-        <Text style={styles.small}>
-          Note: This is a prototype privacy policy for the Throve app. Replace the contact email and
-          any details that do not match your final production implementation before publishing to stores.
         </Text>
       </ScrollView>
     </View>
