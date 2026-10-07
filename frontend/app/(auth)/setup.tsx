@@ -1,6 +1,7 @@
 import { LocationField, placeDisplayLabel } from '@/components/ui/location-field';
 import { ProfileAvatar } from '@/components/ui/profile-avatar';
-import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
+import { OfflineBanner } from '@/components/ui/alert-banner';
+import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { CheckIcon } from '@/components/ui/icons';
 import { KeyboardSafeScreen } from '@/components/ui/keyboard-safe';
@@ -24,7 +25,7 @@ export default function SetupScreen() {
   const [bio, setBio] = useState(session?.bio ?? '');
   const [location, setLocation] = useState(session?.location ?? '');
   const [photoUri, setPhotoUri] = useState(session?.photoUri);
-  const [error, setError] = useState('');
+  const toast = useToast();
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -47,12 +48,11 @@ export default function SetupScreen() {
     const previous = photoUri;
     setPhotoUri(local);
     setUploading(true);
-    setError('');
     try {
       setPhotoUri(await setProfilePhoto(local));
     } catch (err) {
       setPhotoUri(previous);
-      setError(err instanceof Error ? err.message : 'Could not upload photo.');
+      toast.error("That photo didn't upload", err instanceof Error ? err.message : 'Could not upload photo.');
     } finally {
       setUploading(false);
     }
@@ -60,14 +60,12 @@ export default function SetupScreen() {
 
   async function onSubmit() {
     if (!isConnected) return;
-    setError('');
     setLoading(true);
     try {
       await completeSetup({ username, bio, location, photoUri });
       setSaved(true);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Please try again in a moment.';
-      setError(msg);
+      toast.error("We couldn't save that", err instanceof Error ? err.message : 'Please try again in a moment.');
     } finally {
       setLoading(false);
     }
@@ -132,7 +130,6 @@ export default function SetupScreen() {
                   />
                 </View>
               </View>
-              {error ? <AlertBanner variant="error" title="We couldn't save that" message={error} style={styles.banner} /> : null}
               <Button
                 label="Continue"
                 loading={loading}
@@ -181,7 +178,6 @@ const styles = StyleSheet.create({
   uploadText: { fontSize: 12.5, fontFamily: Typography.bodySemiBold, color: Palette.espresso },
   fields: { gap: 18 },
   bio: { minHeight: 70, paddingTop: 12, textAlignVertical: 'top' },
-  banner: { marginTop: 16 },
   submit: { marginTop: 22 },
   done: {
     flex: 1,

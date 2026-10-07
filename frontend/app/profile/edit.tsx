@@ -7,6 +7,7 @@ import { ProgressBar } from '@/components/ui/loading-skeleton';
 import { PhoneField } from '@/components/ui/phone-field';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
+import { useToast } from '@/components/ui/toast';
 import { KeyboardSafeScreen } from '@/components/ui/keyboard-safe';
 import { Palette, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
@@ -51,8 +52,7 @@ export default function EditProfileScreen() {
   const [hydrated, setHydrated] = useState(false);
 
   const [leavePrompt, setLeavePrompt] = useState<LeavePrompt>('idle');
-  const [saveError, setSaveError] = useState(false);
-  const [photoError, setPhotoError] = useState(false);
+  const toast = useToast();
   const [usernameError, setUsernameError] = useState<string | null>(null);
   const [phoneError, setPhoneError] = useState('');
   const [saved, setSaved] = useState(false);
@@ -133,8 +133,6 @@ export default function EditProfileScreen() {
     setNationalNumber(baseline.nationalNumber);
     setPhotoUri(baseline.photoUri);
     setLeavePrompt('idle');
-    setSaveError(false);
-    setPhotoError(false);
     setUsernameError(null);
     setPhoneError('');
     router.back();
@@ -156,15 +154,13 @@ export default function EditProfileScreen() {
     const previous = photoUri;
     setPhotoUri(local);
     setUploading(true);
-    setPhotoError(false);
-    setSaveError(false);
     setUploadProgress(0.28);
     try {
       setPhotoUri(await setProfilePhoto(local));
       setUploadProgress(1);
     } catch {
       setPhotoUri(previous);
-      setPhotoError(true);
+      toast.error("That photo didn't upload", 'Try again or choose another image.');
     } finally {
       setUploading(false);
     }
@@ -172,8 +168,6 @@ export default function EditProfileScreen() {
 
   async function onSave() {
     if (!isConnected || saving || uploading) return;
-    setSaveError(false);
-    setPhotoError(false);
     setUsernameError(null);
     setPhoneError('');
     setLeavePrompt('idle');
@@ -195,11 +189,12 @@ export default function EditProfileScreen() {
         phone: formatPhoneE164(countryIso, nationalNumber),
       });
       setSaved(true);
+      toast.success('Profile updated', 'Your changes are live.');
     } catch (err) {
       if (err instanceof ApiError && (err.code === 'USERNAME_TAKEN' || /username.*taken|unavailable/i.test(err.message))) {
         setUsernameError('That username is taken. Try another.');
       } else {
-        setSaveError(true);
+        toast.error("We couldn't save your profile", 'Please try again in a moment.');
       }
     } finally {
       setSaving(false);
@@ -258,26 +253,6 @@ export default function EditProfileScreen() {
                 />
               </View>
             </View>
-          ) : null}
-
-          {saved ? (
-            <AlertBanner variant="success" title="Profile updated" message="Your changes are live." />
-          ) : null}
-
-          {saveError ? (
-            <AlertBanner
-              variant="error"
-              title="We couldn't save your profile"
-              message="Please try again in a moment."
-            />
-          ) : null}
-
-          {photoError ? (
-            <AlertBanner
-              variant="error"
-              title="That photo didn't upload"
-              message="Try again or choose another image."
-            />
           ) : null}
 
           <Text style={styles.lead}>{lead}</Text>

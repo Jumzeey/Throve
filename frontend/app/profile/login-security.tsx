@@ -1,7 +1,8 @@
-import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
+import { OfflineBanner } from '@/components/ui/alert-banner';
 import { Dialog } from '@/components/ui/dialog';
 import { LockIcon, MailIcon, SpinnerArcIcon } from '@/components/ui/icons';
 import { ScreenHeader } from '@/components/ui/screen-header';
+import { useToast } from '@/components/ui/toast';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import type { PreferredLoginMethod } from '@/data/types';
@@ -20,6 +21,7 @@ export default function LoginSecurityScreen() {
   const [method, setMethod] = useState<PreferredLoginMethod>('password');
   const [pending, setPending] = useState<PreferredLoginMethod | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
+  const toast = useToast();
 
   useEffect(() => {
     let cancelled = false;
@@ -64,8 +66,15 @@ export default function LoginSecurityScreen() {
       setMethod(pending);
       setPending(null);
       setPhase('done');
+      toast.success(
+        'Sign-in preference updated',
+        pending === 'magic_link'
+          ? 'Next time, Throve will send you an email link.'
+          : 'Next time, you can sign in with your email and password.',
+      );
     } catch {
       setPhase('error');
+      toast.error("We couldn't update sign-in", 'Your preference is unchanged. Please try again in a moment.');
     }
   }
 
@@ -89,26 +98,6 @@ export default function LoginSecurityScreen() {
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         {!isConnected ? (
           <OfflineBanner title="No connection" message="Reconnect to change your account settings." />
-        ) : null}
-
-        {phase === 'error' ? (
-          <AlertBanner
-            variant="error"
-            title="We couldn't update sign-in"
-            message="Your preference is unchanged. Please try again in a moment."
-          />
-        ) : null}
-
-        {phase === 'done' ? (
-          <AlertBanner
-            variant="success"
-            title="Sign-in preference updated"
-            message={
-              isMagic
-                ? 'Next time, Throve will send you an email link.'
-                : 'Next time, you can sign in with your email and password.'
-            }
-          />
         ) : null}
 
         <Text style={styles.lead}>

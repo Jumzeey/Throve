@@ -6,6 +6,7 @@ import { ListingsProvider } from '@/context/listings-context';
 import { LiveProvider } from '@/context/live-context';
 import { NotificationsProvider } from '@/context/notifications-context';
 import { SplashScreen } from '@/components/ui/splash-screen';
+import { ToastProvider } from '@/components/ui/toast';
 import { Palette } from '@/constants/theme';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -104,8 +105,10 @@ export default function RootLayout() {
                 <LiveProvider>
                   <CheckoutProvider>
                     <ThemeProvider value={ThroveTheme}>
-                      <StatusBar style="dark" />
-                      <RootNavigator />
+                      <ToastProvider>
+                        <StatusBar style="dark" />
+                        <RootNavigator />
+                      </ToastProvider>
                     </ThemeProvider>
                   </CheckoutProvider>
                 </LiveProvider>

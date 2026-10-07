@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/icons';
 import { SellerProfileSkeleton } from '@/components/ui/loading-skeleton';
 import { ProfileAvatar } from '@/components/ui/profile-avatar';
+import { useToast } from '@/components/ui/toast';
 import { StarRating } from '@/components/ui/star-rating';
 import { StatusChip, type ListingChipVariant } from '@/components/ui/status-chip';
 import { Palette, Radius, Typography } from '@/constants/theme';
@@ -47,7 +48,7 @@ export default function SellerProfileScreen() {
   const [tab, setTab] = useState<'active' | 'sold'>('active');
   const [reviewsOpen, setReviewsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [banner, setBanner] = useState<string | null>(null);
+  const toast = useToast();
   const [reviews, setReviews] = useState<Review[]>([]);
   const [stats, setStats] = useState({ avg: 0, count: 0 });
   const [profileReady, setProfileReady] = useState(false);
@@ -121,12 +122,6 @@ export default function SellerProfileScreen() {
     }
   }, [ensurePublicProfile, reviews]);
 
-  useEffect(() => {
-    if (!banner) return;
-    const timer = setTimeout(() => setBanner(null), 2000);
-    return () => clearTimeout(timer);
-  }, [banner]);
-
   if (!session) return <Redirect href="/(auth)/welcome" />;
   if (!username) return <Redirect href="/(tabs)" />;
 
@@ -174,10 +169,10 @@ export default function SellerProfileScreen() {
         followingCount: result.followingCount,
         isFollowing: result.isFollowing,
       });
-      setBanner(result.isFollowing ? `You're following ${username}` : `Unfollowed ${username}`);
+      toast.success(result.isFollowing ? `You're following ${username}` : `Unfollowed ${username}`);
       void refreshListings();
     } catch {
-      setBanner('Could not update follow. Try again.');
+      toast.error("Couldn't update follow", 'Please try again.');
     } finally {
       setFollowBusy(false);
     }
@@ -189,6 +184,7 @@ export default function SellerProfileScreen() {
     profile.location,
     profile.photoUri,
     refreshListings,
+    toast,
     upsertPublicProfile,
     username,
   ]);
@@ -200,13 +196,6 @@ export default function SellerProfileScreen() {
           <View style={styles.bannerGap}>
             <OfflineBanner title="No connection" message="Reconnect to view this seller." />
           </View>
-        ) : null}
-        {banner ? (
-          <AlertBanner
-            variant={banner.startsWith('Could') ? 'error' : 'success'}
-            title={banner}
-            style={styles.bannerGap}
-          />
         ) : null}
         {profileError && !isOwn ? (
           <AlertBanner
@@ -300,7 +289,6 @@ export default function SellerProfileScreen() {
     ),
     [
       activeListings.length,
-      banner,
       followBusy,
       followerCount,
       isConnected,
@@ -413,12 +401,6 @@ export default function SellerProfileScreen() {
         />
       )}
 
-      {banner ? (
-        <View style={[styles.toast, { top: top + 52 }]}>
-          <Text style={styles.toastText}>{banner}</Text>
-        </View>
-      ) : null}
-
       <Modal visible={reviewsOpen} transparent animationType="slide" onRequestClose={() => setReviewsOpen(false)}>
         <Pressable style={styles.overlay} onPress={() => setReviewsOpen(false)}>
           <Pressable style={[styles.sheet, { paddingBottom: sheetBottom }]} onPress={() => undefined}>
@@ -451,7 +433,7 @@ export default function SellerProfileScreen() {
             <Pressable
               onPress={() => {
                 setMenuOpen(false);
-                setBanner('Seller reported. Our team will review.');
+                toast.success('Seller reported', 'Our team will review.');
               }}
               style={styles.menuRow}>
               <Text style={styles.menuLabel}>Report @{username}</Text>
@@ -460,7 +442,7 @@ export default function SellerProfileScreen() {
               onPress={() => {
                 void inbox.toggleBlock(username);
                 setMenuOpen(false);
-                setBanner(blocked ? `Unblocked @${username}` : `Blocked @${username}`);
+                toast.success(blocked ? `Unblocked @${username}` : `Blocked @${username}`);
               }}
               style={styles.menuRow}>
               <Text style={styles.menuDanger}>{blocked ? 'Unblock seller' : 'Block seller'}</Text>
@@ -865,15 +847,6 @@ const styles = StyleSheet.create({
     fontFamily: Typography.body,
     color: Palette.muted3,
   },
-  toast: {
-    position: 'absolute',
-    alignSelf: 'center',
-    backgroundColor: Palette.espresso,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-  },
-  toastText: { fontSize: 12, fontFamily: Typography.bodyMedium, color: Palette.ivory },
   overlay: { flex: 1, backgroundColor: Palette.liveOverlay, justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: Palette.ivory,

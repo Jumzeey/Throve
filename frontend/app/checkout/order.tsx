@@ -7,6 +7,7 @@ import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { StarRating } from '@/components/ui/star-rating';
 import { TextField } from '@/components/ui/text-field';
+import { useToast } from '@/components/ui/toast';
 import { KeyboardSafeScreen } from '@/components/ui/keyboard-safe';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
@@ -162,7 +163,7 @@ export default function CheckoutOrderScreen() {
   const [trackingEdit, setTrackingEdit] = useState(false);
   const [stars, setStars] = useState(0);
   const [comment, setComment] = useState('');
-  const [actionError, setActionError] = useState<string | null>(null);
+  const toast = useToast();
   const [actionBusy, setActionBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -262,14 +263,14 @@ export default function CheckoutOrderScreen() {
   const payout = order.payout;
   const disputeActive = order.dispute && ['open', 'under_review'].includes(order.dispute.status);
 
-  async function runAction(action: () => Promise<boolean>) {
+  async function runAction(action: () => Promise<boolean>, success?: { title: string; message?: string }) {
     if (!isConnected) return;
-    setActionError(null);
     setActionBusy(true);
     try {
       const ok = await action();
-      if (!ok) setActionError('Something went wrong. Please try again.');
-      else if (orderId) {
+      if (!ok) toast.error("We couldn't complete that", 'Something went wrong. Please try again.');
+      else if (success) toast.success(success.title, success.message);
+      if (ok && orderId) {
         try {
           setFetched(await apiFetch<Order>(`/checkout/orders/${orderId}`));
         } catch {
@@ -277,7 +278,7 @@ export default function CheckoutOrderScreen() {
         }
       }
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+      toast.error("We couldn't complete that", err instanceof Error ? err.message : 'Something went wrong. Please try again.');
     } finally {
       setActionBusy(false);
     }
@@ -305,7 +306,6 @@ export default function CheckoutOrderScreen() {
           {!isConnected ? (
             <OfflineBanner title="No connection" message="Reconnect to update this order." />
           ) : null}
-          {actionError ? <AlertBanner variant="error" title="We couldn't complete that" message={actionError} /> : null}
 
           <View style={styles.orderHeader}>
             <Text style={styles.orderId}>Order {order.id}</Text>
@@ -508,10 +508,18 @@ export default function CheckoutOrderScreen() {
                   disabled={!isConnected}
                   onFocusComment={() => keyboardScroll.onFieldFocus('review')}
                   commentAnchorRef={keyboardScroll.setAnchor('review')}
-                  onSubmit={() => void runAction(() => checkout.submitReview(order.id, me, stars, comment))}
+                  onSubmit={() =>
+                    void runAction(() => checkout.submitReview(order.id, me, stars, comment), {
+                      title: 'Review submitted',
+                      message: 'Thanks — your feedback helps the community.',
+                    })
+                  }
                 />
               ) : order.reviewed ? (
-                <AlertBanner variant="success" title="Review submitted" message="Thanks — your feedback helps the community." />
+                <View style={styles.reviewLocked}>
+                  <Text style={styles.reviewLockedTitle}>Review submitted</Text>
+                  <Text style={styles.reviewLockedBody}>Thanks — your feedback helps the community.</Text>
+                </View>
               ) : (
                 <View style={styles.reviewLocked}>
                   <Text style={styles.reviewLockedTitle}>Leave a seller review</Text>

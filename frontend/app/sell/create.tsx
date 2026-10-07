@@ -1,5 +1,6 @@
 import { AlertBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/toast';
 import { Dialog } from '@/components/ui/dialog';
 import { PlusIcon } from '@/components/ui/icons';
 import { PickerField } from '@/components/ui/picker-field';
@@ -47,8 +48,7 @@ export default function CreateListingScreen() {
   const [catalogError, setCatalogError] = useState(false);
   const [picking, setPicking] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [draftSaved, setDraftSaved] = useState(false);
-  const [draftError, setDraftError] = useState(false);
+  const toast = useToast();
   const [showErrors, setShowErrors] = useState(false);
   const [photoIndex, setPhotoIndex] = useState<number | null>(null);
   const [skipDialog, setSkipDialog] = useState<{ title: string; body: string } | null>(null);
@@ -145,13 +145,11 @@ export default function CreateListingScreen() {
   async function draft() {
     if (!isConnected) return;
     setSaving(true);
-    setDraftError(false);
-    setDraftSaved(false);
     try {
       await saveDraft(username);
-      setDraftSaved(true);
+      toast.success('Draft saved', 'Find it under Drafts in My listings.');
     } catch {
-      setDraftError(true);
+      toast.error("We couldn't save this draft", 'Please try again in a moment.');
     } finally {
       setSaving(false);
     }
@@ -256,22 +254,6 @@ export default function CreateListingScreen() {
             />
           ) : null}
           {catalogError ? <Button label="Try again" variant="secondary" onPress={reloadCatalog} style={styles.retry} /> : null}
-          {draftSaved ? (
-            <AlertBanner
-              variant="success"
-              title="Draft saved"
-              message="Find it under Drafts in My listings."
-              style={styles.banner}
-            />
-          ) : null}
-          {draftError ? (
-            <AlertBanner
-              variant="error"
-              title="We couldn't save this draft"
-              message="Please try again in a moment."
-              style={styles.banner}
-            />
-          ) : null}
           {showErrors && issues.length > 0 ? (
             <AlertBanner
               variant="error"
@@ -366,7 +348,6 @@ export default function CreateListingScreen() {
                   onFocus={() => keyboardScroll.onFieldFocus('title')}
                   onChangeText={(title) => {
                     setForm({ title });
-                    setDraftSaved(false);
                     setShowErrors(false);
                   }}
                 />
@@ -461,7 +442,6 @@ export default function CreateListingScreen() {
                 customEyebrow="Use your brand"
                 onSelect={(brand) => {
                   setForm({ brand });
-                  setDraftSaved(false);
                 }}
               />
               <Text style={styles.hint}>

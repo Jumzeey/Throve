@@ -7,6 +7,7 @@ import { OfferSheet } from '@/components/ui/offer-sheet';
 import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { StatusChip, type ListingChipVariant } from '@/components/ui/status-chip';
+import { useToast } from '@/components/ui/toast';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
@@ -30,23 +31,27 @@ export default function SellerListingScreen() {
   const inbox = useInbox();
   const checkout = useCheckout();
   const { isConnected } = useNetworkStatus();
-  const [note, setNote] = useState<'published' | 'updated' | 'resubmitted' | null>(
-    notice === 'published' || notice === 'submitted' ? 'published' : null,
-  );
+  const toast = useToast();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [offerFor, setOfferFor] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [actionError, setActionError] = useState(false);
+
+  function notify(kind: 'published' | 'updated' | 'resubmitted' | 'error') {
+    if (kind === 'error') toast.error("We couldn't save those changes", 'Please try again in a moment.');
+    else if (kind === 'published')
+      toast.success(
+        'Submitted for review',
+        'Trust & Safety will review this listing before it goes live. Track status here or in My listings.',
+      );
+    else if (kind === 'resubmitted')
+      toast.success('Resubmitted for review', 'Your updates are with Trust & Safety again.');
+    else toast.success('Listing updated', 'Buyers see the new details straight away.');
+  }
 
   useEffect(() => {
-    if (notice === 'published' || notice === 'submitted') setNote('published');
+    if (notice === 'published' || notice === 'submitted') notify('published');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notice]);
-
-  useEffect(() => {
-    if (!note) return;
-    const timer = setTimeout(() => setNote(null), 4000);
-    return () => clearTimeout(timer);
-  }, [note]);
 
   const listing = id ? getListing(id) : undefined;
   const buyers = listing?.savedBy ?? [];
@@ -102,12 +107,11 @@ export default function SellerListingScreen() {
   async function runStatus(next: Listing['status'], successNote: 'updated' | null = 'updated') {
     if (!isConnected || saving) return;
     setSaving(true);
-    setActionError(false);
     try {
       await setStatus(item.id, next);
-      if (successNote) setNote(successNote);
+      if (successNote) notify(successNote);
     } catch {
-      setActionError(true);
+      notify('error');
     } finally {
       setSaving(false);
     }
@@ -116,7 +120,6 @@ export default function SellerListingScreen() {
   async function confirmRemove() {
     if (!allowDelete || saving) return;
     setSaving(true);
-    setActionError(false);
     setConfirmDelete(false);
     try {
       const removed = await removeListing(item.id);
@@ -124,9 +127,9 @@ export default function SellerListingScreen() {
         router.replace('/(tabs)/sell');
         return;
       }
-      setActionError(true);
+      notify('error');
     } catch {
-      setActionError(true);
+      notify('error');
     } finally {
       setSaving(false);
     }
@@ -145,34 +148,6 @@ export default function SellerListingScreen() {
       <ScrollView contentContainerStyle={[styles.body, { paddingBottom: sheetBottom + 24 }]} showsVerticalScrollIndicator={false}>
         {!isConnected ? (
           <OfflineBanner title="No connection" message="Reconnect to manage this listing." />
-        ) : null}
-        {actionError ? (
-          <AlertBanner
-            variant="error"
-            title="We couldn't save those changes"
-            message="Please try again in a moment."
-          />
-        ) : null}
-        {note === 'published' ? (
-          <AlertBanner
-            variant="success"
-            title="Submitted for review"
-            message="Trust & Safety will review this listing before it goes live. Track status here or in My listings."
-          />
-        ) : null}
-        {note === 'resubmitted' ? (
-          <AlertBanner
-            variant="success"
-            title="Resubmitted for review"
-            message="Your updates are with Trust & Safety again."
-          />
-        ) : null}
-        {note === 'updated' ? (
-          <AlertBanner
-            variant="success"
-            title="Listing updated"
-            message="Buyers see the new details straight away."
-          />
         ) : null}
 
         <View style={styles.summaryCard}>
@@ -282,12 +257,11 @@ export default function SellerListingScreen() {
                 onPress={() => {
                   void (async () => {
                     setSaving(true);
-                    setActionError(false);
                     try {
                       await resubmit(item.id);
-                      setNote('resubmitted');
+                      notify('resubmitted');
                     } catch {
-                      setActionError(true);
+                      notify('error');
                     } finally {
                       setSaving(false);
                     }

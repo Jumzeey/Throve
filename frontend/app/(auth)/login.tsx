@@ -1,5 +1,6 @@
 import { PasswordField } from '@/components/auth/password-field';
-import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
+import { OfflineBanner } from '@/components/ui/alert-banner';
+import { useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { MailIcon } from '@/components/ui/icons';
 import { ScreenHeader } from '@/components/ui/screen-header';
@@ -30,7 +31,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
-  const [error, setError] = useState('');
+  const toast = useToast();
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState<'form' | 'sent'>(restoredMagic ? 'sent' : 'form');
   const [cooldown, setCooldown] = useState(() =>
@@ -85,7 +86,6 @@ export default function LoginScreen() {
 
   async function onPasswordLogin() {
     if (!isConnected) return;
-    setError('');
     setPasswordError('');
     if (!isValidEmail(email)) {
       setEmailError('Enter a valid email address.');
@@ -109,7 +109,7 @@ export default function LoginScreen() {
       }
       await signInWithPassword(email, password);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Please try again in a moment.');
+      toast.error("We couldn't sign you in", err instanceof Error ? err.message : 'Please try again in a moment.');
     } finally {
       setLoading(false);
     }
@@ -118,7 +118,6 @@ export default function LoginScreen() {
   async function onSendMagic(isResend = false) {
     if (!isConnected) return;
     if (isResend && cooldown > 0) return;
-    setError('');
     if (!isValidEmail(email)) {
       setEmailError('Enter a valid email address.');
       return;
@@ -136,19 +135,18 @@ export default function LoginScreen() {
         updatedAt: Date.now(),
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Please try again in a moment.');
+      toast.error("We couldn't send that link", err instanceof Error ? err.message : 'Please try again in a moment.');
     } finally {
       setLoading(false);
     }
   }
 
   async function onUseLink() {
-    setError('');
     setLoading(true);
     try {
       await completeMagicLink(email);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Please try again in a moment.');
+      toast.error("We couldn't sign you in", err instanceof Error ? err.message : 'Please try again in a moment.');
     } finally {
       setLoading(false);
     }
@@ -157,7 +155,6 @@ export default function LoginScreen() {
   async function onBack() {
     if (stage === 'sent') {
       setStage('form');
-      setError('');
       return;
     }
     await clearAuthResumeFlow();
@@ -210,15 +207,6 @@ export default function LoginScreen() {
                 </View>
               ) : null}
 
-              {error ? (
-                <AlertBanner
-                  variant="error"
-                  title={isMagic ? "We couldn't send that link" : "We couldn't sign you in"}
-                  message={error}
-                  style={styles.banner}
-                />
-              ) : null}
-
               <Button
                 label={ready && isMagic ? 'Send magic link' : 'Log in'}
                 loading={loading || !ready}
@@ -256,7 +244,6 @@ export default function LoginScreen() {
             />
             {__DEV__ ? <Button label="Simulate: I clicked the link" loading={loading} onPress={onUseLink} /> : null}
           </View>
-          {error ? <AlertBanner variant="error" title="We couldn't send that link" message={error} /> : null}
         </View>
       )}
     </View>
@@ -282,7 +269,6 @@ const styles = StyleSheet.create({
     marginBottom: 26,
   },
   passwordField: { marginTop: 16 },
-  banner: { marginTop: 12 },
   submit: { marginTop: 22 },
   divider: { height: 1, backgroundColor: Palette.divider, marginVertical: 20 },
   footer: { fontSize: 13, textAlign: 'center', color: Palette.body, fontFamily: Typography.body },

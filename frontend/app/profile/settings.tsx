@@ -1,8 +1,9 @@
-import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
+import { OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { LockIcon, MailIcon, SpinnerArcIcon } from '@/components/ui/icons';
 import { ScreenHeader } from '@/components/ui/screen-header';
+import { useToast } from '@/components/ui/toast';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useInbox } from '@/context/inbox-context';
@@ -27,6 +28,7 @@ export default function SettingsScreen() {
   const { hideActiveForSeller } = useListings();
   const { isConnected } = useNetworkStatus();
 
+  const toast = useToast();
   const [confirm, setConfirm] = useState<ConfirmKind>(null);
   const [pendingMethod, setPendingMethod] = useState<PreferredLoginMethod | null>(null);
   const [method, setMethod] = useState<PreferredLoginMethod>('password');
@@ -82,11 +84,7 @@ export default function SettingsScreen() {
       <View style={styles.screen}>
         <ScreenHeader title="Settings and account" />
         <View style={styles.farewell}>
-          {session ? (
-            <Button label="Logging out…" loading disabled />
-          ) : (
-            <AlertBanner variant="success" title="Logged out" message="Returning to Welcome." />
-          )}
+          <Button label="Logging out…" loading disabled />
         </View>
       </View>
     );
@@ -150,9 +148,11 @@ export default function SettingsScreen() {
     try {
       await logout();
       setLogoutPhase('done');
+      toast.success('Logged out', 'Returning to Welcome.');
     } catch {
       setFarewell(null);
       setLogoutPhase('error');
+      toast.error("We couldn't log you out", 'Please try again in a moment.');
     }
   }
 
@@ -168,6 +168,7 @@ export default function SettingsScreen() {
     } catch {
       setFarewell(null);
       setDeletePhase('error');
+      toast.error("We couldn't complete that", 'Your account is unchanged. Please try again in a moment.');
     }
   }
 
@@ -180,8 +181,15 @@ export default function SettingsScreen() {
       setMethod(pendingMethod);
       setSwitchPhase('done');
       setPendingMethod(null);
+      toast.success(
+        'Sign-in preference updated',
+        pendingMethod === 'magic_link'
+          ? 'Next time, Throve will send you an email link.'
+          : 'Next time, you can sign in with your email and password.',
+      );
     } catch {
       setSwitchPhase('error');
+      toast.error("We couldn't update sign-in", 'Your preference is unchanged. Please try again in a moment.');
     }
   }
 
@@ -217,9 +225,11 @@ export default function SettingsScreen() {
     try {
       await updateSettings({ [key]: next });
       setNotifPhase('done');
+      toast.success('Notification preferences updated');
     } catch {
       setters[key](prev[key]);
       setNotifPhase('error');
+      toast.error("Couldn't update notifications", 'Your notification preferences are unchanged. Please try again.');
     }
   }
 
@@ -235,9 +245,11 @@ export default function SettingsScreen() {
     try {
       await updateSettings({ notifMessageTone: next });
       setNotifPhase('done');
+      toast.success('Notification preferences updated');
     } catch {
       setNotifMessageTone(prev);
       setNotifPhase('error');
+      toast.error("Couldn't update notifications", 'Your notification preferences are unchanged. Please try again.');
     }
   }
 
@@ -261,54 +273,6 @@ export default function SettingsScreen() {
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         {!isConnected ? (
           <OfflineBanner title="No connection" message="Reconnect to change your account settings." />
-        ) : null}
-
-        {logoutPhase === 'error' ? (
-          <AlertBanner
-            variant="error"
-            title="We couldn't log you out"
-            message="Please try again in a moment."
-          />
-        ) : null}
-
-        {deletePhase === 'error' ? (
-          <AlertBanner
-            variant="error"
-            title="We couldn't complete that"
-            message="Your account is unchanged. Please try again in a moment."
-          />
-        ) : null}
-
-        {switchPhase === 'error' ? (
-          <AlertBanner
-            variant="error"
-            title="We couldn't update sign-in"
-            message="Your preference is unchanged. Please try again in a moment."
-          />
-        ) : null}
-
-        {switchPhase === 'done' ? (
-          <AlertBanner
-            variant="success"
-            title="Sign-in preference updated"
-            message={
-              isMagic
-                ? 'Next time, Throve will send you an email link.'
-                : 'Next time, you can sign in with your email and password.'
-            }
-          />
-        ) : null}
-
-        {notifPhase === 'error' ? (
-          <AlertBanner
-            variant="error"
-            title="Couldn't update notifications"
-            message="Your notification preferences are unchanged. Please try again."
-          />
-        ) : null}
-
-        {notifPhase === 'done' ? (
-          <AlertBanner variant="success" title="Notification preferences updated" />
         ) : null}
 
         <Section label="Profile">

@@ -1,4 +1,4 @@
-import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
+import { OfflineBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
 import { KeyboardSafeScreen } from '@/components/ui/keyboard-safe';
 import { ScreenHeader } from '@/components/ui/screen-header';
@@ -59,10 +59,10 @@ export default function RecoveryScreen() {
                 keyboardType="email-address"
                 value={email}
                 onChangeText={setEmail}
+                error={error}
                 onFocus={() => keyboardScroll.onFieldFocus('email')}
               />
             </View>
-            {error ? <AlertBanner variant="error" title="Couldn’t continue" message={error} style={styles.banner} /> : null}
             <Button label="Continue" loading={loading} onPress={onContinue} disabled={!isConnected} style={styles.submit} />
           </>
         )}
@@ -89,6 +89,5 @@ const styles = StyleSheet.create({
     color: Palette.body,
     marginBottom: 26,
   },
-  banner: { marginTop: 12 },
   submit: { marginTop: 22 },
 });

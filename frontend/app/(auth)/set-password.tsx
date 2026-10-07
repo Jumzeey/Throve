@@ -3,6 +3,7 @@ import { PasswordField } from '@/components/auth/password-field';
 import { PasswordRequirements } from '@/components/auth/password-requirements';
 import { PasswordStrengthMeter } from '@/components/auth/password-strength-meter';
 import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
+import { useErrorToast, useToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { MailIcon } from '@/components/ui/icons';
 import { ScreenHeader } from '@/components/ui/screen-header';
@@ -53,6 +54,8 @@ export default function SetPasswordScreen() {
   const [confirm, setConfirm] = useState('');
   const [stage, setStage] = useState<Stage>('otp');
   const [error, setError] = useState('');
+  const toast = useToast();
+  useErrorToast(error, stage === 'password' ? 'Couldn’t save password' : 'Couldn’t continue');
   const [info, setInfo] = useState(
     restored ? 'Enter the code we already emailed you. Request a new one only if it expired.' : '',
   );
@@ -133,7 +136,7 @@ export default function SetPasswordScreen() {
       });
       if (isResend) {
         setOtp('');
-        setInfo('A new code is on its way. Check your inbox and spam folder.');
+        toast.info('Code resent', 'A new code is on its way. Check your inbox and spam folder.');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Please try again in a moment.');
@@ -240,7 +243,6 @@ export default function SetPasswordScreen() {
                       <Text style={styles.emailCardValue}>{email}</Text>
                     </View>
                   )}
-                  {error ? <AlertBanner variant="error" title="Couldn’t continue" message={error} style={styles.banner} /> : null}
                   <Button label="Send code" loading={loading} onPress={() => sendCode()} disabled={!isConnected} style={styles.submit} />
                 </>
               ) : (
@@ -268,15 +270,7 @@ export default function SetPasswordScreen() {
                     />
                   </View>
 
-                  {info ? (
-                    <AlertBanner
-                      variant="info"
-                      title={info.includes('already emailed') ? 'Use your existing code' : 'Code resent'}
-                      message={info}
-                      style={styles.banner}
-                    />
-                  ) : null}
-                  {error ? <AlertBanner variant="error" title="Couldn’t continue" message={error} style={styles.banner} /> : null}
+                  {info ? <AlertBanner variant="info" title="Use your existing code" message={info} style={styles.banner} /> : null}
 
                   <Button
                     label="Continue"
@@ -331,7 +325,6 @@ export default function SetPasswordScreen() {
                   />
                 </View>
               </View>
-              {error ? <AlertBanner variant="error" title="Couldn’t save password" message={error} style={styles.banner} /> : null}
               <Button label="Save password" loading={loading} onPress={onSavePassword} disabled={!isConnected} style={styles.submit} />
             </>
           )}

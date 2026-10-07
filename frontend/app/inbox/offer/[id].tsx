@@ -1,10 +1,11 @@
-import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
+import { OfflineBanner } from '@/components/ui/alert-banner';
 import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
 import { ChatBubbleIcon, ClockIcon, InfoCircleIcon } from '@/components/ui/icons';
 import { OfferSheet } from '@/components/ui/offer-sheet';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { StatusChip } from '@/components/ui/status-chip';
+import { useToast } from '@/components/ui/toast';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
@@ -30,7 +31,7 @@ export default function OfferDetailsScreen() {
   const { isConnected } = useNetworkStatus();
   const [now, setNow] = useState(Date.now());
   const [busy, setBusy] = useState(false);
-  const [actionError, setActionError] = useState(false);
+  const toast = useToast();
   const [counterOpen, setCounterOpen] = useState(false);
 
   useEffect(() => {
@@ -89,11 +90,10 @@ export default function OfferDetailsScreen() {
   async function runAction(task: () => Promise<unknown>) {
     if (!isConnected) return;
     setBusy(true);
-    setActionError(false);
     try {
       await task();
     } catch {
-      setActionError(true);
+      toast.error("We couldn't complete that", 'Please try again in a moment.');
     } finally {
       setBusy(false);
     }
@@ -119,7 +119,7 @@ export default function OfferDetailsScreen() {
         });
         router.push('/checkout/shipping');
       } catch {
-        setActionError(true);
+        toast.error("We couldn't complete that", 'Please try again in a moment.');
       }
     });
   }
@@ -131,14 +131,6 @@ export default function OfferDetailsScreen() {
       <ScrollView contentContainerStyle={[styles.body, { paddingBottom: sheetBottom + 24 }]}>
         {!isConnected ? (
           <OfflineBanner title="No connection" message="Reconnect to respond to this offer." style={styles.banner} />
-        ) : null}
-        {actionError ? (
-          <AlertBanner
-            variant="error"
-            title="We couldn't complete that"
-            message="Please try again in a moment."
-            style={styles.banner}
-          />
         ) : null}
 
         <View style={styles.headRow}>

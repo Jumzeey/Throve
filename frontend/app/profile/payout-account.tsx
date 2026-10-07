@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { CheckIcon, SpinnerArcIcon } from '@/components/ui/icons';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
+import { useToast } from '@/components/ui/toast';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useNetworkStatus } from '@/hooks/use-network-status';
@@ -42,7 +43,7 @@ export default function PayoutAccountScreen() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [accountNumber, setAccountNumber] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  const toast = useToast();
 
   const load = useCallback(async () => {
     setPhase('loading');
@@ -77,7 +78,6 @@ export default function PayoutAccountScreen() {
   const canSubmit = isConnected && Boolean(bank) && numberValid && phase !== 'verifying';
 
   function startEditing() {
-    setSavedMessage(null);
     setError(null);
     setBank(account ? banks.find((b) => b.code === account.bankCode) ?? null : null);
     setAccountNumber('');
@@ -96,14 +96,18 @@ export default function PayoutAccountScreen() {
       setMode(res.mode);
       setAccount(res.account);
       setAccountNumber('');
-      setSavedMessage(
+      toast.success(
+        'Account verified',
         res.releasedPayouts > 0
-          ? `Account verified. ${res.releasedPayouts} payout${res.releasedPayouts === 1 ? '' : 's'} can now be released.`
-          : 'Account verified. Future payouts will go to this account.',
+          ? `${res.releasedPayouts} payout${res.releasedPayouts === 1 ? '' : 's'} can now be released.`
+          : 'Future payouts will go to this account.',
       );
       setPhase('idle');
     } catch (err) {
-      setError(err instanceof ApiError || err instanceof Error ? err.message : 'Could not verify this account.');
+      toast.error(
+        "Couldn't verify account",
+        err instanceof ApiError || err instanceof Error ? err.message : 'Could not verify this account.',
+      );
       setPhase('editing');
     }
   }
@@ -133,9 +137,6 @@ export default function PayoutAccountScreen() {
             message="Live payouts are now on. Confirm your bank details again so we can pay you."
           />
         ) : null}
-
-        {savedMessage ? <AlertBanner variant="success" title={savedMessage} /> : null}
-        {error && phase !== 'error' ? <AlertBanner variant="error" title="Couldn't verify account" message={error} /> : null}
 
         <Text style={styles.lead}>
           Payouts for completed orders are sent to this Nigerian bank account. Only the last four digits are shown.

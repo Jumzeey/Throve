@@ -13,6 +13,7 @@ import { LiveWatchersSheet } from '@/components/live/watchers-sheet';
 import type { PinnedProductVariant } from '@/components/live/pinned-product-card';
 import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { ModeratorBadge } from '@/components/ui/status-chip';
+import { useToast } from '@/components/ui/toast';
 import {
   BagIcon,
   ChevronBackIcon,
@@ -68,7 +69,7 @@ export default function LiveViewerScreen() {
   const live = useLive();
   const checkout = useCheckout();
   const [draft, setDraft] = useState('');
-  const [note, setNote] = useState<string | null>(null);
+  const toast = useToast();
   const [credentials, setCredentials] = useState<LiveMediaCredentials | null>(null);
   const [mediaStatus, setMediaStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [mediaErrorMessage, setMediaErrorMessage] = useState<string | null>(null);
@@ -114,10 +115,10 @@ export default function LiveViewerScreen() {
   const shortScreen = Dimensions.get('window').height < 720;
   const maxComments = shortScreen ? 6 : 8;
 
-  const showEdgeToast = useCallback((message: string) => {
-    setNote(message);
-    setTimeout(() => setNote(null), 1800);
-  }, []);
+  const showEdgeToast = useCallback(
+    (message: string) => toast.show({ variant: 'info', title: message, duration: 2400 }),
+    [toast],
+  );
 
   const goToLive = useCallback(
     (targetId: string | null, direction: 'next' | 'prev') => {
@@ -182,7 +183,6 @@ export default function LiveViewerScreen() {
     setReportOpen(false);
     setWatchersOpen(false);
     setDrawerProduct(null);
-    setNote(null);
   }, [sessionId, translateY]);
 
   useEffect(() => {
@@ -225,8 +225,8 @@ export default function LiveViewerScreen() {
   }, [fetchLiveMedia, sessionId, viewSession?.status]);
 
   useEffect(() => {
-    if (live.roomNotice) setNote(live.roomNotice);
-  }, [live.roomNotice]);
+    if (live.roomNotice) showEdgeToast(live.roomNotice);
+  }, [live.roomNotice, showEdgeToast]);
 
   useEffect(() => {
     if (keyboardOpen) {
@@ -365,7 +365,7 @@ export default function LiveViewerScreen() {
       });
       showEdgeToast(`Reported @${comment.user}`);
     } catch {
-      showEdgeToast("We couldn't send that report.");
+      toast.error("We couldn't send that report", 'Please try again in a moment.');
     }
   }
 
@@ -397,11 +397,9 @@ export default function LiveViewerScreen() {
         { method: isFollowing ? 'DELETE' : 'POST' },
       );
       setIsFollowing(result.isFollowing);
-      setNote(result.isFollowing ? `You're following ${activeSession.host}` : `Unfollowed ${activeSession.host}`);
-      setTimeout(() => setNote(null), 1800);
+      showEdgeToast(result.isFollowing ? `You're following ${activeSession.host}` : `Unfollowed ${activeSession.host}`);
     } catch {
-      setNote("Couldn't update follow. Try again.");
-      setTimeout(() => setNote(null), 1800);
+      toast.error("Couldn't update follow", 'Please try again.');
     } finally {
       setFollowBusy(false);
     }
@@ -415,15 +413,13 @@ export default function LiveViewerScreen() {
         host: activeSession.host,
       });
     } catch {
-      setNote("Couldn't open share. Try again.");
-      setTimeout(() => setNote(null), 2200);
+      toast.error("Couldn't open share", 'Please try again.');
     }
   }
 
   async function submitReport(kind: 'session' | 'user' | 'listing') {
     if (kind === 'listing' && !pinnedProduct?.listingId) {
-      setNote('No listing to report right now.');
-      setTimeout(() => setNote(null), 2200);
+      showEdgeToast('No listing to report right now.');
       return;
     }
     try {
@@ -435,17 +431,13 @@ export default function LiveViewerScreen() {
           targetUsername: kind === 'user' ? activeSession.host : undefined,
         }),
       });
-      setNote(
-        kind === 'session'
-          ? 'Live session reported.'
-          : kind === 'user'
-            ? 'User reported.'
-            : 'Listing reported.',
+      toast.success(
+        kind === 'session' ? 'Live session reported' : kind === 'user' ? 'User reported' : 'Listing reported',
+        'Thanks — our Trust & Safety team will take a look.',
       );
     } catch {
-      setNote("We couldn't send that report. Try again.");
+      toast.error("We couldn't send that report", 'Please try again in a moment.');
     }
-    setTimeout(() => setNote(null), 2200);
   }
 
   async function send() {
@@ -456,8 +448,7 @@ export default function LiveViewerScreen() {
       await live.sendComment(activeSession.id, username, text);
     } catch {
       setDraft(text);
-      setNote("Couldn't send that comment. Try again.");
-      setTimeout(() => setNote(null), 2200);
+      toast.error("Couldn't send that comment", 'Please try again.');
     }
   }
 
@@ -468,8 +459,7 @@ export default function LiveViewerScreen() {
     setClaimError(null);
     try {
       await live.claimProduct(activeSession.id, product.id, 1);
-      setNote('Claimed — complete checkout to buy.');
-      setTimeout(() => setNote(null), 2200);
+      toast.success('Claimed', 'Complete checkout to buy.');
     } catch (err) {
       setClaimError(err instanceof Error ? err.message : 'Claim failed');
     } finally {
@@ -523,11 +513,6 @@ export default function LiveViewerScreen() {
     <GestureDetector gesture={swipeGesture}>
       <Animated.View style={[styles.screen, swipeStyle]}>
       <StatusBar style="light" />
-      {note ? (
-        <View style={[styles.toast, { top: top + 8 }]}>
-          <Text style={styles.toastText}>{note}</Text>
-        </View>
-      ) : null}
       {swipeHintVisible && swipeQueue.nextId && !sheetsOpen ? (
         <View style={[styles.swipeHint, { bottom: dockClearance + 72 }]} pointerEvents="none">
           <Text style={styles.swipeHintText}>Swipe up for next live</Text>
@@ -830,16 +815,6 @@ const styles = StyleSheet.create({
     fontFamily: Typography.bodySemiBold,
     color: Palette.ivory,
   },
-  toast: {
-    position: 'absolute',
-    alignSelf: 'center',
-    zIndex: 20,
-    backgroundColor: 'rgba(27,17,19,0.85)',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  toastText: { color: Palette.ivory, fontSize: 12 },
   topArea: {
     flexDirection: 'row',
     alignItems: 'center',

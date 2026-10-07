@@ -6,6 +6,7 @@ import { PhoneField } from '@/components/ui/phone-field';
 import { PickerField } from '@/components/ui/picker-field';
 import { ScreenHeader } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
+import { useToast } from '@/components/ui/toast';
 import { KeyboardSafeScreen } from '@/components/ui/keyboard-safe';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
@@ -127,7 +128,7 @@ export default function ShippingDetailsScreen() {
   const checkout = useCheckout();
   const { isConnected } = useNetworkStatus();
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const [saveError, setSaveError] = useState(false);
+  const toast = useToast();
   const [continuing, setContinuing] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [addressPlaceId, setAddressPlaceId] = useState<string | null>(null);
@@ -252,7 +253,6 @@ export default function ShippingDetailsScreen() {
       placeSelected,
     });
     setFieldErrors(nextErrors);
-    setSaveError(false);
     if (Object.keys(nextErrors).length > 0) return;
     if (!isConnected) return;
 
@@ -261,7 +261,7 @@ export default function ShippingDetailsScreen() {
       await new Promise((resolve) => setTimeout(resolve, 280));
       router.push('/checkout/delivery');
     } catch {
-      setSaveError(true);
+      toast.error("We couldn't save these details", 'Please try again in a moment.');
     } finally {
       setContinuing(false);
     }
@@ -277,13 +277,6 @@ export default function ShippingDetailsScreen() {
           <>
           {!isConnected ? (
             <OfflineBanner title="No connection" message="Reconnect to continue checkout." />
-          ) : null}
-          {saveError ? (
-            <AlertBanner
-              variant="error"
-              title="We couldn't save these details"
-              message="Please try again in a moment."
-            />
           ) : null}
           {attempted && !canContinue ? (
             <AlertBanner

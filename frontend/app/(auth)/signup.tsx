@@ -2,7 +2,8 @@ import { OtpInput } from '@/components/auth/otp-input';
 import { PasswordField } from '@/components/auth/password-field';
 import { PasswordRequirements } from '@/components/auth/password-requirements';
 import { PasswordStrengthMeter } from '@/components/auth/password-strength-meter';
-import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
+import { OfflineBanner } from '@/components/ui/alert-banner';
+import { useErrorToast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { DateField } from '@/components/ui/date-field';
 import { MailIcon } from '@/components/ui/icons';
@@ -42,6 +43,7 @@ export default function SignupScreen() {
   const [otp, setOtp] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
+  useErrorToast(error, "We couldn't complete that");
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState<'form' | 'verify'>(restored ? 'verify' : 'form');
   const [cooldown, setCooldown] = useState(() => (restored ? remainingCooldownSec(restored.cooldownUntil) : 0));
@@ -272,7 +274,6 @@ export default function SignupScreen() {
                   </Text>
                 </View>
               </View>
-              {error ? <AlertBanner variant="error" title="We couldn't complete that" message={error} style={styles.banner} /> : null}
               <Button label="Create account" loading={loading} onPress={onSubmit} disabled={!isConnected} style={styles.submit} />
               <Text style={styles.footer}>
                 Already have an account?{' '}
@@ -319,7 +320,6 @@ export default function SignupScreen() {
                   <Button label="Simulate: I verified" loading={loading} onPress={onDevSimulate} style={styles.simulate} />
                 ) : null}
               </View>
-              {error ? <AlertBanner variant="error" title="We couldn't complete that" message={error} /> : null}
             </>
           )}
         </KeyboardSafeScreen>
@@ -370,7 +370,6 @@ const styles = StyleSheet.create({
     fontFamily: Typography.body,
     color: Palette.body,
   },
-  banner: { marginTop: 16 },
   submit: { marginTop: 20 },
   footer: {
     marginTop: 14,

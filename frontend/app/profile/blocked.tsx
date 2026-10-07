@@ -1,6 +1,7 @@
-import { AlertBanner, OfflineBanner } from '@/components/ui/alert-banner';
+import { OfflineBanner } from '@/components/ui/alert-banner';
 import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { ScreenHeader } from '@/components/ui/screen-header';
+import { useToast } from '@/components/ui/toast';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useInbox } from '@/context/inbox-context';
@@ -15,7 +16,7 @@ export default function BlockedUsersScreen() {
   const inbox = useInbox();
   const { isConnected } = useNetworkStatus();
   const [busyUser, setBusyUser] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
   const blocked = inbox.blockedUsers;
 
   useEffect(() => {
@@ -31,11 +32,10 @@ export default function BlockedUsersScreen() {
   async function onUnblock(username: string) {
     if (!isConnected || busyUser) return;
     setBusyUser(username);
-    setError(null);
     try {
       await inbox.toggleBlock(username);
     } catch {
-      setError(`Could not unblock @${username}. Try again.`);
+      toast.error(`Couldn't unblock @${username}`, 'Please try again in a moment.');
     } finally {
       setBusyUser(null);
     }
@@ -46,7 +46,6 @@ export default function BlockedUsersScreen() {
       <ScreenHeader title="Blocked users" onBack={() => router.back()} />
       <ScrollView contentContainerStyle={styles.body}>
         {!isConnected ? <OfflineBanner message="Reconnect to manage blocked users." /> : null}
-        {error ? <AlertBanner variant="error" title="Something went wrong" message={error} /> : null}
 
         {blocked.length === 0 ? (
           <View style={styles.empty}>

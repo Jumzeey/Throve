@@ -1,8 +1,8 @@
-import { AlertBanner } from '@/components/ui/alert-banner';
 import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
 import { EyeIcon } from '@/components/ui/icons';
 import { PhotoPager } from '@/components/ui/photo-pager';
+import { useErrorToast } from '@/components/ui/toast';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { isListingFormPublishable, parseListingPrice, useListings } from '@/context/listings-context';
@@ -27,6 +27,8 @@ export default function ListingPreviewScreen() {
   const [saving, setSaving] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
+  useErrorToast(publishError, "Couldn't publish");
+  useErrorToast(draftError, "Couldn't save draft");
 
   if (!session) {
     return <Redirect href="/(auth)/welcome" />;
@@ -113,23 +115,6 @@ export default function ListingPreviewScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 12 }}>
-        {publishError ? (
-          <AlertBanner
-            variant="error"
-            title="Couldn't publish"
-            message={publishError}
-            style={styles.errorBanner}
-          />
-        ) : null}
-        {draftError ? (
-          <AlertBanner
-            variant="error"
-            title="Couldn't save draft"
-            message={draftError}
-            style={styles.errorBanner}
-          />
-        ) : null}
-
         <PhotoPager
           count={photoCount}
           uris={photoUris}
@@ -276,10 +261,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontFamily: Typography.body,
     color: Palette.plum,
-  },
-  errorBanner: {
-    marginHorizontal: Spacing.xl,
-    marginTop: Spacing.md,
   },
   thumbs: {
     gap: 8,
