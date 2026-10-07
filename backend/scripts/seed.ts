@@ -5,9 +5,7 @@ import { createServiceClient } from '../src/lib/supabase.js';
 import {
   DEFAULT_SHIPPING,
   listingUuid,
-  liveUuid,
   SEED_LISTINGS,
-  SEED_LIVE,
   SEED_REVIEWS,
   SEED_USERS,
   userUuid,
@@ -125,86 +123,6 @@ async function seedReviews(userIds: Map<string, string>) {
   }
 }
 
-async function seedLive(userIds: Map<string, string>) {
-  for (const session of SEED_LIVE) {
-    const hostId = userIds.get(session.host);
-    if (!hostId) throw new Error(`Unknown host ${session.host}`);
-
-    const sessionId = liveUuid(session.key);
-    const pinnedListingId = session.pinnedListing ? listingUuid(session.pinnedListing) : null;
-    const featuredIds = (session.featuredListingSlugs ?? []).map(listingUuid);
-
-    const { error: sessionError } = await admin.from('live_sessions').upsert(
-      {
-        id: sessionId,
-        host_id: hostId,
-        title: session.title,
-        status: session.status,
-        viewers: session.viewers ?? null,
-        scheduled_at: session.scheduledAt ?? null,
-        department: session.department ?? null,
-        pinned_listing_id: pinnedListingId,
-        featured_listing_ids: featuredIds,
-        livekit_room_name: `live_${sessionId}`,
-        started_at: session.status === 'live' ? new Date().toISOString() : null,
-      },
-      { onConflict: 'id' },
-    );
-    if (sessionError) throw sessionError;
-
-    if (session.featuredListingSlugs?.length) {
-      for (const [index, slug] of session.featuredListingSlugs.entries()) {
-        const listingId = listingUuid(slug);
-        const listing = SEED_LISTINGS.find((row) => row.slug === slug);
-        const { data: product, error: productError } = await admin
-          .from('live_stream_products')
-          .upsert(
-            {
-              live_session_id: sessionId,
-              listing_id: listingId,
-              live_price: listing?.price ?? 0,
-              stock: 1,
-              reserved_count: 0,
-              sold_count: 0,
-              is_pinned: slug === session.pinnedListing,
-              sort_order: index,
-            },
-            { onConflict: 'live_session_id,listing_id' },
-          )
-          .select('id')
-          .single();
-        if (productError) throw productError;
-
-        if (slug === session.pinnedListing && product) {
-          await admin.from('live_sessions').update({ pinned_listing_id: listingId }).eq('id', sessionId);
-        }
-      }
-    }
-
-    if (session.comments?.length) {
-      for (const comment of session.comments) {
-        const userId = userIds.get(comment.user);
-        if (!userId) continue;
-        const { data: existing } = await admin
-          .from('live_comments')
-          .select('id')
-          .eq('session_id', sessionId)
-          .eq('user_id', userId)
-          .eq('text', comment.text)
-          .maybeSingle();
-        if (existing) continue;
-
-        const { error } = await admin.from('live_comments').insert({
-          session_id: sessionId,
-          user_id: userId,
-          text: comment.text,
-        });
-        if (error) throw error;
-      }
-    }
-  }
-}
-
 async function main() {
   console.log('Seeding Throve demo data…');
 
@@ -224,10 +142,7 @@ async function main() {
   await seedReviews(userIds);
   console.log(`  ${SEED_REVIEWS.length} reviews`);
 
-  await seedLive(userIds);
-  console.log(`  ${SEED_LIVE.length} live sessions`);
-
-  console.log('Done. Reload the app — Home, Browse, Live and Search should show demo catalog.');
+  console.log('Done. Reload the app — Home, Browse and Search should show demo catalog.');
   console.log('Demo seller login: ada.thrifts@throve.dev (use Simulate on login)');
 }
 

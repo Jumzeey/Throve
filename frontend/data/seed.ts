@@ -342,16 +342,7 @@ export const LISTINGS: Listing[] = [
   }),
 ];
 
-export const LIVE_SESSIONS: LiveSession[] = [
-  {
-    id: 'live2',
-    host: 'sneakerspot.ng',
-    title: 'Sneaker Restock',
-    status: 'upcoming',
-    scheduledAt: 'Tomorrow, 6:00 PM',
-    department: 'Men',
-  },
-];
+export const LIVE_SESSIONS: LiveSession[] = [];
 
 export const LIVE_COMMENTS: Record<string, LiveComment[]> = {};
 

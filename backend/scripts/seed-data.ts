@@ -8,10 +8,6 @@ export function listingUuid(slug: string) {
   return `00000000-0000-4000-a000-${String(n).padStart(12, '0')}`;
 }
 
-export function liveUuid(key: number) {
-  return `00000000-0000-4000-c000-${String(key).padStart(12, '0')}`;
-}
-
 export const DEFAULT_SHIPPING = 'Buyer pays shipping · 3–5 days within Nigeria';
 
 export type SeedUser = {
@@ -419,18 +415,6 @@ export const SEED_REVIEWS = [
   { seller: 'ada.thrifts', buyer: 'chidinma.o', rating: 4, comment: 'Nice dress, slightly small.' },
   { seller: 'sneakerspot.ng', buyer: 'femi.k', rating: 5, comment: 'Great sneakers, true to size.' },
   { seller: 'vintagevault.ng', buyer: 'ada.thrifts', rating: 3, comment: 'Item had more wear than expected.' },
-];
-
-export const SEED_LIVE = [
-  {
-    key: 2,
-    host: 'sneakerspot.ng',
-    title: 'Sneaker Restock',
-    status: 'upcoming' as const,
-    scheduledAt: 'Tomorrow, 6:00 PM',
-    department: 'Men' as const,
-    featuredListingSlugs: ['l2', 'l7'],
-  },
 ];
 
 export function usernameToKey(username: string, users: SeedUser[] = SEED_USERS) {
