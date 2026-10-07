@@ -126,13 +126,12 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   labelWrap: {
-    alignSelf: 'stretch',
-    width: '100%',
-    paddingHorizontal: 1,
+    alignSelf: 'center',
+    alignItems: 'center',
+    maxWidth: '100%',
     marginTop: 2,
   },
   label: {
-    width: '100%',
     fontSize: 10,
     lineHeight: 12,
     fontFamily: Typography.bodySemiBold,

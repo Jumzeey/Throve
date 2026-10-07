@@ -1,47 +1,66 @@
+import type { ReactNode } from 'react';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
 type Props = { size?: number; color: string };
 
-export function HomeIcon({ size = 21, color }: Props) {
+/** Glyphs are drawn centred on (12, 12) and span roughly 3.5–20.5 so tabs line up optically. */
+function TabSvg({ size = 21, color, children }: Props & { children: ReactNode }) {
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.7} strokeLinejoin="round">
-      <Path d="M3 10.5 12 3l9 7.5" />
-      <Path d="M5.5 9.5V20h13V9.5" />
+    <Svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth={1.7}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {children}
     </Svg>
   );
 }
 
-export function LiveIcon({ size = 21, color }: Props) {
+export function HomeIcon(props: Props) {
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.7} strokeLinejoin="round">
-      <Rect x={2.5} y={6} width={14} height={12} rx={2.5} />
-      <Path d="M16.5 10.5 21.5 8v8l-5-2.5z" />
-    </Svg>
+    <TabSvg {...props}>
+      <Path d="M3.5 10.5 12 3.5l8.5 7" />
+      <Path d="M5.5 9v11.5h13V9" />
+    </TabSvg>
   );
 }
 
-export function SellIcon({ size = 21, color }: Props) {
+export function LiveIcon(props: Props) {
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.7} strokeLinecap="round">
+    <TabSvg {...props}>
+      <Rect x={2.5} y={5.5} width={14} height={13} rx={2.5} />
+      <Path d="M16.5 10 21.5 7.5v9l-5-2.5z" />
+    </TabSvg>
+  );
+}
+
+export function SellIcon(props: Props) {
+  return (
+    <TabSvg {...props}>
       <Rect x={3.5} y={3.5} width={17} height={17} rx={4} />
       <Path d="M12 8.5v7M8.5 12h7" />
-    </Svg>
+    </TabSvg>
   );
 }
 
-export function InboxIcon({ size = 21, color }: Props) {
+export function InboxIcon(props: Props) {
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.7} strokeLinejoin="round">
-      <Path d="M3.5 6.5h17v11h-11l-6 3.5z" />
-    </Svg>
+    <TabSvg {...props}>
+      <Path d="M3.5 4.5h17v12H10l-6.5 3.5z" />
+    </TabSvg>
   );
 }
 
-export function ProfileIcon({ size = 21, color }: Props) {
+export function ProfileIcon(props: Props) {
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={1.7} strokeLinecap="round">
-      <Circle cx={12} cy={8} r={3.6} />
+    <TabSvg {...props}>
+      <Circle cx={12} cy={7.6} r={3.6} />
       <Path d="M4.8 20c.6-3.7 3.6-5.6 7.2-5.6s6.6 1.9 7.2 5.6" />
-    </Svg>
+    </TabSvg>
   );
 }

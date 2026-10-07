@@ -484,9 +484,7 @@ export default function ChatScreen() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
           onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}>
-          {thread.length === 0 && failed.length === 0 ? (
-            <Text style={styles.threadEmpty}>Say hello — keep it about the listing.</Text>
-          ) : (
+          {thread.length === 0 && failed.length === 0 ? null : (
             dayGroups.map((group) => (
               <View key={group.label} style={styles.dayGroup}>
                 <Text style={styles.dayLabel}>{group.label}</Text>
@@ -935,13 +933,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.lg,
     gap: 12,
     flexGrow: 1,
-  },
-  threadEmpty: {
-    marginTop: Spacing.xxl,
-    textAlign: 'center',
-    fontSize: 13,
-    fontFamily: Typography.body,
-    color: Palette.muted,
   },
   dayGroup: {
     gap: 12,
