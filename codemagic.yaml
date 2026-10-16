@@ -106,6 +106,15 @@ workflows:
         script: |
           cd frontend
           npx expo prebuild --platform android --non-interactive
+          # Prebuild writes .webp launcher icons and leaves older .png copies.
+          # Gradle treats both as the same resource and fails mergeReleaseResources.
+          find android/app/src/main/res -type f \( \
+            -name 'ic_launcher.png' -o \
+            -name 'ic_launcher_round.png' -o \
+            -name 'ic_launcher_background.png' -o \
+            -name 'ic_launcher_foreground.png' -o \
+            -name 'ic_launcher_monochrome.png' \
+          \) -delete
       - name: Set up app/build.gradle
         script: |
           cp ./support-files/build.gradle frontend/android/app/build.gradle

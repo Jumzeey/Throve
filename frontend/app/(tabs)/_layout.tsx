@@ -13,7 +13,6 @@ function TabBarLabel({ color, children }: { color: string; children: string }) {
     <View style={styles.labelWrap}>
       <Text
         style={[styles.label, { color }]}
-        numberOfLines={1}
         allowFontScaling={false}
         android_hyphenationFrequency="none"
       >
@@ -117,23 +116,21 @@ export default function TabLayout() {
 const styles = StyleSheet.create({
   item: {
     flex: 1,
-    minWidth: 0,
     paddingHorizontal: 0,
-    alignItems: 'center',
     justifyContent: 'center',
   },
   icon: {
     marginTop: 2,
   },
   labelWrap: {
-    alignSelf: 'center',
-    alignItems: 'center',
-    maxWidth: '100%',
+    alignSelf: 'stretch',
+    width: '100%',
     marginTop: 2,
   },
   label: {
+    width: '100%',
     fontSize: 10,
-    lineHeight: 12,
+    lineHeight: 13,
     fontFamily: Typography.bodySemiBold,
     textAlign: 'center',
     includeFontPadding: false,
