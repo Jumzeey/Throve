@@ -332,7 +332,7 @@ router.post('/conversations/:id/receipts', requireAuth, async (req, res) => {
   if (parsed.data.level === 'read') {
     await supabase.from('conversation_unread').delete().eq('conversation_id', req.params.id).eq('user_id', userId);
   }
-  void supabase.from('profiles').update({ last_seen_at: new Date().toISOString() }).eq('id', userId);
+  void createServiceClient().from('profiles').update({ last_seen_at: new Date().toISOString() }).eq('id', userId);
 
   const { data, error } = await supabase
     .from('messages')
@@ -402,7 +402,7 @@ router.post('/conversations/:id/messages', requireAuth, async (req, res) => {
 
   if (error) return handleSupabaseError(res, error);
 
-  void supabase.from('profiles').update({ last_seen_at: new Date().toISOString() }).eq('id', userId);
+  void createServiceClient().from('profiles').update({ last_seen_at: new Date().toISOString() }).eq('id', userId);
 
   const preview = text || 'Sent a photo';
   await supabase
@@ -526,6 +526,19 @@ router.post('/offers', requireAuth, async (req, res) => {
   const sellerId = await usernameToId(supabase, parsed.data.seller);
   if (!buyerId || !sellerId) return sendError(res, 404, 'Participant not found');
 
+  // The seller must own the listing, and the caller must be the side making the offer.
+  const { data: offerListing } = await supabase
+    .from('listings')
+    .select('seller_id')
+    .eq('id', parsed.data.listingId)
+    .maybeSingle();
+  if (!offerListing) return sendError(res, 404, 'Listing not found');
+  if (offerListing.seller_id !== sellerId || buyerId === sellerId) {
+    return sendError(res, 403, 'Not allowed');
+  }
+  const initiatorId = parsed.data.initiator === 'buyer' ? buyerId : sellerId;
+  if (initiatorId !== userId) return sendError(res, 403, 'Not allowed');
+
   const price = await listingPrice(supabase, parsed.data.listingId);
   if (price == null) return sendError(res, 404, 'Listing not found');
   const amountError = validateOfferAgainstListing(parsed.data.amount, price);
@@ -539,7 +552,7 @@ router.post('/offers', requireAuth, async (req, res) => {
     .eq('status', 'pending');
 
   if (priorPending && priorPending.length > 0) {
-    await supabase
+    await createServiceClient()
       .from('offers')
       .update({ status: 'withdrawn' })
       .eq('listing_id', parsed.data.listingId)
@@ -559,7 +572,7 @@ router.post('/offers', requireAuth, async (req, res) => {
   }
 
   const expiresAt = new Date(Date.now() + OFFER_TTL_MS).toISOString();
-  const { data, error } = await supabase
+  const { data, error } = await createServiceClient()
     .from('offers')
     .insert({
       listing_id: parsed.data.listingId,
@@ -675,7 +688,7 @@ router.patch('/offers/:id', requireAuth, async (req, res) => {
     return sendError(res, 400, 'Invalid action');
   }
 
-  const { data, error } = await supabase.from('offers').update(patch).eq('id', req.params.id).select('*').single();
+  const { data, error } = await createServiceClient().from('offers').update(patch).eq('id', req.params.id).select('*').single();
   if (error) return handleSupabaseError(res, error);
 
   const buyer = await getProfileById(supabase, data.buyer_id);

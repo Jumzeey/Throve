@@ -1,3 +1,5 @@
+import { createServiceClient, isServiceClient } from './supabase.js';
+
 type ProfileRow = {
   id: string;
   email: string;
@@ -123,8 +125,13 @@ export function mapListing(row: ListingRow, sellerUsername: string, savedBy: str
   };
 }
 
+// Full profile rows include private columns (email, phone, dob, roles) that clients cannot read,
+// so these lookups always run with the service role. A user-scoped client still gets the old RLS
+// behaviour of hiding deactivated profiles.
 export async function getProfileById(supabase: ReturnType<typeof import('./supabase.js').createSupabaseClient>, id: string) {
-  const { data, error } = await supabase.from('profiles').select('*').eq('id', id).maybeSingle();
+  let query = createServiceClient().from('profiles').select('*').eq('id', id);
+  if (!isServiceClient(supabase)) query = query.eq('deactivated', false);
+  const { data, error } = await query.maybeSingle();
   if (error) throw error;
   return data as ProfileRow | null;
 }
@@ -134,7 +141,9 @@ export async function getProfileByUsername(
   username: string,
 ) {
   const escaped = username.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
-  const { data, error } = await supabase.from('profiles').select('*').ilike('username', escaped).limit(1);
+  let query = createServiceClient().from('profiles').select('*').ilike('username', escaped);
+  if (!isServiceClient(supabase)) query = query.eq('deactivated', false);
+  const { data, error } = await query.limit(1);
   if (error) throw error;
   return (data?.[0] as ProfileRow | undefined) ?? null;
 }
