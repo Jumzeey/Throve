@@ -23,17 +23,26 @@ export function createSupabaseClient(accessToken?: string): SupabaseClient {
   });
 }
 
+const serviceClients = new WeakSet<SupabaseClient>();
+
 /** Service-role client for atomic RPCs (claims/pin/expiry). Never expose to clients. */
 export function createServiceClient(): SupabaseClient {
   if (!supabaseServiceRoleKey) {
     throw new Error('SUPABASE_SERVICE_ROLE_KEY is required for commerce RPCs');
   }
-  return createClient(supabaseUrl, supabaseServiceRoleKey, {
+  const client = createClient(supabaseUrl, supabaseServiceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
     },
   });
+  serviceClients.add(client);
+  return client;
+}
+
+/** True when the client was made by createServiceClient (RLS bypassed). */
+export function isServiceClient(client: SupabaseClient) {
+  return serviceClients.has(client);
 }
 
 export const supabaseAdmin = createSupabaseClient();

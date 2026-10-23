@@ -2,6 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { randomUUID } from 'crypto';
 import { handleSupabaseError, sendError } from '../lib/errors.js';
+import { createServiceClient } from '../lib/supabase.js';
 import { type AuthedRequest, requireAuth } from '../middleware/auth.js';
 
 const router = Router();
@@ -20,7 +21,7 @@ router.post('/profile-photo', requireAuth, upload.single('file'), async (req, re
   if (uploadError) return handleSupabaseError(res, uploadError);
 
   const { data } = supabase.storage.from('profile-photos').getPublicUrl(path);
-  await supabase.from('profiles').update({ photo_url: data.publicUrl }).eq('id', userId);
+  await createServiceClient().from('profiles').update({ photo_url: data.publicUrl }).eq('id', userId);
 
   return res.json({ url: data.publicUrl });
 });

@@ -5,6 +5,7 @@ import {
   fulfillPaidCheckout,
   newTxRef,
   paymentMode,
+  quoteItemPrice,
   type CheckoutPayload,
 } from '../lib/checkout-fulfill.js';
 import { handleSupabaseError, sendError } from '../lib/errors.js';
@@ -56,20 +57,12 @@ router.post('/payments/init', requireAuth, async (req, res) => {
   if (!listing) return sendError(res, 400, 'Listing unavailable');
   if (listing.status === 'sold') return sendError(res, 400, 'Listing unavailable');
 
-  let itemPrice = listing.price;
-  if (parsed.data.offerId) {
-    const { data: offer } = await supabase.from('offers').select('*').eq('id', parsed.data.offerId).maybeSingle();
-    if (!offer || offer.status !== 'accepted' || offer.buyer_id !== userId) {
-      return sendError(res, 400, 'Offer not available for checkout');
-    }
-    itemPrice = offer.amount;
-  } else if (parsed.data.liveStreamProductId) {
-    const { data: product } = await supabase
-      .from('live_stream_products')
-      .select('*')
-      .eq('id', parsed.data.liveStreamProductId)
-      .maybeSingle();
-    if (product) itemPrice = product.live_price;
+  let itemPrice: number;
+  try {
+    itemPrice = await quoteItemPrice(supabase, userId, parsed.data, listing);
+  } catch (err) {
+    const e = err as { status?: number; code?: string; message?: string };
+    return sendError(res, e.status ?? 400, e.message ?? 'Checkout unavailable', e.code);
   }
 
   const amounts = computeCheckoutAmounts(itemPrice, parsed.data.deliveryMethod);
@@ -310,25 +303,37 @@ router.post('/payments/webhook', async (req, res) => {
   if (!intent) return res.json({ ok: true });
   if (intent.status === 'successful') return res.json({ ok: true });
 
-  const status = String(event.data?.status ?? '').toLowerCase();
-  if (status !== 'successful' && status !== 'success') {
-    if (status === 'failed') {
-      await service
-        .from('payment_intents')
-        .update({ status: 'failed', provider_ref: String(event.data?.id ?? '') })
-        .eq('id', intent.id);
-    }
+  // Never trust the webhook body for money: re-check the transaction with Flutterwave
+  // and require the exact amount and currency of the intent, as /payments/verify does.
+  let verified: Awaited<ReturnType<typeof flutterwaveVerifyByRef>>;
+  try {
+    verified = await flutterwaveVerifyByRef(txRef);
+  } catch {
+    return res.status(502).json({ ok: false });
+  }
+  const providerRef = verified.providerRef ?? (event.data?.id != null ? String(event.data.id) : null);
+
+  if (verified.status === 'failed') {
+    await service.from('payment_intents').update({ status: 'failed', provider_ref: providerRef }).eq('id', intent.id);
+    return res.json({ ok: true });
+  }
+  if (verified.status !== 'successful' && verified.status !== 'success') {
+    return res.json({ ok: true });
+  }
+  if (verified.currency !== 'NGN' || Math.round(verified.amount) !== intent.amount) {
+    await service.from('payment_intents').update({ status: 'failed', provider_ref: providerRef }).eq('id', intent.id);
+    console.warn('[payments/webhook] amount mismatch', { txRef, expected: intent.amount, got: verified.amount });
     return res.json({ ok: true });
   }
 
   try {
     const order = await fulfillPaidCheckout(service, intent.user_id, intent.checkout_payload as CheckoutPayload, {
       txRef,
-      providerRef: event.data?.id != null ? String(event.data.id) : null,
+      providerRef,
     });
     await service
       .from('payment_intents')
-      .update({ status: 'successful', order_id: order.id, provider_ref: String(event.data?.id ?? '') })
+      .update({ status: 'successful', order_id: order.id, provider_ref: providerRef })
       .eq('id', intent.id);
   } catch {
     /* leave pending for retry */

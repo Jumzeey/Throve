@@ -12,7 +12,8 @@ export type AdminRoute =
   | 'refunds'
   | 'payouts'
   | 'reviews'
-  | 'audit';
+  | 'audit'
+  | 'staff';
 
 export const ROLE_LABELS: Record<AdminRole, string> = {
   super_admin: 'Super Admin',
@@ -34,6 +35,7 @@ export const ROUTE_PATHS: Record<AdminRoute, string> = {
   payouts: '/payouts',
   reviews: '/reviews',
   audit: '/audit',
+  staff: '/staff',
 };
 
 const ALL: AdminRole[] = ['super_admin', 'trust_safety', 'support', 'finance'];
@@ -52,6 +54,7 @@ export const ROUTE_ROLES: Record<AdminRoute, AdminRole[]> = {
   payouts: ['super_admin', 'finance'],
   reviews: ['super_admin', 'trust_safety'],
   audit: ['super_admin', 'trust_safety', 'support', 'finance'],
+  staff: ['super_admin'],
 };
 
 export function canAccess(role: AdminRole, route: AdminRoute) {
@@ -95,7 +98,7 @@ export function navSectionsFor(role: AdminRole): NavSection[] {
         ],
       },
       { label: 'Finance', routes: ['orders', 'payments', 'refunds', 'payouts'] },
-      { label: 'Governance', routes: ['audit'] },
+      { label: 'Governance', routes: ['staff', 'audit'] },
     ];
   }
   // trust_safety

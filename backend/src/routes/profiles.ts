@@ -3,7 +3,7 @@ import { accountDeactivatedEmail } from '../lib/email/templates/account.js';
 import { getFollowStats } from '../lib/follows.js';
 import { getProfileById, getProfileByUsername, mapProfile, publicPhotoUrl, storedPhotoUrl } from '../lib/mappers.js';
 import { notifyUser } from '../lib/notify.js';
-import { createSupabaseClient } from '../lib/supabase.js';
+import { createServiceClient, createSupabaseClient } from '../lib/supabase.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
 import { Router } from 'express';
 import { z } from 'zod';
@@ -18,7 +18,7 @@ router.get('/me', requireAuth, async (req, res) => {
     return sendError(res, 404, 'Profile not found', 'NOT_FOUND');
   }
   if (profile.photo_url && !publicPhotoUrl(profile.photo_url)) {
-    await supabase.from('profiles').update({ photo_url: null }).eq('id', userId);
+    await createServiceClient().from('profiles').update({ photo_url: null }).eq('id', userId);
     profile.photo_url = null;
   }
   return res.json(mapProfile(profile));
@@ -63,7 +63,7 @@ router.put('/me', requireAuth, async (req, res) => {
   const photoUrl = storedPhotoUrl(parsed.data.photoUri);
   if (photoUrl !== undefined) patch.photo_url = photoUrl;
 
-  const { data, error } = await supabase
+  const { data, error } = await createServiceClient()
     .from('profiles')
     .update(patch)
     .eq('id', userId)
@@ -108,7 +108,7 @@ router.post('/me/setup', requireAuth, async (req, res) => {
   const setupPhoto = storedPhotoUrl(parsed.data.photoUri);
   if (setupPhoto !== undefined) setupPatch.photo_url = setupPhoto;
 
-  const { data, error } = await supabase
+  const { data, error } = await createServiceClient()
     .from('profiles')
     .update(setupPatch)
     .eq('id', userId)
@@ -156,7 +156,7 @@ router.patch('/me/settings', requireAuth, async (req, res) => {
     return res.json(mapProfile(profile));
   }
 
-  const { error } = await supabase.from('profiles').update(patch).eq('id', userId);
+  const { error } = await createServiceClient().from('profiles').update(patch).eq('id', userId);
   if (error) return handleSupabaseError(res, error);
   const profile = await getProfileById(supabase, userId);
   if (!profile) return sendError(res, 404, 'Profile not found', 'NOT_FOUND');
@@ -169,7 +169,7 @@ router.post('/me/heartbeat', requireAuth, async (req, res) => {
   const { data: current } = await supabase.from('profiles').select('last_seen_at').eq('id', userId).maybeSingle();
   const last = current?.last_seen_at ? new Date(String(current.last_seen_at)).getTime() : 0;
   if (!last || Date.now() - last > 20_000) {
-    const { error } = await supabase.from('profiles').update({ last_seen_at: now }).eq('id', userId);
+    const { error } = await createServiceClient().from('profiles').update({ last_seen_at: now }).eq('id', userId);
     if (error) return handleSupabaseError(res, error);
   }
   return res.json({ ok: true, lastSeenAt: Date.now() });
@@ -190,7 +190,7 @@ router.post('/me/deactivate', requireAuth, async (req, res) => {
     content: accountDeactivatedEmail(),
   });
 
-  const { error } = await supabase.from('profiles').update({ deactivated: true }).eq('id', userId);
+  const { error } = await createServiceClient().from('profiles').update({ deactivated: true }).eq('id', userId);
   if (error) return handleSupabaseError(res, error);
 
   return res.json({ ok: true });

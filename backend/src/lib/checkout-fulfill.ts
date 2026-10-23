@@ -44,12 +44,81 @@ export function computeCheckoutAmounts(itemPrice: number, deliveryMethod: 'Stand
   return { itemPrice, deliveryFee, protectionFee, total };
 }
 
+function checkoutError(message: string, status = 400, code?: string) {
+  return Object.assign(new Error(message), { status, code });
+}
+
+/** Active, unexpired claim owned by the buyer whose live product is this listing. */
+async function loadCheckoutClaim(userId: string, claimId: string, listingId: string) {
+  const service = createServiceClient();
+  const { data: claim } = await service.from('live_claims').select('*').eq('id', claimId).maybeSingle();
+  if (!claim || claim.user_id !== userId || claim.status !== 'active') {
+    throw checkoutError('Invalid claim');
+  }
+  if (new Date(claim.expires_at).getTime() < Date.now()) {
+    throw checkoutError('Claim expired', 400, 'CLAIM_EXPIRED');
+  }
+  if (!claim.live_stream_product_id) return { claim, product: null };
+  const { data: product } = await service
+    .from('live_stream_products')
+    .select('*')
+    .eq('id', claim.live_stream_product_id)
+    .maybeSingle();
+  if (!product || product.listing_id !== listingId || claim.listing_id !== listingId) {
+    throw checkoutError('Claim does not match this listing');
+  }
+  return { claim, product };
+}
+
+async function loadCheckoutOffer(
+  supabase: SupabaseClient,
+  userId: string,
+  offerId: string,
+  listing: { id: string; seller_id: string },
+) {
+  const { data: offer } = await supabase.from('offers').select('*').eq('id', offerId).maybeSingle();
+  if (
+    !offer ||
+    offer.status !== 'accepted' ||
+    offer.buyer_id !== userId ||
+    offer.listing_id !== listing.id ||
+    offer.seller_id !== listing.seller_id
+  ) {
+    throw checkoutError('Offer not available for checkout');
+  }
+  return offer;
+}
+
+/**
+ * Price the buyer will pay, without side effects. Must agree with resolveItemPrice so the
+ * amount charged at payment init matches the order created after payment.
+ */
+export async function quoteItemPrice(
+  supabase: SupabaseClient,
+  userId: string,
+  payload: CheckoutPayload,
+  listing: { id: string; seller_id: string; price: number },
+) {
+  let itemPrice = listing.price;
+  if (payload.offerId) {
+    itemPrice = (await loadCheckoutOffer(supabase, userId, payload.offerId, listing)).amount;
+  }
+  if (payload.claimId) {
+    const { product } = await loadCheckoutClaim(userId, payload.claimId, listing.id);
+    if (product) itemPrice = product.live_price;
+  } else if (payload.liveStreamProductId) {
+    throw checkoutError('Claim this product before checkout');
+  }
+  return itemPrice;
+}
+
 export async function resolveItemPrice(
   supabase: SupabaseClient,
   userId: string,
   payload: CheckoutPayload,
-  listingPrice: number,
+  listing: { id: string; seller_id: string; price: number },
 ) {
+  const listingPrice = listing.price;
   let itemPrice = listingPrice;
   let listedPrice: number | null = null;
   let offerId = payload.offerId ?? null;
@@ -57,15 +126,13 @@ export async function resolveItemPrice(
   let liveStreamProductId = payload.liveStreamProductId ?? null;
 
   if (offerId) {
-    const { data: offer } = await supabase.from('offers').select('*').eq('id', offerId).maybeSingle();
-    if (!offer || offer.status !== 'accepted' || offer.buyer_id !== userId || offer.listing_id !== payload.listingId) {
-      throw Object.assign(new Error('Offer not available for checkout'), { status: 400 });
-    }
+    const offer = await loadCheckoutOffer(supabase, userId, offerId, listing);
     itemPrice = offer.amount;
     listedPrice = listingPrice !== offer.amount ? listingPrice : null;
   }
 
   if (claimId) {
+    await loadCheckoutClaim(userId, claimId, listing.id);
     const service = createServiceClient();
     const { data: claim, error } = await service.rpc('convert_live_claim', {
       p_claim_id: claimId,
@@ -107,7 +174,7 @@ export async function fulfillPaidCheckout(
   if (listingError) throw listingError;
   if (!listing) throw Object.assign(new Error('Listing unavailable'), { status: 400 });
 
-  const resolved = await resolveItemPrice(supabase, userId, payload, listing.price);
+  const resolved = await resolveItemPrice(supabase, userId, payload, listing);
   let { itemPrice, listedPrice, offerId, claimId, liveStreamProductId } = resolved;
 
   const { deliveryFee, protectionFee, total } = computeCheckoutAmounts(itemPrice, payload.deliveryMethod);

@@ -15,6 +15,7 @@ import { PayoutsPage } from './pages/PayoutsPage';
 import { RefundsPage } from './pages/RefundsPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { ReviewsPage } from './pages/ReviewsPage';
+import { StaffPage } from './pages/StaffPage';
 import { UsersPage } from './pages/UsersPage';
 
 export default function App() {
@@ -123,6 +124,14 @@ export default function App() {
               element={
                 <RequireRoute route="audit">
                   <AuditPage />
+                </RequireRoute>
+              }
+            />
+            <Route
+              path="/staff"
+              element={
+                <RequireRoute route="staff">
+                  <StaffPage />
                 </RequireRoute>
               }
             />

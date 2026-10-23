@@ -630,7 +630,7 @@ router.post('/:id/reserve', requireAuth, async (req, res) => {
 
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   if (req.body.liveSessionId) {
-    await supabase.from('live_claims').upsert({
+    await createServiceClient().from('live_claims').upsert({
       session_id: req.body.liveSessionId,
       listing_id: req.params.id,
       user_id: userId,

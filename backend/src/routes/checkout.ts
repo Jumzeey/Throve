@@ -271,7 +271,7 @@ router.post('/complete', requireAuth, async (req, res) => {
   } else if (listing.status === 'sold') {
     return sendError(res, 400, 'Listing unavailable');
   } else {
-    await supabase.from('listings').update({ status: 'sold' }).eq('id', listing.id);
+    await createServiceClient().from('listings').update({ status: 'sold' }).eq('id', listing.id);
   }
 
   // For live multi-stock products, only mark listing sold when fully sold out
@@ -282,7 +282,7 @@ router.post('/complete', requireAuth, async (req, res) => {
       .eq('id', liveStreamProductId)
       .maybeSingle();
     if (product && product.sold_count + product.reserved_count >= product.stock && product.sold_count >= product.stock) {
-      await supabase.from('listings').update({ status: 'sold' }).eq('id', listing.id);
+      await createServiceClient().from('listings').update({ status: 'sold' }).eq('id', listing.id);
     }
   }
 
@@ -390,7 +390,7 @@ router.post('/complete', requireAuth, async (req, res) => {
 router.post('/orders/:id/dispatch', requireAuth, async (req, res) => {
   const { supabase, userId } = req as AuthedRequest;
   const now = new Date().toISOString();
-  const { data, error } = await supabase
+  const { data, error } = await createServiceClient()
     .from('orders')
     .update({ status: 'dispatched', dispatched_at: now })
     .eq('id', req.params.id)
@@ -454,7 +454,7 @@ router.post('/orders/:id/tracking', requireAuth, async (req, res) => {
     patch.in_transit_at = now;
   }
 
-  const { error } = await supabase.from('orders').update(patch).eq('id', order.id);
+  const { error } = await createServiceClient().from('orders').update(patch).eq('id', order.id);
   if (error) return handleSupabaseError(res, error);
 
   const tracking = parsed.data.trackingNumber.trim();
@@ -492,7 +492,7 @@ router.post('/orders/:id/mark-delivered', requireAuth, async (req, res) => {
   }
 
   const now = new Date().toISOString();
-  const { error } = await supabase
+  const { error } = await createServiceClient()
     .from('orders')
     .update({
       status: 'delivered',
@@ -523,7 +523,7 @@ router.post('/orders/:id/mark-delivered', requireAuth, async (req, res) => {
 router.post('/orders/:id/confirm-received', requireAuth, async (req, res) => {
   const { supabase, userId } = req as AuthedRequest;
   const now = new Date().toISOString();
-  const { data, error } = await supabase
+  const { data, error } = await createServiceClient()
     .from('orders')
     .update({
       status: 'completed',
@@ -592,7 +592,7 @@ router.post('/orders/:id/cancel', requireAuth, async (req, res) => {
   if (order.buyer_id !== userId && order.seller_id !== userId) return sendError(res, 403, 'Forbidden');
 
   const now = new Date().toISOString();
-  const { error } = await supabase
+  const { error } = await createServiceClient()
     .from('orders')
     .update({
       status: 'cancelled',
@@ -604,7 +604,7 @@ router.post('/orders/:id/cancel', requireAuth, async (req, res) => {
   if (error) return handleSupabaseError(res, error);
 
   if (!order.live_stream_product_id) {
-    await supabase.from('listings').update({ status: 'available' }).eq('id', order.listing_id);
+    await createServiceClient().from('listings').update({ status: 'available' }).eq('id', order.listing_id);
   }
 
   const otherId = order.buyer_id === userId ? order.seller_id : order.buyer_id;
@@ -653,7 +653,7 @@ router.post('/orders/:id/dispute', requireAuth, async (req, res) => {
   const { data: existing } = await supabase.from('order_disputes').select('id').eq('order_id', order.id).maybeSingle();
   if (existing) return sendError(res, 409, 'A dispute is already open for this order', 'DISPUTE_EXISTS');
 
-  const { data: dispute, error } = await supabase
+  const { data: dispute, error } = await createServiceClient()
     .from('order_disputes')
     .insert({
       order_id: order.id,
@@ -666,7 +666,7 @@ router.post('/orders/:id/dispute', requireAuth, async (req, res) => {
     .single();
   if (error) return handleSupabaseError(res, error);
 
-  await supabase
+  await createServiceClient()
     .from('orders')
     .update({ payout_status: 'on_hold', auto_complete_at: null })
     .eq('id', order.id);
@@ -730,7 +730,7 @@ router.post('/orders/:id/dispute/respond', requireAuth, async (req, res) => {
     return sendError(res, 400, 'No open dispute');
   }
 
-  const { error } = await supabase
+  const { error } = await createServiceClient()
     .from('order_disputes')
     .update({ seller_response: parsed.data.response.trim(), status: 'under_review' })
     .eq('id', dispute.id);
@@ -770,7 +770,7 @@ router.post('/orders/:id/dispute/evidence', requireAuth, async (req, res) => {
   }
 
   const merged = [...(dispute.evidence_urls ?? []), ...parsed.data.evidenceUrls].slice(0, 12);
-  const { error } = await supabase.from('order_disputes').update({ evidence_urls: merged }).eq('id', dispute.id);
+  const { error } = await createServiceClient().from('order_disputes').update({ evidence_urls: merged }).eq('id', dispute.id);
   if (error) return handleSupabaseError(res, error);
 
   const otherId = order.buyer_id === userId ? order.seller_id : order.buyer_id;
@@ -804,16 +804,29 @@ router.post('/orders/:id/review', requireAuth, async (req, res) => {
     return sendError(res, 400, 'Order not eligible for review');
   }
 
-  const { error: reviewError } = await supabase.from('reviews').insert({
+  const service = createServiceClient();
+  // Claim the order's single review slot first so parallel requests cannot post twice.
+  const { data: claimed, error: claimError } = await service
+    .from('orders')
+    .update({ reviewed: true })
+    .eq('id', order.id)
+    .eq('reviewed', false)
+    .select('id')
+    .maybeSingle();
+  if (claimError) return handleSupabaseError(res, claimError);
+  if (!claimed) return sendError(res, 400, 'Order not eligible for review');
+
+  const { error: reviewError } = await service.from('reviews').insert({
     seller_id: order.seller_id,
     buyer_id: userId,
     order_id: order.id,
     rating: parsed.data.rating,
     comment: parsed.data.comment.trim(),
   });
-  if (reviewError) return handleSupabaseError(res, reviewError);
-
-  await supabase.from('orders').update({ reviewed: true }).eq('id', order.id);
+  if (reviewError) {
+    await service.from('orders').update({ reviewed: false }).eq('id', order.id);
+    return handleSupabaseError(res, reviewError);
+  }
 
   const buyer = await getProfileById(supabase, userId);
   void notifyUser({

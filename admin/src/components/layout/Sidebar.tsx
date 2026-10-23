@@ -11,6 +11,7 @@ import {
   CircleDollarSign,
   RefreshCcw,
   ScrollText,
+  ShieldCheck,
   Star,
   Users,
   Wallet,
@@ -46,6 +47,7 @@ function routeLabel(route: AdminRoute, role: AdminRole) {
     payouts: 'Payouts',
     reviews: 'Reviews',
     audit: 'Audit log',
+    staff: 'Staff access',
   };
   return labels[route];
 }
@@ -66,6 +68,7 @@ function routeIcon(route: AdminRoute, role: AdminRole) {
     payouts: CircleDollarSign,
     reviews: Star,
     audit: ScrollText,
+    staff: ShieldCheck,
   };
   return icons[route];
 }

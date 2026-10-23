@@ -17,7 +17,8 @@ export type AdminRoute =
   | 'refunds'
   | 'payouts'
   | 'reviews'
-  | 'audit';
+  | 'audit'
+  | 'staff';
 
 export type StaffAction =
   | 'suspend_user'
@@ -58,6 +59,7 @@ export const ROUTE_ROLES: Record<AdminRoute, AdminRole[]> = {
   payouts: ['super_admin', 'finance'],
   reviews: ['super_admin', 'trust_safety'],
   audit: ['super_admin', 'trust_safety', 'support', 'finance'],
+  staff: ['super_admin'],
 };
 
 /** Least-privilege map — mirror of admin SPA ACTION_ROLES. */
