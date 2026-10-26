@@ -1,6 +1,7 @@
 import { OfflineBanner } from '@/components/ui/alert-banner';
 import { AppImage } from '@/components/ui/app-image';
 import { EmptyState } from '@/components/ui/empty-state';
+import { HomeBannerCarousel } from '@/components/home/home-banner-carousel';
 import { BellIcon, BookmarkIcon, ImagePlaceholderIcon, SearchIcon } from '@/components/ui/icons';
 import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
 import { ListingCard } from '@/components/ui/listing-card';
@@ -20,7 +21,7 @@ import { formatLiveSchedule } from '@/lib/format';
 import { FOLLOWING_PREVIEW_PER_SELLER, latestPerSeller } from '@/lib/following-feed';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 
@@ -198,7 +199,9 @@ export default function HomeScreen() {
     }
   }, [ensurePublicProfile, liveNow, sellers]);
 
+  const [bannerRefresh, setBannerRefresh] = useState(0);
   const pullTask = useCallback(async () => {
+    setBannerRefresh((n) => n + 1);
     await Promise.all([refreshListings(), refreshLive()]);
   }, [refreshListings, refreshLive]);
   const { refreshing, onRefresh } = usePullRefresh(pullTask);
@@ -234,24 +237,7 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
-        <Pressable
-          onPress={() => router.push('/category-browse')}
-          style={styles.hero}
-          accessibilityRole="button"
-          accessibilityLabel="Shop now"
-        >
-          <Text style={styles.heroTitle} maxFontSizeMultiplier={1.15} allowFontScaling>
-            Curated finds.{'\n'}Loved again.
-          </Text>
-          <Text style={styles.heroSub} maxFontSizeMultiplier={1.15}>
-            Timeless style, from closets across Nigeria.
-          </Text>
-          <View style={styles.heroCta}>
-            <Text style={styles.heroCtaText} maxFontSizeMultiplier={1.1}>
-              Shop now
-            </Text>
-          </View>
-        </Pressable>
+        <HomeBannerCarousel refreshSignal={bannerRefresh} />
 
         <View style={styles.section}>
           <SectionHeading title="Shop by department" onSeeAll={() => router.push('/category-browse')} />
@@ -480,49 +466,6 @@ const styles = StyleSheet.create({
   },
   content: {},
   offline: { marginHorizontal: 20, marginBottom: 12 },
-  hero: {
-    marginHorizontal: 20,
-    marginBottom: 26,
-    minHeight: 210,
-    borderRadius: Radius.sm,
-    overflow: 'hidden',
-    backgroundColor: Palette.plum,
-    paddingHorizontal: 24,
-    paddingTop: 28,
-    paddingBottom: 28,
-    justifyContent: 'center',
-    gap: 12,
-  },
-  heroTitle: {
-    fontFamily: Typography.display,
-    fontSize: 29,
-    lineHeight: 34,
-    color: Palette.ivory,
-    maxWidth: 200,
-    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
-  },
-  heroSub: {
-    fontSize: 12,
-    lineHeight: 18,
-    fontFamily: Typography.body,
-    color: 'rgba(255,247,240,0.82)',
-    maxWidth: 180,
-    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
-  },
-  heroCta: {
-    alignSelf: 'flex-start',
-    marginTop: 4,
-    backgroundColor: Palette.ivory,
-    paddingHorizontal: 20,
-    paddingVertical: 11,
-    borderRadius: 22,
-  },
-  heroCtaText: {
-    fontSize: 12.5,
-    fontFamily: Typography.bodySemiBold,
-    color: Palette.plum,
-    ...(Platform.OS === 'android' ? { includeFontPadding: false } : {}),
-  },
   section: { marginBottom: 26 },
   listingsBody: { paddingHorizontal: 20 },
   sectionHeader: {
