@@ -14,6 +14,7 @@
 #        EXPO_PUBLIC_SUPABASE_ANON_KEY
 #        EXPO_PUBLIC_API_URL          (must be hosted backend, e.g. Railway — not localhost)
 #        EXPO_PUBLIC_AUTH_REDIRECT_URL (e.g. throveapp://auth/callback)
+#        EXPO_TOKEN                    (Expo access token; enables the EAS Update step after Android builds)
 #    - `google_play` — GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS (Play service-account JSON)
 # 5. Mark secret values as Secure in the UI.
 # 6. Caching — configured per workflow below via `cache.cache_paths`. After the next
@@ -137,13 +138,38 @@ workflows:
           ./gradlew bundleRelease \
             -PversionCode=$UPDATED_BUILD_NUMBER \
             -PversionName=1.0.$UPDATED_BUILD_NUMBER
+      - name: Write Google Play release notes
+        script: |
+          # Codemagic attaches release_notes.json in the project root to the Play release.
+          NOTES=$(git log -1 --pretty=%B | head -c 480)
+          node -e 'require("fs").writeFileSync("release_notes.json", JSON.stringify([{ language: "en-GB", text: process.argv[1] }]))' "$NOTES"
+          cat release_notes.json
+      - name: Publish EAS Update (production channel)
+        script: |
+          # Runs only after a successful build, so installed apps get the same JS over the air.
+          # Needs EXPO_TOKEN (expo.dev > Account settings > Access tokens) in the throve_frontend group.
+          set -e
+          if [ -z "${EXPO_TOKEN:-}" ]; then
+            echo "EXPO_TOKEN not set; skipping EAS Update"
+            exit 0
+          fi
+          cd frontend
+          npx eas-cli@latest update \
+            --channel production \
+            --environment production \
+            --platform all \
+            --message "Codemagic build $BUILD_NUMBER · ${CM_COMMIT:0:7}" \
+            --non-interactive
     artifacts:
       - frontend/android/app/build/outputs/**/*.aab
     publishing:
       google_play:
         credentials: $GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS
+        # Closed testing first, then the same release is promoted to Open testing (beta).
         track: alpha
         submit_as_draft: false
+        release_promotion:
+          track: beta
 
   # Manual only (Start new build). Wire App Store Connect + ios_signing before enabling IPA publish.
   react-native-ios:
