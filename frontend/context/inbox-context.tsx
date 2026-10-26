@@ -42,6 +42,7 @@ type InboxContextValue = {
     buyer: string;
     seller: string;
     amount: number;
+    quantity?: number;
     initiator: Offer['initiator'];
   }) => Promise<Offer | null>;
   acceptOffer: (id: string, username: string) => Promise<boolean>;
@@ -415,7 +416,14 @@ export function InboxProvider({ children }: { children: ReactNode }) {
   );
 
   const createOffer = useCallback(
-    async (input: { listingId: string; buyer: string; seller: string; amount: number; initiator: Offer['initiator'] }) => {
+    async (input: {
+      listingId: string;
+      buyer: string;
+      seller: string;
+      amount: number;
+      quantity?: number;
+      initiator: Offer['initiator'];
+    }) => {
       const offer = await apiFetch<Offer>('/inbox/offers', { method: 'POST', body: JSON.stringify(input) });
       setOffers((current) => [offer, ...current]);
       void refresh({ silent: true }).catch(() => undefined);

@@ -5,7 +5,8 @@ import { Palette, Radius, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
 import { useInbox } from '@/context/inbox-context';
-import { useListings } from '@/context/listings-context';
+import { listingUnitsLeft, useListings } from '@/context/listings-context';
+import type { Listing } from '@/data/types';
 import { getListingImage, getListingImageSource, isUsableRemoteImageUri } from '@/data/images';
 import { sellerRatingInfo } from '@/data/seed';
 import { apiFetch } from '@/lib/api';
@@ -216,6 +217,9 @@ export default function ProductScreen() {
             <Text style={styles.price}>{formatNaira(listing.price)}</Text>
             {listing.status !== 'reserved' ? <AvailabilityBadge status={listing.status} /> : null}
           </View>
+          {listing.status === 'available' && stockNote(listing) ? (
+            <Text style={styles.stockNote}>{stockNote(listing)}</Text>
+          ) : null}
           {listing.status === 'available' ? (
             <>
               <View style={styles.protectRow}>
@@ -371,14 +375,16 @@ export default function ProductScreen() {
         <OfferSheet
           visible={offerOpen}
           listingPrice={product.price}
+          maxQuantity={listingUnitsLeft(product)}
           onClose={() => setOfferOpen(false)}
-          onSubmit={(amount) => {
+          onSubmit={(amount, quantity) => {
             void inbox
               .createOffer({
                 listingId: product.id,
                 buyer: username,
                 seller: product.seller,
                 amount,
+                quantity,
                 initiator: 'buyer',
               })
               .then(async (created) => {
@@ -414,13 +420,20 @@ export default function ProductScreen() {
   );
 }
 
+/** "Only 2 left" when stock is low, "12 available" otherwise; nothing for single items. */
+function stockNote(listing: Listing) {
+  const left = listingUnitsLeft(listing);
+  if ((listing.quantity ?? 1) <= 1 || left < 1) return null;
+  return left <= 3 ? `Only ${left} left` : `${left} available`;
+}
+
 function AvailabilityBadge({ status }: { status: string }) {
   const tone =
     status === 'available'
       ? { border: Palette.success, color: Palette.success, dot: Palette.success, label: 'AVAILABLE' }
       : status === 'reserved'
         ? { border: Palette.warning, color: Palette.warning, dot: Palette.warning, label: 'RESERVED' }
-        : { border: Palette.espresso, color: Palette.espresso, dot: Palette.espresso, label: 'SOLD' };
+        : { border: Palette.espresso, color: Palette.espresso, dot: Palette.espresso, label: 'SOLD OUT' };
   return (
     <View style={[styles.avail, { borderColor: tone.border }]}>
       <View style={[styles.availDot, { backgroundColor: tone.dot }]} />
@@ -513,6 +526,12 @@ const styles = StyleSheet.create({
     fontFamily: Typography.body,
     color: Palette.muted,
     marginBottom: 16,
+  },
+  stockNote: {
+    marginTop: 6,
+    fontSize: 12.5,
+    fontFamily: Typography.bodySemiBold,
+    color: Palette.warningText,
   },
   priceRow: {
     flexDirection: 'row',

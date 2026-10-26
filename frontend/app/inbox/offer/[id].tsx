@@ -15,7 +15,7 @@ import { getListingImageSource } from '@/data/images';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatNaira } from '@/lib/format';
-import { effectiveOfferStatus, formatOfferCountdown, offerChipVariant } from '@/lib/offer-display';
+import { effectiveOfferStatus, formatOfferCountdown, offerChipVariant, offerAmountLabel } from '@/lib/offer-display';
 import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -81,7 +81,7 @@ export default function OfferDetailsScreen() {
   const listingReserved = listing?.status === 'reserved';
   const listingSold = listing?.status === 'sold' || listing?.status === 'removed';
   const listingAvailable = listing?.status === 'available';
-  const canCheckout = isBuyer && status === 'accepted' && listingAvailable;
+  const canCheckout = isBuyer && status === 'accepted' && listingAvailable && !offer?.used;
   const checkoutBlocked = isBuyer && status === 'accepted' && (listingReserved || listingSold);
   const metaLine = [listing?.department, listing?.category, listing?.condition].filter(Boolean).join(' · ');
   const priceLabel =
@@ -169,7 +169,7 @@ export default function OfferDetailsScreen() {
             ) : null}
             <View style={[styles.priceRow, styles.priceHighlight]}>
               <Text style={styles.priceBody}>{"Seller's counter"}</Text>
-              <Text style={styles.priceStrong}>{formatNaira(offer.amount)}</Text>
+              <Text style={styles.priceStrong}>{offerAmountLabel(offer)}</Text>
             </View>
             {countdown && status === 'pending' ? (
               <Text style={styles.expiresInline}>Expires in {countdown}</Text>
@@ -183,7 +183,7 @@ export default function OfferDetailsScreen() {
             </View>
             <View style={[styles.priceRow, styles.priceHighlight]}>
               <Text style={styles.priceBody}>{priceLabel}</Text>
-              <Text style={styles.priceStrong}>{formatNaira(offer.amount)}</Text>
+              <Text style={styles.priceStrong}>{offerAmountLabel(offer)}</Text>
             </View>
           </View>
         )}
@@ -333,7 +333,7 @@ export default function OfferDetailsScreen() {
           {canCheckout ? (
             <>
               <Button
-                label={`Continue to checkout · ${formatNaira(offer.amount)}`}
+                label={`Continue to checkout · ${formatNaira(offer.amount * (offer.quantity ?? 1))}`}
                 disabled={!isConnected || busy}
                 loading={busy}
                 onPress={startBuy}

@@ -421,13 +421,16 @@ router.put('/:id', requireAuth, async (req, res) => {
     patch.shipping = shippingSummary(parsed.data.shippingMethod);
   }
 
-  let { data, error } = await supabase
-    .from('listings')
-    .update(patch)
-    .eq('id', req.params.id)
-    .eq('seller_id', userId)
-    .select('*')
-    .single();
+  // A stock-only change has no column patch; just load the row.
+  let { data, error } = Object.keys(patch).length
+    ? await supabase
+        .from('listings')
+        .update(patch)
+        .eq('id', req.params.id)
+        .eq('seller_id', userId)
+        .select('*')
+        .single()
+    : await supabase.from('listings').select('*').eq('id', req.params.id).eq('seller_id', userId).single();
 
   if (error) return handleSupabaseError(res, error);
 
@@ -664,40 +667,42 @@ router.post('/:id/reserve', requireAuth, async (req, res) => {
     });
   }
 
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-  if (req.body.liveSessionId) {
-    await createServiceClient().from('live_claims').upsert({
-      session_id: req.body.liveSessionId,
-      listing_id: req.params.id,
-      user_id: userId,
-      expires_at: expiresAt,
-    });
-  }
-
   return res.json(mapListing(data, sellerUsername));
 });
 
+/**
+ * Seller makes a listing buyable again: lifts a manual reservation, or un-hides a listing the
+ * seller hid themselves. Listings hidden by Throve staff stay hidden. Stock decides the final
+ * status (a sold-out listing goes back to Sold, not Available).
+ */
 router.post('/:id/release', requireAuth, async (req, res) => {
-  const { supabase } = req as AuthedRequest;
-  const { data: listing } = await supabase.from('listings').select('*').eq('id', req.params.id).maybeSingle();
-  const { error } = await supabase.from('listings').update({ status: 'available' }).eq('id', req.params.id);
-  if (error) return handleSupabaseError(res, error);
-  await supabase.from('live_claims').delete().eq('listing_id', req.params.id);
+  const { userId } = req as AuthedRequest;
+  const service = createServiceClient();
+  const { data: listing } = await service.from('listings').select('*').eq('id', req.params.id).maybeSingle();
+  // Older app builds call this for buyers too; that was always a no-op.
+  if (!listing || listing.seller_id !== userId) return res.json({ ok: true });
+  if (!['reserved', 'hidden'].includes(String(listing.status))) return res.json({ ok: true, status: listing.status });
 
-  if (listing?.seller_id) {
-    void notifyUser({
-      userId: listing.seller_id,
-      category: 'account',
-      type: 'listing_released',
-      title: 'Reservation released',
-      body: String(listing.title ?? 'Your listing'),
-      deepLink: `product/${req.params.id}`,
-      data: { listingId: String(req.params.id) },
-      skipPush: true,
-    });
+  if (listing.status === 'hidden') {
+    const { data: lastStaffEvent } = await service
+      .from('listing_review_events')
+      .select('action')
+      .eq('listing_id', listing.id)
+      .in('action', ['hidden', 'restored'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (lastStaffEvent?.action === 'hidden') {
+      return sendError(res, 403, 'Throve hid this listing. Contact support to restore it.', 'HIDDEN_BY_STAFF');
+    }
   }
 
-  return res.json({ ok: true });
+  const { error } = await service.from('listings').update({ status: 'available' }).eq('id', listing.id);
+  if (error) return handleSupabaseError(res, error);
+  await service.rpc('sync_listing_stock_status', { p_listing_id: listing.id });
+  const { data: updated } = await service.from('listings').select('status').eq('id', listing.id).maybeSingle();
+
+  return res.json({ ok: true, status: updated?.status ?? 'available' });
 });
 
 /** Seller sold the rest outside Throve: quantity drops to what is already sold or being bought. */

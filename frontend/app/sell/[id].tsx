@@ -12,7 +12,8 @@ import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
 import { useInbox } from '@/context/inbox-context';
-import { useListings } from '@/context/listings-context';
+import { MAX_LISTING_QUANTITY, listingUnitsLeft, useListings } from '@/context/listings-context';
+import { QuantityStepper } from '@/components/ui/quantity-stepper';
 import { getListingImageSource } from '@/data/images';
 import type { Listing } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
@@ -22,12 +23,24 @@ import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+function stockLine(item: Listing) {
+  const total = item.quantity ?? 1;
+  const sold = item.quantitySold ?? 0;
+  const held = item.quantityHeld ?? 0;
+  const left = item.quantityAvailable ?? Math.max(0, total - sold - held);
+  const parts = [`${left} of ${total} left`];
+  if (sold) parts.push(`${sold} sold`);
+  if (held) parts.push(`${held} being bought`);
+  return parts.join(' · ');
+}
+
 export default function SellerListingScreen() {
   const router = useRouter();
   const { sheetBottom } = useScreenInsets();
   const { id, notice } = useLocalSearchParams<{ id: string; notice?: string }>();
   const { session, publicProfiles, ensurePublicProfile } = useAuth();
-  const { getListing, loadFormFromListing, setStatus, removeListing, canDelete, resubmit } = useListings();
+  const { getListing, loadFormFromListing, setStatus, removeListing, canDelete, resubmit, updateListing } =
+    useListings();
   const inbox = useInbox();
   const checkout = useCheckout();
   const { isConnected } = useNetworkStatus();
@@ -35,6 +48,7 @@ export default function SellerListingScreen() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [offerFor, setOfferFor] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [stockDraft, setStockDraft] = useState<number | null>(null);
 
   function notify(kind: 'published' | 'updated' | 'resubmitted' | 'error') {
     if (kind === 'error') toast.error("We couldn't save those changes", 'Please try again in a moment.');
@@ -117,6 +131,20 @@ export default function SellerListingScreen() {
     }
   }
 
+  async function saveStock() {
+    if (!isConnected || saving || stockDraft == null) return;
+    setSaving(true);
+    try {
+      await updateListing(item.id, { quantity: stockDraft });
+      setStockDraft(null);
+      toast.success('Stock updated', 'Buyers see the new quantity straight away.');
+    } catch (err) {
+      toast.error("We couldn't update the stock", err instanceof Error ? err.message : 'Please try again in a moment.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function confirmRemove() {
     if (!allowDelete || saving) return;
     setSaving(true);
@@ -160,6 +188,39 @@ export default function SellerListingScreen() {
             <StatusChip kind="listing" variant={item.status as ListingChipVariant} />
           </View>
         </View>
+
+        {['available', 'reserved', 'sold', 'hidden'].includes(item.status) ? (
+          <View style={styles.stockCard}>
+            <View style={styles.stockHead}>
+              <Text style={styles.classLabel}>STOCK</Text>
+              <Text style={styles.stockSummary}>
+                {stockLine(item)}
+              </Text>
+            </View>
+            <View style={styles.stockRow}>
+              <QuantityStepper
+                value={stockDraft ?? item.quantity ?? 1}
+                min={(item.quantitySold ?? 0) + (item.quantityHeld ?? 0)}
+                max={MAX_LISTING_QUANTITY}
+                accessibilityLabel="Total quantity"
+                onChange={(next) => setStockDraft(next)}
+              />
+              <Button
+                label="Save stock"
+                style={styles.stockSave}
+                variant="secondary"
+                disabled={
+                  saving || !isConnected || stockDraft == null || stockDraft === (item.quantity ?? 1)
+                }
+                onPress={() => void saveStock()}
+              />
+            </View>
+            <Text style={styles.help}>
+              Total you have listed, including what has sold. Raise it to restock; it can&apos;t go below what is
+              already sold or being bought.
+            </Text>
+          </View>
+        ) : null}
 
         {item.status === 'pending_review' ? (
           <AlertBanner
@@ -232,8 +293,8 @@ export default function SellerListingScreen() {
                 </Text>
               </Pressable>
               <Text style={styles.help}>
-                Hide removes this from public browse until you make it available again. Mark as sold is for sales
-                completed outside Throve.
+                Hide removes this from public browse until you make it available again. Mark as sold sets the rest
+                as sold outside Throve.
               </Text>
             </>
           ) : null}
@@ -306,7 +367,7 @@ export default function SellerListingScreen() {
                 <Text style={[styles.deleteOutlineLabel, styles.controlDisabledLabel]}>Delete listing</Text>
               </Pressable>
               <Text style={styles.help}>
-                Sold items can&apos;t be bought again. Delete stays unavailable while the order is open.
+                Sold out. Add more stock above to sell it again. Delete stays unavailable while orders are open.
               </Text>
             </>
           ) : null}
@@ -450,8 +511,9 @@ export default function SellerListingScreen() {
       <OfferSheet
         visible={Boolean(offerFor)}
         listingPrice={item.price}
+        maxQuantity={listingUnitsLeft(item)}
         onClose={() => setOfferFor(null)}
-        onSubmit={(amount) => {
+        onSubmit={(amount, quantity) => {
           if (!offerFor) return;
           void inbox
             .createOffer({
@@ -459,6 +521,7 @@ export default function SellerListingScreen() {
               buyer: offerFor,
               seller: session.username,
               amount,
+              quantity,
               initiator: 'seller',
             })
             .then((created) => {
@@ -512,6 +575,18 @@ const styles = StyleSheet.create({
     fontFamily: Typography.display,
     color: Palette.espresso,
   },
+  stockCard: {
+    gap: 10,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Palette.border,
+    borderRadius: Radius.md,
+    backgroundColor: Palette.ivoryElevated,
+  },
+  stockHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  stockSummary: { fontSize: 12.5, fontFamily: Typography.bodyMedium, color: Palette.espresso },
+  stockRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  stockSave: { flex: 1 },
   summaryPrice: {
     fontSize: 15,
     fontFamily: Typography.bodySemiBold,

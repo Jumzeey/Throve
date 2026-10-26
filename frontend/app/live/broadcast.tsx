@@ -532,7 +532,6 @@ export default function LiveBroadcastScreen() {
               await live.addProduct(sessionId, {
                 listingId: listing.id,
                 livePrice: listing.price,
-                stock: 1,
                 isPinned: true,
               });
               setPickerOpen(false);

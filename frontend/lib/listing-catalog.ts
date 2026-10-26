@@ -75,6 +75,7 @@ export function sizeIsRequired(catalog: ListingCatalog, productType: string) {
 }
 
 export type ListingFormIssueField =
+  | 'quantity'
   | 'photos'
   | 'title'
   | 'department'
@@ -101,6 +102,10 @@ export function listingFormIssues(form: ListingForm, catalog: ListingCatalog): L
   if (!form.productType.trim()) issues.push({ field: 'productType', label: 'Product type' });
   const price = Number(form.price.replace(/[^\d]/g, ''));
   if (!Number.isFinite(price) || price <= 0) issues.push({ field: 'price', label: 'Price' });
+  const quantity = Number(form.quantity);
+  if (!form.quantity || !Number.isInteger(quantity) || quantity < 1) {
+    issues.push({ field: 'quantity', label: 'Quantity' });
+  }
   if (sizeIsRequired(catalog, form.productType) && !form.size.trim()) {
     issues.push({ field: 'size', label: 'Size' });
   }

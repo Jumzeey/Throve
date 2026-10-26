@@ -320,6 +320,11 @@ export default function CheckoutOrderScreen() {
             <View style={styles.itemCopy}>
               <Text style={styles.itemTitle}>{order.listingTitle}</Text>
               {listingMeta ? <Text style={styles.itemMeta}>{listingMeta}</Text> : null}
+              {(order.quantity ?? 1) > 1 ? (
+                <Text style={styles.itemMeta}>
+                  {order.quantity} × {formatNaira(order.unitPrice ?? Math.round(order.itemPrice / (order.quantity ?? 1)))}
+                </Text>
+              ) : null}
               <Text style={styles.itemPrice}>{formatNaira(order.itemPrice)}</Text>
             </View>
           </View>
@@ -383,7 +388,10 @@ export default function CheckoutOrderScreen() {
 
               <View style={styles.card}>
                 <Text style={styles.cardLabel}>Payment summary</Text>
-                <MoneyRow label="Item price" value={formatNaira(order.itemPrice)} />
+                <MoneyRow
+                  label={(order.quantity ?? 1) > 1 ? `Items (${order.quantity})` : 'Item price'}
+                  value={formatNaira(order.itemPrice)}
+                />
                 <MoneyRow label="Delivery" value={formatNaira(order.deliveryFee)} />
                 <MoneyRow
                   label="Buyer Protection fee"

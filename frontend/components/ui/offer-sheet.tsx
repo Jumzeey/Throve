@@ -1,6 +1,7 @@
 import { AlertBanner } from '@/components/ui/alert-banner';
 import { Button } from '@/components/ui/button';
 import { KeyboardSafeSheet } from '@/components/ui/keyboard-safe';
+import { QuantityStepper } from '@/components/ui/quantity-stepper';
 import { TextField } from '@/components/ui/text-field';
 import { Palette, Radius, Shadows, Spacing, Typography } from '@/constants/theme';
 import { minOfferAmount, validateOfferAmount } from '@/context/inbox-context';
@@ -17,16 +18,27 @@ type Props = {
   visible: boolean;
   listingPrice: number;
   title?: string;
+  /** Units the buyer can ask for; shows a quantity picker when more than one. */
+  maxQuantity?: number;
   onClose: () => void;
-  onSubmit: (amount: number) => void;
+  /** `amount` is per item. */
+  onSubmit: (amount: number, quantity: number) => void;
 };
 
 function amountForOff(listingPrice: number, off: QuickOff) {
   return Math.max(1, Math.round(listingPrice * (1 - off / 100)));
 }
 
-export function OfferSheet({ visible, listingPrice, title = 'Make an offer', onClose, onSubmit }: Props) {
+export function OfferSheet({
+  visible,
+  listingPrice,
+  title = 'Make an offer',
+  maxQuantity = 1,
+  onClose,
+  onSubmit,
+}: Props) {
   const [mode, setMode] = useState<Mode>(10);
+  const [quantity, setQuantity] = useState(1);
   const [customAmount, setCustomAmount] = useState('');
   const [error, setError] = useState<string | null>(null);
   const min = minOfferAmount(listingPrice);
@@ -47,6 +59,7 @@ export function OfferSheet({ visible, listingPrice, title = 'Make an offer', onC
     setMode(first?.off ?? 'custom');
     setCustomAmount('');
     setError(null);
+    setQuantity(1);
   }, [visible, listingPrice, quickOptions]);
 
   const selectedAmount = useMemo(() => {
@@ -74,7 +87,7 @@ export function OfferSheet({ visible, listingPrice, title = 'Make an offer', onC
       return;
     }
     Keyboard.dismiss();
-    onSubmit(selectedAmount);
+    onSubmit(selectedAmount, Math.min(quantity, Math.max(1, maxQuantity)));
     setCustomAmount('');
     setError(null);
   }
@@ -93,7 +106,25 @@ export function OfferSheet({ visible, listingPrice, title = 'Make an offer', onC
           <Pressable onPress={(event) => event.stopPropagation()}>
             <View style={styles.handle} />
             <Text style={styles.title}>{title}</Text>
-            <Text style={styles.sub}>Listed at {formatNaira(listingPrice)}</Text>
+            <Text style={styles.sub}>
+              Listed at {formatNaira(listingPrice)}
+              {maxQuantity > 1 ? ' each' : ''}
+            </Text>
+
+            {maxQuantity > 1 ? (
+              <View style={styles.qtyRow}>
+                <View>
+                  <Text style={styles.qtyLabel}>How many?</Text>
+                  <Text style={styles.qtyHint}>{maxQuantity} available · your price is per item</Text>
+                </View>
+                <QuantityStepper
+                  value={quantity}
+                  max={maxQuantity}
+                  accessibilityLabel="How many to offer on"
+                  onChange={(next) => setQuantity(Math.max(1, next ?? 1))}
+                />
+              </View>
+            ) : null}
 
             <View style={styles.chips}>
               {quickOptions.map((option) => {
@@ -138,7 +169,9 @@ export function OfferSheet({ visible, listingPrice, title = 'Make an offer', onC
               />
             ) : (
               <Text style={styles.selectedHint}>
-                Offering {formatNaira(selectedAmount)} · minimum {formatNaira(min)}
+                Offering {formatNaira(selectedAmount)}
+                {quantity > 1 ? ` each (${formatNaira(selectedAmount * quantity)} for ${quantity})` : ''} · minimum{' '}
+                {formatNaira(min)}
               </Text>
             )}
 
@@ -155,6 +188,14 @@ export function OfferSheet({ visible, listingPrice, title = 'Make an offer', onC
 }
 
 const styles = StyleSheet.create({
+  qtyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.md,
+  },
+  qtyLabel: { fontSize: 14, fontFamily: Typography.bodySemiBold, color: Palette.espresso },
+  qtyHint: { marginTop: 2, fontSize: 12, fontFamily: Typography.body, color: Palette.muted },
   overlay: {
     flex: 1,
     backgroundColor: Palette.liveOverlay,

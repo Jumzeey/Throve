@@ -46,10 +46,14 @@ type CheckoutContextValue = {
     offerId?: string | null;
     itemPrice?: number;
     listedPrice?: number | null;
+    quantity?: number;
   }) => Promise<boolean>;
   updateDraft: (
     patch: Partial<
-      Pick<CheckoutDraft, 'name' | 'address' | 'city' | 'state' | 'phone' | 'deliveryNote' | 'deliveryMethod'>
+      Pick<
+        CheckoutDraft,
+        'name' | 'address' | 'city' | 'state' | 'phone' | 'deliveryNote' | 'deliveryMethod' | 'quantity'
+      >
     >,
   ) => void;
   cancelCheckout: () => Promise<string | null>;
@@ -145,6 +149,7 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
       offerId?: string | null;
       itemPrice?: number;
       listedPrice?: number | null;
+      quantity?: number;
     }) => {
       try {
         // Omit nulls — production Zod rejects null for optional string fields.
@@ -168,6 +173,11 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
           offerId: started.offerId ?? input.offerId ?? null,
           itemPrice: started.itemPrice ?? input.itemPrice,
           listedPrice: started.listedPrice ?? input.listedPrice ?? null,
+          quantityFixed: Boolean(started.quantityFixed),
+          quantityAvailable: started.quantityAvailable ?? 1,
+          quantity: started.quantityFixed
+            ? (started.quantity ?? 1)
+            : Math.min(Math.max(1, input.quantity ?? 1), started.quantityAvailable ?? 1),
           buyer: started.buyer,
           name: '',
           address: '',
@@ -191,7 +201,10 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
   const updateDraft = useCallback(
     (
       patch: Partial<
-        Pick<CheckoutDraft, 'name' | 'address' | 'city' | 'state' | 'phone' | 'deliveryNote' | 'deliveryMethod'>
+        Pick<
+          CheckoutDraft,
+          'name' | 'address' | 'city' | 'state' | 'phone' | 'deliveryNote' | 'deliveryMethod' | 'quantity'
+        >
       >,
     ) => {
       setDraft((current) => (current ? { ...current, ...patch } : current));
@@ -230,6 +243,7 @@ export function CheckoutProvider({ children }: { children: ReactNode }) {
       phone: draft.phone,
       deliveryNote: draft.deliveryNote || null,
       deliveryMethod: draft.deliveryMethod,
+      ...(draft.quantityFixed ? {} : { quantity: draft.quantity ?? 1 }),
     };
   }, [draft]);
 

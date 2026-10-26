@@ -16,17 +16,26 @@ export function buyerProtectionFee(itemPrice: number) {
   return Math.min(2500, Math.max(300, raw));
 }
 
+/**
+ * `itemPrice` and `listedPrice` are per unit; the returned `itemPrice` / `listedPrice` are line
+ * totals for `quantity` units. Delivery is charged once per order; Buyer Protection is on the items.
+ */
 export function checkoutTotals(input: {
   itemPrice: number;
   deliveryMethod: DeliveryMethod | null | undefined;
   listedPrice?: number | null;
+  quantity?: number;
 }) {
+  const quantity = Math.max(1, Math.trunc(input.quantity ?? 1));
+  const itemPrice = input.itemPrice * quantity;
   const delivery = getDeliveryOption(input.deliveryMethod);
-  const protectionFee = buyerProtectionFee(input.itemPrice);
-  const total = input.itemPrice + delivery.fee + protectionFee;
+  const protectionFee = buyerProtectionFee(itemPrice);
+  const total = itemPrice + delivery.fee + protectionFee;
   return {
-    itemPrice: input.itemPrice,
-    listedPrice: input.listedPrice ?? null,
+    unitPrice: input.itemPrice,
+    quantity,
+    itemPrice,
+    listedPrice: input.listedPrice != null ? input.listedPrice * quantity : null,
     delivery,
     protectionFee,
     total,

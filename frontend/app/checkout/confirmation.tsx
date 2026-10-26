@@ -211,6 +211,7 @@ function ConfirmedOrderView({ order }: { order: Order }) {
                   {order.seller}
                 </Text>
               </Text>
+              {(order.quantity ?? 1) > 1 ? <Text style={styles.itemSub}>Quantity: {order.quantity}</Text> : null}
               <Text style={styles.itemPrice}>{formatNaira(order.itemPrice)}</Text>
             </View>
           </View>

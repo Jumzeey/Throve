@@ -1,5 +1,12 @@
 import type { Offer, OfferStatus } from '@/data/types';
 import type { OfferChipVariant } from '@/components/ui/status-chip';
+import { formatNaira } from '@/lib/format';
+
+/** "₦8,000" for one item, "₦8,000 each × 3" for several. */
+export function offerAmountLabel(offer: Pick<Offer, 'amount' | 'quantity'>) {
+  const quantity = offer.quantity ?? 1;
+  return quantity > 1 ? `${formatNaira(offer.amount)} each × ${quantity}` : formatNaira(offer.amount);
+}
 
 export function effectiveOfferStatus(offer: Offer): OfferStatus {
   if (offer.status === 'pending' && offer.expiresAt <= Date.now()) return 'expired';
@@ -30,6 +37,7 @@ export function offerFooter(offer: Offer, status: OfferStatus, now = Date.now())
     return { text: 'No response within 24 hours', warning: false };
   }
   if (status === 'accepted') {
+    if (offer.used) return { text: 'Bought', warning: false };
     return { text: 'Waiting for the buyer to start checkout', warning: false };
   }
   if (status === 'expired') {

@@ -118,6 +118,7 @@ export default function PaymentScreen() {
     itemPrice,
     deliveryMethod: draft.deliveryMethod,
     listedPrice: draft.listedPrice,
+    quantity: draft.quantity ?? 1,
   });
   const shown = {
     itemPrice: charged?.itemPrice ?? totals.itemPrice,
@@ -282,7 +283,10 @@ export default function PaymentScreen() {
             </View>
           </View>
           <View style={styles.divider} />
-          <Row label="Item price" value={formatNaira(shown.itemPrice)} />
+          <Row
+            label={totals.quantity > 1 ? `Items (${totals.quantity} × ${formatNaira(totals.unitPrice)})` : 'Item price'}
+            value={formatNaira(shown.itemPrice)}
+          />
           <Row label="Delivery" value={formatNaira(shown.deliveryFee)} />
           <Row
             label="Buyer Protection fee"

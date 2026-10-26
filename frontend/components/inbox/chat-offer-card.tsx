@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button';
 import { Palette, Typography } from '@/constants/theme';
 import type { Offer } from '@/data/types';
 import { formatNaira } from '@/lib/format';
-import { effectiveOfferStatus } from '@/lib/offer-display';
+import { effectiveOfferStatus, offerAmountLabel } from '@/lib/offer-display';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 type Props = {
@@ -43,10 +43,10 @@ export function ChatOfferCard({
       onPress={onOpen}
       style={[styles.card, mine ? styles.cardMine : styles.cardTheirs]}
       accessibilityRole="button"
-      accessibilityLabel={`Offer ${formatNaira(offer.amount)}, ${statusLabel}`}
+      accessibilityLabel={`Offer ${offerAmountLabel(offer)}, ${statusLabel}`}
     >
       <View style={styles.priceRow}>
-        <Text style={styles.amount}>{formatNaira(offer.amount)}</Text>
+        <Text style={styles.amount}>{offerAmountLabel(offer)}</Text>
         {listingPrice > offer.amount ? (
           <Text style={styles.listPrice}>{formatNaira(listingPrice)}</Text>
         ) : null}
