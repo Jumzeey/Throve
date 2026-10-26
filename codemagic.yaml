@@ -165,11 +165,12 @@ workflows:
     publishing:
       google_play:
         credentials: $GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS
-        # Closed testing first, then the same release is promoted to Open testing (beta).
+        # Closed testing first, then the same release is promoted to Production
+        # (Google still reviews each production release before it goes live).
         track: alpha
         submit_as_draft: false
         release_promotion:
-          track: beta
+          track: production
 
   # Manual only (Start new build). Wire App Store Connect + ios_signing before enabling IPA publish.
   react-native-ios:
