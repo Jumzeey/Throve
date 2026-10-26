@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { runAutoCompleteDueOrders } from '../lib/order-map.js';
+import { releaseCheckoutHold } from '../lib/checkout-fulfill.js';
 import { reconcilePendingProviderOps } from '../lib/payments/settle.js';
 import { createServiceClient } from '../lib/supabase.js';
 
@@ -17,8 +18,9 @@ async function expireStaleIntents(supabase: ReturnType<typeof createServiceClien
     .update({ status: 'cancelled' })
     .eq('status', 'pending')
     .lt('created_at', cutoff)
-    .select('id');
+    .select('id, stock_hold_id');
   if (error) throw error;
+  for (const row of data ?? []) await releaseCheckoutHold(row.stock_hold_id as string | null);
   return data?.length ?? 0;
 }
 

@@ -5,7 +5,7 @@ import type { DbRow } from '../lib/db-types.js';
 import { listingReservedEmail, listingSubmittedForReviewEmail } from '../lib/email/templates/listings.js';
 import { notifySavedListingWatchers } from '../lib/saved-listing-alerts.js';
 import { getProfileById, getSellerCards, getSellerMap, mapListing, escapeIlike } from '../lib/mappers.js';
-import { LISTING_CATALOG, categoriesForDepartment, shippingSummary, sizeIsRequiredForProductType } from '../lib/listing-catalog.js';
+import { LISTING_CATALOG, MAX_LISTING_QUANTITY, categoriesForDepartment, shippingSummary, sizeIsRequiredForProductType } from '../lib/listing-catalog.js';
 import { notifyUser } from '../lib/notify.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
 import { createServiceClient } from '../lib/supabase.js';
@@ -15,6 +15,9 @@ const router = Router();
 function validateListingForSubmit(existing: DbRow) {
   if (!existing.title || !existing.category || !existing.condition || Number(existing.price) <= 0) {
     return 'Listing is missing required fields';
+  }
+  if (!Number.isInteger(Number(existing.quantity)) || Number(existing.quantity) < 1) {
+    return 'Add how many of this item you have (at least 1)';
   }
   const photos = (existing.photo_urls as string[] | null | undefined) ?? [];
   if (photos.length < 1) {
@@ -351,7 +354,17 @@ const listingBody = z.object({
   photoUrls: z.array(z.string()).optional(),
   shipping: z.string().optional(),
   shippingMethod: z.enum(['Standard', 'Express']).optional(),
+  quantity: z.number().int().min(0).max(MAX_LISTING_QUANTITY).optional(),
 });
+
+function quantityErrorMessage(raw: string) {
+  if (raw.includes('QUANTITY_TOO_LOW')) {
+    return 'Quantity can’t be lower than what is already sold or being bought right now';
+  }
+  if (raw.includes('INVALID_QTY')) return `Quantity must be between 0 and ${MAX_LISTING_QUANTITY}`;
+  if (raw.includes('FORBIDDEN')) return 'Listing not found';
+  return 'Could not update quantity';
+}
 
 router.post('/draft', requireAuth, async (req, res) => {
   const { supabase, userId } = req as AuthedRequest;
@@ -375,6 +388,8 @@ router.post('/draft', requireAuth, async (req, res) => {
     colour: parsed.data.colour ?? null,
     photo_urls: parsed.data.photoUrls ?? [],
     shipping: parsed.data.shipping?.trim() || shippingSummary(parsed.data.shippingMethod),
+    // 0 = not chosen yet; publishing requires at least 1.
+    quantity: parsed.data.quantity ?? 0,
     status: 'draft',
   };
 
@@ -406,7 +421,7 @@ router.put('/:id', requireAuth, async (req, res) => {
     patch.shipping = shippingSummary(parsed.data.shippingMethod);
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('listings')
     .update(patch)
     .eq('id', req.params.id)
@@ -415,6 +430,27 @@ router.put('/:id', requireAuth, async (req, res) => {
     .single();
 
   if (error) return handleSupabaseError(res, error);
+
+  if (parsed.data.quantity !== undefined && parsed.data.quantity !== Number(data.quantity)) {
+    const wasSoldOut = data.status === 'sold';
+    const { data: updated, error: qtyError } = await createServiceClient().rpc('set_listing_quantity', {
+      p_listing_id: req.params.id,
+      p_seller_id: userId,
+      p_quantity: parsed.data.quantity,
+    });
+    if (qtyError) return sendError(res, 400, quantityErrorMessage(qtyError.message ?? ''), 'INVALID_QUANTITY');
+    data = updated as DbRow;
+    if (wasSoldOut && data.status === 'available') {
+      void notifySavedListingWatchers({
+        listingId: String(data.id),
+        listingTitle: String(data.title ?? 'A saved item'),
+        type: 'saved_listing_restocked',
+        title: 'Back in stock',
+        excludeUserIds: [userId],
+      });
+    }
+  }
+
   const profile = await getProfileById(supabase, userId);
   return res.json(mapListing(data, profile?.username ?? 'unknown'));
 });
@@ -664,18 +700,25 @@ router.post('/:id/release', requireAuth, async (req, res) => {
   return res.json({ ok: true });
 });
 
+/** Seller sold the rest outside Throve: quantity drops to what is already sold or being bought. */
 router.post('/:id/sold', requireAuth, async (req, res) => {
   const { supabase, userId } = req as AuthedRequest;
   const { data: listing } = await supabase
     .from('listings')
-    .select('id, title, seller_id, status')
+    .select('id, title, seller_id, status, quantity_sold, quantity_held')
     .eq('id', req.params.id)
+    .eq('seller_id', userId)
     .maybeSingle();
-  const { error } = await supabase.from('listings').update({ status: 'sold' }).eq('id', req.params.id);
-  if (error) return handleSupabaseError(res, error);
-  await supabase.from('live_claims').delete().eq('listing_id', req.params.id);
+  if (!listing) return sendError(res, 404, 'Listing not found');
 
-  if (listing) {
+  const { data: updated, error } = await createServiceClient().rpc('set_listing_quantity', {
+    p_listing_id: listing.id,
+    p_seller_id: userId,
+    p_quantity: Number(listing.quantity_sold ?? 0) + Number(listing.quantity_held ?? 0),
+  });
+  if (error) return sendError(res, 400, quantityErrorMessage(error.message ?? ''), 'INVALID_QUANTITY');
+
+  if ((updated as DbRow | null)?.status === 'sold') {
     void notifySavedListingWatchers({
       listingId: String(listing.id),
       listingTitle: String(listing.title ?? 'A saved item'),
@@ -685,7 +728,7 @@ router.post('/:id/sold', requireAuth, async (req, res) => {
     });
   }
 
-  return res.json({ ok: true });
+  return res.json({ ok: true, status: (updated as DbRow | null)?.status ?? listing.status });
 });
 
 export default router;

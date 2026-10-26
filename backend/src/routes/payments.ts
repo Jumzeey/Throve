@@ -5,11 +5,14 @@ import {
   fulfillPaidCheckout,
   newTxRef,
   paymentMode,
-  quoteItemPrice,
+  holdCheckoutStock,
+  quoteCheckout,
+  releaseCheckoutHold,
   type CheckoutPayload,
 } from '../lib/checkout-fulfill.js';
 import { handleSupabaseError, sendError } from '../lib/errors.js';
 import { getProfileById } from '../lib/mappers.js';
+import { mapOrderJson } from '../lib/order-map.js';
 import {
   flutterwaveInitPayment,
   flutterwaveVerifyByRef,
@@ -33,6 +36,7 @@ const checkoutBody = z.object({
   phone: z.string().min(1),
   deliveryNote: z.string().optional().nullable(),
   deliveryMethod: z.enum(['Standard', 'Express']),
+  quantity: z.number().int().positive().optional(),
 });
 
 function publicApiBase() {
@@ -55,20 +59,23 @@ router.post('/payments/init', requireAuth, async (req, res) => {
     .maybeSingle();
   if (listingError) return handleSupabaseError(res, listingError);
   if (!listing) return sendError(res, 400, 'Listing unavailable');
-  if (listing.status === 'sold') return sendError(res, 400, 'Listing unavailable');
 
-  let itemPrice: number;
+  // Price the order and hold the units while the buyer pays (live claims already hold theirs).
+  let amounts: ReturnType<typeof computeCheckoutAmounts>;
+  let holdId: string | null = null;
   try {
-    itemPrice = await quoteItemPrice(supabase, userId, parsed.data, listing);
+    const quote = await quoteCheckout(supabase, userId, parsed.data, listing);
+    amounts = computeCheckoutAmounts(quote.unitPrice, quote.quantity, parsed.data.deliveryMethod);
+    const hold = await holdCheckoutStock(userId, listing, quote);
+    holdId = hold ? String(hold.id) : null;
   } catch (err) {
     const e = err as { status?: number; code?: string; message?: string };
     return sendError(res, e.status ?? 400, e.message ?? 'Checkout unavailable', e.code);
   }
 
-  const amounts = computeCheckoutAmounts(itemPrice, parsed.data.deliveryMethod);
   const txRef = newTxRef();
   const mode = paymentMode();
-  const payload: CheckoutPayload = parsed.data;
+  const payload: CheckoutPayload = { ...parsed.data, quantity: amounts.quantity, stockHoldId: holdId };
   const service = createServiceClient();
 
   const { data: intent, error: intentError } = await service
@@ -82,11 +89,15 @@ router.post('/payments/init', requireAuth, async (req, res) => {
       status: 'pending',
       provider: mode === 'flutterwave' ? 'flutterwave' : 'simulate',
       checkout_payload: payload,
+      stock_hold_id: holdId,
     })
     .select('*')
     .single();
 
-  if (intentError) return handleSupabaseError(res, intentError);
+  if (intentError) {
+    await releaseCheckoutHold(holdId);
+    return handleSupabaseError(res, intentError);
+  }
 
   const profile = await getProfileById(supabase, userId);
 
@@ -135,6 +146,7 @@ router.post('/payments/init', requireAuth, async (req, res) => {
     });
   } catch (err) {
     await service.from('payment_intents').update({ status: 'failed' }).eq('id', intent.id);
+    await releaseCheckoutHold(holdId);
     return sendError(res, 502, err instanceof Error ? err.message : 'Payment provider unavailable');
   }
 });
@@ -180,6 +192,8 @@ router.post('/payments/verify', requireAuth, async (req, res) => {
           deliveryMethod: order.delivery_method,
           deliveryFee: order.delivery_fee,
           protectionFee: order.protection_fee ?? 0,
+          quantity: Number(order.quantity ?? 1),
+          unitPrice: Number(order.unit_price ?? order.item_price),
           itemPrice: order.item_price,
           listedPrice: order.listed_price ?? null,
           offerId: order.offer_id ?? null,
@@ -201,10 +215,12 @@ router.post('/payments/verify', requireAuth, async (req, res) => {
     const outcome = parsed.data.simulateOutcome ?? 'success';
     if (outcome === 'cancelled') {
       await service.from('payment_intents').update({ status: 'cancelled' }).eq('id', intent.id);
+      await releaseCheckoutHold(intent.stock_hold_id);
       return res.json({ status: 'cancelled' });
     }
     if (outcome === 'failed') {
       await service.from('payment_intents').update({ status: 'failed' }).eq('id', intent.id);
+      await releaseCheckoutHold(intent.stock_hold_id);
       return res.json({ status: 'failed' });
     }
     providerStatus = 'successful';
@@ -229,6 +245,7 @@ router.post('/payments/verify', requireAuth, async (req, res) => {
 
   if (providerStatus === 'failed') {
     await service.from('payment_intents').update({ status: 'failed', provider_ref: providerRef }).eq('id', intent.id);
+    await releaseCheckoutHold(intent.stock_hold_id);
     return res.json({ status: 'failed' });
   }
 
@@ -247,6 +264,12 @@ router.post('/payments/verify', requireAuth, async (req, res) => {
       .eq('id', intent.id);
     return res.json({ status: 'successful', order });
   } catch (err) {
+    // The webhook may have completed this payment at the same moment.
+    const { data: settled } = await service.from('payment_intents').select('status, order_id').eq('id', intent.id).maybeSingle();
+    if (settled?.status === 'successful' && settled.order_id) {
+      const { data: row } = await service.from('orders').select('*').eq('id', settled.order_id).maybeSingle();
+      if (row) return res.json({ status: 'successful', order: await mapOrderJson(supabase, row) });
+    }
     const status =
       typeof err === 'object' && err && 'status' in err ? Number((err as { status: number }).status) : 500;
     return sendError(res, status || 500, err instanceof Error ? err.message : 'Could not complete order');
@@ -315,6 +338,7 @@ router.post('/payments/webhook', async (req, res) => {
 
   if (verified.status === 'failed') {
     await service.from('payment_intents').update({ status: 'failed', provider_ref: providerRef }).eq('id', intent.id);
+    await releaseCheckoutHold(intent.stock_hold_id);
     return res.json({ ok: true });
   }
   if (verified.status !== 'successful' && verified.status !== 'success') {

@@ -15,13 +15,13 @@ import {
   orderPayoutStatusEmail,
   orderTrackingUpdatedEmail,
 } from '../lib/email/templates/orders.js';
-import { getProfileById, getProfileByUsername } from '../lib/mappers.js';
+import { getProfileById, getProfileByUsername, listingAvailableQuantity } from '../lib/mappers.js';
 import { notifyUser } from '../lib/notify.js';
 import { createServiceClient } from '../lib/supabase.js';
 import { type AuthedRequest, requireAuth } from '../middleware/auth.js';
 import { buyerProtectionFee, shippingFee } from '../lib/listing-catalog.js';
 import { autoCompleteAtFrom, mapOrderJson, runAutoCompleteDueOrders } from '../lib/order-map.js';
-import { newOrderId, paymentMode } from '../lib/checkout-fulfill.js';
+import { fulfillPaidCheckout, paymentMode } from '../lib/checkout-fulfill.js';
 
 const router = Router();
 const RESERVE_MS = 10 * 60 * 1000;
@@ -155,6 +155,22 @@ router.post('/start', requireAuth, async (req, res) => {
   listedPrice = listing.price;
   if (itemPrice == null) itemPrice = listing.price;
 
+  // Offers and live claims fix the quantity; a normal checkout lets the buyer choose up to what's left.
+  let fixedQuantity: number | null = null;
+  if (claimId) {
+    const { data: claim } = await supabase.from('live_claims').select('quantity').eq('id', claimId).maybeSingle();
+    fixedQuantity = Number(claim?.quantity ?? 1);
+  } else if (offerId) {
+    const { data: offer } = await supabase.from('offers').select('quantity').eq('id', offerId).maybeSingle();
+    fixedQuantity = Number(offer?.quantity ?? 1);
+  }
+  const quantityAvailable = listingAvailableQuantity(listing);
+  if (fixedQuantity == null && quantityAvailable < 1) {
+    return Number(listing.quantity_held ?? 0) > 0
+      ? sendError(res, 409, 'The last ones are being bought right now. Try again in a few minutes.', 'OUT_OF_STOCK')
+      : sendError(res, 409, 'This item is sold out', 'OUT_OF_STOCK');
+  }
+
   // Catalog stays available until claim (live) or paid order fulfillment.
   // Do not reserve on checkout start — that made “Add to cart” / shipping feel like a hold.
   if (!liveStreamProductId && listing.status === 'reserved') {
@@ -178,6 +194,10 @@ router.post('/start', requireAuth, async (req, res) => {
     claimId: claimId ?? null,
     offerId,
     itemPrice,
+    unitPrice: itemPrice,
+    quantity: fixedQuantity ?? 1,
+    quantityFixed: fixedQuantity != null,
+    quantityAvailable: fixedQuantity ?? quantityAvailable,
     listedPrice: offerId && listedPrice !== itemPrice ? listedPrice : null,
     buyer: buyer?.username ?? 'unknown',
     name: '',
@@ -211,180 +231,18 @@ router.post('/complete', requireAuth, async (req, res) => {
       deliveryNote: z.string().optional().nullable(),
       deliveryMethod: z.enum(['Standard', 'Express']),
       offerId: z.string().uuid().optional().nullable(),
+      quantity: z.number().int().positive().optional(),
     })
     .safeParse(req.body);
 
   if (!parsed.success) return sendError(res, 400, 'Invalid checkout details');
 
-  const { data: listing, error: listingError } = await supabase
-    .from('listings')
-    .select('*')
-    .eq('id', parsed.data.listingId)
-    .maybeSingle();
-
-  if (listingError) return handleSupabaseError(res, listingError);
-  if (!listing) return sendError(res, 400, 'Listing unavailable');
-
-  let itemPrice = listing.price;
-  const listedPrice = listing.price;
-  let claimId = parsed.data.claimId ?? null;
-  let liveStreamProductId = parsed.data.liveStreamProductId ?? null;
-  let offerId = parsed.data.offerId ?? null;
-
-  if (offerId) {
-    const { data: offer, error: offerError } = await supabase.from('offers').select('*').eq('id', offerId).maybeSingle();
-    if (offerError) return handleSupabaseError(res, offerError);
-    if (!offer || offer.status !== 'accepted' || offer.buyer_id !== userId || offer.listing_id !== listing.id) {
-      return sendError(res, 400, 'Offer not available for checkout');
-    }
-    itemPrice = offer.amount;
+  try {
+    return res.json(await fulfillPaidCheckout(supabase, userId, parsed.data));
+  } catch (err) {
+    const e = err as { status?: number; code?: string; message?: string };
+    return sendError(res, e.status ?? 500, e.message ?? 'Could not complete order', e.code);
   }
-
-  if (claimId) {
-    try {
-      const service = createServiceClient();
-      const { data: claim, error } = await service.rpc('convert_live_claim', {
-        p_claim_id: claimId,
-        p_user_id: userId,
-      });
-      if (error) {
-        const raw = error.message ?? '';
-        if (raw.includes('CLAIM_EXPIRED')) return sendError(res, 400, 'Claim expired', 'CLAIM_EXPIRED');
-        if (raw.includes('OUT_OF_STOCK')) return sendError(res, 409, 'Out of stock', 'OUT_OF_STOCK');
-        return sendError(res, 400, error.message);
-      }
-      liveStreamProductId = (claim as DbRow)?.live_stream_product_id
-        ? String((claim as DbRow).live_stream_product_id)
-        : liveStreamProductId;
-    } catch (err) {
-      return sendError(res, 500, err instanceof Error ? err.message : 'Claim convert failed');
-    }
-
-    if (liveStreamProductId) {
-      const { data: product } = await supabase
-        .from('live_stream_products')
-        .select('*')
-        .eq('id', liveStreamProductId)
-        .maybeSingle();
-      if (product) itemPrice = product.live_price;
-    }
-  } else if (listing.status === 'sold') {
-    return sendError(res, 400, 'Listing unavailable');
-  } else {
-    await createServiceClient().from('listings').update({ status: 'sold' }).eq('id', listing.id);
-  }
-
-  // For live multi-stock products, only mark listing sold when fully sold out
-  if (liveStreamProductId) {
-    const { data: product } = await supabase
-      .from('live_stream_products')
-      .select('*')
-      .eq('id', liveStreamProductId)
-      .maybeSingle();
-    if (product && product.sold_count + product.reserved_count >= product.stock && product.sold_count >= product.stock) {
-      await createServiceClient().from('listings').update({ status: 'sold' }).eq('id', listing.id);
-    }
-  }
-
-  const deliveryFee = shippingFee(parsed.data.deliveryMethod);
-  const protectionFee = buyerProtectionFee(itemPrice);
-  const total = itemPrice + deliveryFee + protectionFee;
-
-  const service = createServiceClient();
-  const orderId = newOrderId();
-
-  const { data, error } = await service
-    .from('orders')
-    .insert({
-      id: orderId,
-      listing_id: listing.id,
-      listing_title: listing.title,
-      buyer_id: userId,
-      seller_id: listing.seller_id,
-      name: parsed.data.name.trim(),
-      address: parsed.data.address.trim(),
-      city: parsed.data.city.trim(),
-      state: parsed.data.state?.trim() || null,
-      phone: parsed.data.phone.trim(),
-      delivery_note: parsed.data.deliveryNote?.trim() || null,
-      delivery_method: parsed.data.deliveryMethod,
-      delivery_fee: deliveryFee,
-      protection_fee: protectionFee,
-      item_price: itemPrice,
-      listed_price: offerId && listedPrice !== itemPrice ? listedPrice : null,
-      offer_id: offerId,
-      total,
-      from_live_id: parsed.data.liveSessionId ?? null,
-      live_stream_product_id: liveStreamProductId,
-      claim_id: claimId,
-      status: 'paid',
-      paid_at: new Date().toISOString(),
-      payout_status: 'not_yet_eligible',
-    })
-    .select('*')
-    .single();
-
-  if (error) return handleSupabaseError(res, error);
-
-  const buyer = await getProfileById(supabase, userId);
-  const seller = await getProfileById(supabase, listing.seller_id);
-  const fromLive = Boolean(data.from_live_id);
-  const orderVars = {
-    orderId: data.id,
-    listingTitle: data.listing_title,
-    total: data.total,
-    buyerName: buyer?.username ?? 'buyer',
-    sellerName: seller?.username ?? 'seller',
-    deliveryMethod: data.delivery_method,
-    fromLive,
-  };
-
-  void notifyUser({
-    userId,
-    category: 'order',
-    type: 'order_placed',
-    title: 'Order confirmed',
-    body: data.listing_title,
-    deepLink: `checkout/order?id=${encodeURIComponent(data.id)}`,
-    data: { orderId: data.id },
-    email: orderPlacedBuyerEmail(orderVars),
-  });
-  void notifyUser({
-    userId: listing.seller_id,
-    category: 'order',
-    type: 'order_placed_seller',
-    title: 'You made a sale',
-    body: data.listing_title,
-    deepLink: `checkout/order?id=${encodeURIComponent(data.id)}`,
-    data: { orderId: data.id },
-    email: orderPlacedSellerEmail(orderVars),
-  });
-
-  return res.status(201).json({
-    id: data.id,
-    listingId: data.listing_id,
-    listingTitle: data.listing_title,
-    buyer: buyer?.username ?? 'unknown',
-    seller: seller?.username ?? 'unknown',
-    name: data.name,
-    address: data.address,
-    city: data.city,
-    state: data.state ?? null,
-    phone: data.phone,
-    deliveryMethod: data.delivery_method,
-    deliveryFee: data.delivery_fee,
-    protectionFee: data.protection_fee ?? 0,
-    itemPrice: data.item_price,
-    listedPrice: data.listed_price ?? null,
-    offerId: data.offer_id ?? null,
-    total: data.total,
-    fromLiveId: data.from_live_id,
-    liveStreamProductId: data.live_stream_product_id ?? undefined,
-    claimId: data.claim_id ?? undefined,
-    createdAt: data.created_at,
-    status: data.status,
-    reviewed: data.reviewed,
-  });
 });
 
 router.post('/orders/:id/dispatch', requireAuth, async (req, res) => {
@@ -592,7 +450,8 @@ router.post('/orders/:id/cancel', requireAuth, async (req, res) => {
   if (order.buyer_id !== userId && order.seller_id !== userId) return sendError(res, 403, 'Forbidden');
 
   const now = new Date().toISOString();
-  const { error } = await createServiceClient()
+  const service = createServiceClient();
+  const { data: cancelled, error } = await service
     .from('orders')
     .update({
       status: 'cancelled',
@@ -600,11 +459,32 @@ router.post('/orders/:id/cancel', requireAuth, async (req, res) => {
       cancelled_at: now,
       payout_status: 'not_yet_eligible',
     })
-    .eq('id', req.params.id);
+    .eq('id', req.params.id)
+    .eq('status', 'paid')
+    .select('id')
+    .maybeSingle();
   if (error) return handleSupabaseError(res, error);
+  if (!cancelled) return sendError(res, 400, 'Order not eligible');
 
-  if (!order.live_stream_product_id) {
-    await createServiceClient().from('listings').update({ status: 'available' }).eq('id', order.listing_id);
+  // Give the units back to the listing (and to the live product they came from).
+  const quantity = Number(order.quantity ?? 1);
+  const { error: restoreError } = await service.rpc('restore_listing_stock', {
+    p_listing_id: order.listing_id,
+    p_qty: quantity,
+  });
+  if (restoreError) console.warn('[checkout] restore stock failed', order.id, restoreError.message);
+  if (order.live_stream_product_id) {
+    const { data: product } = await service
+      .from('live_stream_products')
+      .select('sold_count')
+      .eq('id', order.live_stream_product_id)
+      .maybeSingle();
+    if (product) {
+      await service
+        .from('live_stream_products')
+        .update({ sold_count: Math.max(0, Number(product.sold_count) - quantity) })
+        .eq('id', order.live_stream_product_id);
+    }
   }
 
   const otherId = order.buyer_id === userId ? order.seller_id : order.buyer_id;

@@ -19,7 +19,7 @@ import { mapLiveClaim, mapLiveSession, mapLiveStreamProduct } from '../lib/live-
 import { createSessionMediaCredentials, configuredMediaProvider } from '../lib/live-media.js';
 import { finalizeLiveSessionEnd } from '../lib/live-session-end.js';
 import { ensureIvsChannelForSession, isIvsConfigured } from '../lib/ivs.js';
-import { getProfileById, mapListing, publicPhotoUrl } from '../lib/mappers.js';
+import { getProfileById, listingAvailableQuantity, mapListing, publicPhotoUrl } from '../lib/mappers.js';
 import { notifyUser } from '../lib/notify.js';
 import { createServiceClient, createSupabaseClient } from '../lib/supabase.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
@@ -43,6 +43,12 @@ function formatStart(iso: string) {
 
 function publicClient(req: AuthedRequest) {
   return req.supabase ?? createSupabaseClient();
+}
+
+/** Live stock for a listing: what the host asked for, never more than the listing has left. */
+function liveStockFor(listing: DbRow, requested?: number) {
+  const left = listingAvailableQuantity(listing);
+  return Math.max(0, Math.min(requested ?? left, left));
 }
 
 async function loadProducts(supabase: ReturnType<typeof createSupabaseClient>, sessionId: string) {
@@ -105,7 +111,10 @@ function mapRowsError(err: unknown) {
 
 function rpcErrorMessage(error: { message?: string; details?: string; hint?: string } | null) {
   const raw = `${error?.message ?? ''} ${error?.details ?? ''} ${error?.hint ?? ''}`;
-  if (raw.includes('OUT_OF_STOCK')) return { status: 409, message: 'Out of stock', code: 'OUT_OF_STOCK' };
+  if (raw.includes('OUT_OF_STOCK')) {
+    return { status: 409, message: 'Not enough left for that quantity', code: 'OUT_OF_STOCK' };
+  }
+  if (raw.includes('OWN_LISTING')) return { status: 400, message: 'You can’t claim your own item', code: 'OWN_LISTING' };
   if (raw.includes('FORBIDDEN')) return { status: 403, message: 'Forbidden', code: 'FORBIDDEN' };
   if (raw.includes('PRODUCT_NOT_FOUND')) return { status: 404, message: 'Product not found', code: 'NOT_FOUND' };
   if (raw.includes('CLAIM_NOT_FOUND')) return { status: 404, message: 'Claim not found', code: 'NOT_FOUND' };
@@ -290,7 +299,8 @@ router.post('/sessions', requireAuth, async (req, res) => {
           z.object({
             listingId: z.string(),
             livePrice: z.number().int().nonnegative(),
-            stock: z.number().int().positive(),
+            // Omitted = everything the listing has left.
+            stock: z.number().int().positive().optional(),
             isPinned: z.boolean().optional(),
           }),
         )
@@ -315,14 +325,17 @@ router.post('/sessions', requireAuth, async (req, res) => {
       : parsed.data.featuredListingIds.map((listingId, index) => ({
           listingId,
           livePrice: 0,
-          stock: 1,
+          stock: undefined as number | undefined,
           isPinned: index === 0,
         }));
 
   // Resolve prices from catalog when livePrice is 0
   const listingIds = productInputs.map((p) => p.listingId);
   const { data: listings } = listingIds.length
-    ? await supabase.from('listings').select('id, price, seller_id').in('id', listingIds)
+    ? await supabase
+        .from('listings')
+        .select('id, price, seller_id, quantity, quantity_sold, quantity_held')
+        .in('id', listingIds)
     : { data: [] as DbRow[] };
   const listingMap = new Map((listings ?? []).map((row: DbRow) => [String(row.id), row]));
 
@@ -377,7 +390,7 @@ router.post('/sessions', requireAuth, async (req, res) => {
         live_session_id: data.id,
         listing_id: p.listingId,
         live_price: p.livePrice > 0 ? p.livePrice : Number(listing.price),
-        stock: p.stock,
+        stock: liveStockFor(listing, p.stock),
         is_pinned: Boolean(p.isPinned) || index === 0,
         sort_order: index,
       };
@@ -732,7 +745,7 @@ router.post('/sessions/:id/products', requireAuth, async (req, res) => {
     .object({
       listingId: z.string(),
       livePrice: z.number().int().nonnegative(),
-      stock: z.number().int().positive(),
+      stock: z.number().int().positive().optional(),
       isPinned: z.boolean().optional(),
     })
     .safeParse(req.body);
@@ -755,7 +768,7 @@ router.post('/sessions/:id/products', requireAuth, async (req, res) => {
       live_session_id: req.params.id,
       listing_id: parsed.data.listingId,
       live_price: parsed.data.livePrice || listing.price,
-      stock: parsed.data.stock,
+      stock: liveStockFor(listing, parsed.data.stock),
       is_pinned: false,
       sort_order: count ?? 0,
     })
@@ -1181,13 +1194,14 @@ router.post('/sessions/:id/claim/:listingId', requireAuth, async (req, res) => {
     .eq('listing_id', req.params.listingId)
     .maybeSingle();
   if (!product) return sendError(res, 404, 'Product not found in session');
+  const parsedQty = z.object({ quantity: z.number().int().positive().default(1) }).safeParse(req.body ?? {});
 
   try {
     const service = createServiceClient();
     const { data, error } = await service.rpc('claim_live_product', {
       p_product_id: product.id,
       p_user_id: userId,
-      p_qty: 1,
+      p_qty: parsedQty.success ? parsedQty.data.quantity : 1,
       p_ttl_seconds: CLAIM_TTL_SECONDS,
     });
     if (error) {
