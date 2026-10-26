@@ -18,7 +18,8 @@ export type AdminRoute =
   | 'payouts'
   | 'reviews'
   | 'audit'
-  | 'staff';
+  | 'staff'
+  | 'banners';
 
 export type StaffAction =
   | 'suspend_user'
@@ -41,7 +42,8 @@ export type StaffAction =
   | 'view_kyc_payout'
   | 'dismiss_report'
   | 'close_report'
-  | 'mark_report_action_taken';
+  | 'mark_report_action_taken'
+  | 'manage_banners';
 
 const ALL: AdminRole[] = ['super_admin', 'trust_safety', 'support', 'finance'];
 
@@ -60,6 +62,7 @@ export const ROUTE_ROLES: Record<AdminRoute, AdminRole[]> = {
   reviews: ['super_admin', 'trust_safety'],
   audit: ['super_admin', 'trust_safety', 'support', 'finance'],
   staff: ['super_admin'],
+  banners: ['super_admin'],
 };
 
 /** Least-privilege map — mirror of admin SPA ACTION_ROLES. */
@@ -85,6 +88,7 @@ export const ACTION_ROLES: Record<StaffAction, AdminRole[]> = {
   dismiss_report: ['super_admin', 'trust_safety'],
   close_report: ['super_admin', 'trust_safety'],
   mark_report_action_taken: ['super_admin', 'trust_safety'],
+  manage_banners: ['super_admin'],
 };
 
 export function canAccessRoute(role: AdminRole, route: AdminRoute): boolean {

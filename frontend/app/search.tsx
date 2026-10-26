@@ -24,7 +24,7 @@ import type { Listing, ListingFilters } from '@/data/types';
 import { searchCatalog, type SearchBrand, type SearchSeller } from '@/lib/catalog-search';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
-import { Redirect, useRouter } from 'expo-router';
+import { Redirect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -37,7 +37,9 @@ export default function SearchScreen() {
   const { top } = useScreenInsets();
   const { session } = useAuth();
   const { isConnected } = useNetworkStatus();
-  const [query, setQuery] = useState('');
+  // `q` lets other screens (e.g. a Home banner) open Search with a term filled in.
+  const params = useLocalSearchParams<{ q?: string }>();
+  const [query, setQuery] = useState(typeof params.q === 'string' ? params.q : '');
   const [filters, setFilters] = useState<ListingFilters>(DEFAULT_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
