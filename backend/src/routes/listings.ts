@@ -388,8 +388,9 @@ router.post('/draft', requireAuth, async (req, res) => {
     colour: parsed.data.colour ?? null,
     photo_urls: parsed.data.photoUrls ?? [],
     shipping: parsed.data.shipping?.trim() || shippingSummary(parsed.data.shippingMethod),
-    // 0 = not chosen yet; publishing requires at least 1.
-    quantity: parsed.data.quantity ?? 0,
+    // The app requires sellers to pick a quantity; builds from before quantities existed
+    // don't send one, so they keep listing single items.
+    quantity: parsed.data.quantity ?? 1,
     status: 'draft',
   };
 

@@ -628,7 +628,9 @@ export function OrdersPage() {
                     </div>
                     <div className="overflow-hidden rounded-[8px] border border-[#ebe3da] text-[12.5px]">
                       <div className="flex justify-between gap-3 border-b border-[#f0e7de] px-3 py-2.5">
-                        <span className="text-body">Item price</span>
+                        <span className="text-body">
+                          {(selected.quantity ?? 1) > 1 ? `Items (${selected.quantity})` : 'Item price'}
+                        </span>
                         <span className="font-semibold tabular-nums text-espresso">
                           {showAmounts ? formatNaira(selected.itemPrice) : '—'}
                         </span>

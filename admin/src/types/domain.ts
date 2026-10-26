@@ -135,6 +135,8 @@ export type AdminOrder = {
   listingId: string;
   buyer: string;
   seller: string;
+  quantity?: number;
+  /** Line total for all units. */
   itemPrice: number;
   buyerProtection: number;
   deliveryFee: number;

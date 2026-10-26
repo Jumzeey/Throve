@@ -139,6 +139,7 @@ function mapAdminOrder(
     listingId: String(row.listing_id),
     buyer: extras.buyerUsername,
     seller: extras.sellerUsername,
+    quantity: Number(row.quantity ?? 1),
     itemPrice: Number(row.item_price ?? 0),
     buyerProtection: Number(row.protection_fee ?? 0),
     deliveryFee,
