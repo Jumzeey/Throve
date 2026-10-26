@@ -16,6 +16,7 @@ import { mapOrderJson } from '../lib/order-map.js';
 import {
   flutterwaveInitPayment,
   flutterwaveVerifyByRef,
+  flutterwaveEnvironment,
   flutterwaveWebhookVerified,
 } from '../lib/payments/flutterwave.js';
 import { createServiceClient } from '../lib/supabase.js';
@@ -280,6 +281,8 @@ router.get('/payments/config', requireAuth, async (_req, res) => {
   const mode = paymentMode();
   return res.json({
     mode,
+    // The backend alone decides: simulate, Flutterwave test keys, or Flutterwave live keys.
+    environment: mode === 'flutterwave' ? flutterwaveEnvironment() : 'simulate',
     currency: 'NGN',
     publicKey: mode === 'flutterwave' ? process.env.FLW_PUBLIC_KEY ?? null : null,
     redirectUrl: paymentRedirectUrl(),

@@ -49,6 +49,7 @@ export default function PaymentScreen() {
   const [txRef, setTxRef] = useState<string | null>(null);
   const [statusDetail, setStatusDetail] = useState<string | null>(null);
   const [paymentModeLabel, setPaymentModeLabel] = useState<'simulate' | 'flutterwave' | null>(null);
+  const [flutterwaveTest, setFlutterwaveTest] = useState(false);
   const [charged, setCharged] = useState<PaymentInitResult['breakdown'] | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const successNavRef = useRef(false);
@@ -67,8 +68,13 @@ export default function PaymentScreen() {
     let cancelled = false;
     void (async () => {
       try {
-        const config = await apiFetch<{ mode: 'simulate' | 'flutterwave' }>('/checkout/payments/config');
-        if (!cancelled) setPaymentModeLabel(config.mode);
+        const config = await apiFetch<{ mode: 'simulate' | 'flutterwave'; environment?: 'simulate' | 'test' | 'live' }>(
+          '/checkout/payments/config',
+        );
+        if (!cancelled) {
+          setPaymentModeLabel(config.mode);
+          setFlutterwaveTest(config.environment === 'test');
+        }
       } catch {
         /* ignore — copy falls back */
       }
@@ -368,7 +374,9 @@ export default function PaymentScreen() {
               </Text>
               <Text style={styles.secureBody}>
                 {paymentModeLabel === 'flutterwave' && !simulateRef.current
-                  ? "You'll continue to Flutterwave's secure payment experience."
+                  ? flutterwaveTest
+                    ? "Flutterwave test mode: use Flutterwave's test cards. No real money is charged."
+                    : "You'll continue to Flutterwave's secure payment experience."
                   : 'Test mode confirms payment automatically — no card charge.'}
               </Text>
             </View>
