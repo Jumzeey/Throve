@@ -95,7 +95,10 @@ export function getAccessToken() {
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
   const headers = new Headers(init.headers);
-  if (!headers.has('Content-Type') && init.body) headers.set('Content-Type', 'application/json');
+  // FormData sets its own multipart boundary.
+  if (!headers.has('Content-Type') && init.body && !(init.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
 
   const isPublicAuth =
     path.startsWith('/auth/staff/login') ||

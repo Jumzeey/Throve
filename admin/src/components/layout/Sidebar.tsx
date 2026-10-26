@@ -6,6 +6,7 @@ import {
   Disc3,
   FileWarning,
   History,
+  Images,
   LayoutDashboard,
   Package,
   CircleDollarSign,
@@ -48,6 +49,7 @@ function routeLabel(route: AdminRoute, role: AdminRole) {
     reviews: 'Reviews',
     audit: 'Audit log',
     staff: 'Staff access',
+    banners: 'Home banners',
   };
   return labels[route];
 }
@@ -69,6 +71,7 @@ function routeIcon(route: AdminRoute, role: AdminRole) {
     reviews: Star,
     audit: ScrollText,
     staff: ShieldCheck,
+    banners: Images,
   };
   return icons[route];
 }
