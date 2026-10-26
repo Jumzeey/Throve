@@ -22,6 +22,7 @@ import { apiFetch, ApiError } from '@/lib/api';
 import { formatNaira } from '@/lib/format';
 import { Redirect, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
+import { FlutterwaveWebView, type FlutterwaveOutcome } from '@/components/checkout/flutterwave-webview';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { ExpiredCheckout } from './shipping';
@@ -53,6 +54,8 @@ export default function PaymentScreen() {
   const [charged, setCharged] = useState<PaymentInitResult['breakdown'] | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const successNavRef = useRef(false);
+  const [webPay, setWebPay] = useState<{ url: string; redirectUrl: string; txRef: string } | null>(null);
+  const webPayDoneRef = useRef(false);
   const simulateRef = useRef(false);
 
   const clearPoll = useCallback(() => {
@@ -244,12 +247,9 @@ export default function PaymentScreen() {
         return;
       }
 
-      const result = await WebBrowser.openAuthSessionAsync(init.checkoutUrl, init.redirectUrl);
-      if (result.type === 'cancel' || result.type === 'dismiss') {
-        setUi('cancelled');
-        return;
-      }
-      await finishVerify(init.txRef);
+      // Flutterwave opens inside the app; the result arrives via onWebPayFinish / onWebPayClose.
+      webPayDoneRef.current = false;
+      setWebPay({ url: init.checkoutUrl, redirectUrl: init.redirectUrl, txRef: init.txRef });
     } catch (err) {
       if (!isConnected) setUi('offline');
       else {
@@ -257,6 +257,40 @@ export default function PaymentScreen() {
         setStatusDetail(err instanceof Error ? err.message : 'Could not start payment.');
       }
     }
+  }
+
+  function onWebPayFinish(outcome: FlutterwaveOutcome) {
+    if (!webPay || webPayDoneRef.current) return;
+    webPayDoneRef.current = true;
+    const ref = webPay.txRef;
+    setWebPay(null);
+    if (outcome === 'cancelled') {
+      setUi('cancelled');
+      return;
+    }
+    // The backend checks with Flutterwave whatever the redirect said.
+    void finishVerify(ref);
+  }
+
+  function onWebPayClose() {
+    if (!webPay || webPayDoneRef.current) return;
+    webPayDoneRef.current = true;
+    const ref = webPay.txRef;
+    setWebPay(null);
+    setUi('processing');
+    // A bank transfer can still complete after the sheet is closed: check before calling it cancelled.
+    void (async () => {
+      try {
+        const status = await checkout.getPaymentStatus(ref);
+        if (status.status === 'successful' || status.orderId) {
+          await finishVerify(ref);
+          return;
+        }
+      } catch {
+        /* fall through */
+      }
+      setUi('cancelled');
+    })();
   }
 
   async function retryPay() {
@@ -450,6 +484,12 @@ export default function PaymentScreen() {
           </>
         ) : null}
       </ScrollView>
+      <FlutterwaveWebView
+        url={webPay?.url ?? null}
+        redirectUrl={webPay?.redirectUrl ?? 'throveapp://checkout/payment-return'}
+        onFinish={onWebPayFinish}
+        onClose={onWebPayClose}
+      />
     </View>
   );
 }
