@@ -9,6 +9,7 @@ import { leaveCheckout, useCheckout } from '@/context/checkout-context';
 import { useLive } from '@/context/live-context';
 import { useListings } from '@/context/listings-context';
 import { checkoutTotals } from '@/data/checkout';
+import { QuantityStepper } from '@/components/ui/quantity-stepper';
 import { getListingImageSource } from '@/data/images';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { formatCountdown, formatNaira } from '@/lib/format';
@@ -47,11 +48,15 @@ export default function CheckoutSummaryScreen() {
 
   const itemPrice = draft.itemPrice ?? listing?.price ?? 0;
   const listedPrice = draft.listedPrice ?? null;
+  const quantity = draft.quantity ?? 1;
+  const maxQuantity = Math.max(1, draft.quantityAvailable ?? 1);
   const totals = checkoutTotals({
     itemPrice,
     deliveryMethod: draft.deliveryMethod,
     listedPrice,
+    quantity,
   });
+  const itemLabel = quantity > 1 ? `Items (${quantity} × ${formatNaira(itemPrice)})` : 'Item price';
   const shipLines = {
     name: draft.name,
     address: [draft.address, draft.city, draft.state].filter(Boolean).join(', '),
@@ -134,7 +139,33 @@ export default function CheckoutSummaryScreen() {
               ) : (
                 <Text style={styles.itemPrice}>{formatNaira(itemPrice)}</Text>
               )}
+              {quantity > 1 || !draft.quantityFixed ? <Text style={styles.itemSub}>Price per item</Text> : null}
             </View>
+          </View>
+        ) : null}
+
+        {listing && !sold && !expired ? (
+          <View style={styles.qtyRow}>
+            <View style={styles.qtyCopy}>
+              <Text style={styles.cardLabel}>Quantity</Text>
+              <Text style={styles.cardMuted}>
+                {draft.quantityFixed
+                  ? draft.offerId
+                    ? 'Set by your accepted offer'
+                    : 'Set by your live claim'
+                  : `${maxQuantity} available`}
+              </Text>
+            </View>
+            {draft.quantityFixed || maxQuantity <= 1 ? (
+              <Text style={styles.qtyFixed}>{quantity}</Text>
+            ) : (
+              <QuantityStepper
+                value={quantity}
+                max={maxQuantity}
+                accessibilityLabel="How many to buy"
+                onChange={(next) => checkout.updateDraft({ quantity: Math.max(1, next ?? 1) })}
+              />
+            )}
           </View>
         ) : null}
 
@@ -173,11 +204,11 @@ export default function CheckoutSummaryScreen() {
           <View style={styles.card}>
             <Text style={styles.cardLabel}>Payment summary</Text>
             {listedPrice != null && listedPrice !== itemPrice ? (
-              <Row label="Listed price" value={formatNaira(listedPrice)} struck />
+              <Row label="Listed price" value={formatNaira(totals.listedPrice ?? listedPrice)} struck />
             ) : null}
             <Row
-              label={listedPrice != null && listedPrice !== itemPrice ? 'Accepted offer price' : 'Item price'}
-              value={formatNaira(itemPrice)}
+              label={listedPrice != null && listedPrice !== itemPrice ? 'Accepted offer price' : itemLabel}
+              value={formatNaira(totals.itemPrice)}
             />
             <Row label={deliveryLabelText} value={formatNaira(totals.delivery.fee)} />
             <Row
@@ -374,6 +405,19 @@ const styles = StyleSheet.create({
     color: Palette.plum,
     fontFamily: Typography.bodySemiBold,
   },
+  qtyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.md,
+    padding: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Palette.border,
+    borderRadius: Radius.md,
+    backgroundColor: Palette.ivoryElevated,
+  },
+  qtyCopy: { flex: 1, gap: 2 },
+  qtyFixed: { fontSize: 16, fontFamily: Typography.bodySemiBold, color: Palette.espresso },
   itemPrice: {
     marginTop: 8,
     fontSize: 15,

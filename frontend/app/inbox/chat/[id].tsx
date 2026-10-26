@@ -31,7 +31,7 @@ import { ApiError } from '@/lib/api';
 import { pickChatImage, uploadChatImage } from '@/lib/chat-media';
 import { chatDayLabel, formatChatClock, formatNaira } from '@/lib/format';
 import { formatLastSeen, isOnline } from '@/lib/presence';
-import { effectiveOfferStatus, formatOfferCountdown, offerChipVariant } from '@/lib/offer-display';
+import { effectiveOfferStatus, formatOfferCountdown, offerChipVariant, offerAmountLabel } from '@/lib/offer-display';
 import { supabase } from '@/lib/supabase';
 import { Redirect, useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -453,7 +453,7 @@ export default function ChatScreen() {
           <Pressable onPress={() => router.push(`/inbox/offer/${activeOffer.id}`)} style={styles.offerBanner}>
             <TicketIcon />
             <Text style={styles.offerCopy} numberOfLines={2}>
-              {`Offer ${formatNaira(activeOffer.amount)} · `}
+              {`Offer ${offerAmountLabel(activeOffer)} · `}
               <Text style={styles.offerStatus}>{offerChip.toUpperCase()}</Text>
               {offerCountdown && offerStatus === 'pending' ? ` · expires in ${offerCountdown}` : ''}
             </Text>

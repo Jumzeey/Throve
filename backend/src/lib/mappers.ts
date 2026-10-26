@@ -48,7 +48,16 @@ type ListingRow = {
   review_reason?: string | null;
   reviewed_at?: string | null;
   reviewed_by?: string | null;
+  quantity?: number | null;
+  quantity_sold?: number | null;
+  quantity_held?: number | null;
 };
+
+/** Units a buyer can still take: quantity minus sold minus held (checkouts in progress, live claims). */
+export function listingAvailableQuantity(row: { quantity?: number | null; quantity_sold?: number | null; quantity_held?: number | null }) {
+  const quantity = Number(row.quantity ?? 1);
+  return Math.max(0, quantity - Number(row.quantity_sold ?? 0) - Number(row.quantity_held ?? 0));
+}
 
 export function publicPhotoUrl(value: string | null | undefined) {
   if (!value) return undefined;
@@ -122,6 +131,10 @@ export function mapListing(row: ListingRow, sellerUsername: string, savedBy: str
     reviewSubmittedAt: row.review_submitted_at ?? undefined,
     reviewReason: row.review_reason ?? undefined,
     reviewedAt: row.reviewed_at ?? undefined,
+    quantity: Number(row.quantity ?? 1),
+    quantitySold: Number(row.quantity_sold ?? 0),
+    quantityHeld: Number(row.quantity_held ?? 0),
+    quantityAvailable: listingAvailableQuantity(row),
   };
 }
 

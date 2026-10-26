@@ -23,6 +23,10 @@ export function startClaimExpiryWorker() {
         .lt('expires_at', nowIso)
         .limit(50);
 
+      // Checkout holds (normal and offer purchases) lapse on the same tick as live claims.
+      const { error: holdError } = await supabase.rpc('expire_stale_stock_holds');
+      if (holdError) console.warn('[claim-expiry] stock holds', holdError.message);
+
       const { data, error } = await supabase.rpc('expire_stale_live_claims');
       if (error) {
         console.warn('[claim-expiry]', error.message);

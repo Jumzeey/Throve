@@ -9,7 +9,8 @@ import { TextField } from '@/components/ui/text-field';
 import { KeyboardSafeScreen } from '@/components/ui/keyboard-safe';
 import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import { useListings } from '@/context/listings-context';
+import { MAX_LISTING_QUANTITY, useListings } from '@/context/listings-context';
+import { QuantityStepper } from '@/components/ui/quantity-stepper';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import type { KeyboardAwareScrollApi } from '@/hooks/use-keyboard-aware-scroll';
 import { formatNaira } from '@/lib/format';
@@ -478,6 +479,28 @@ export default function CreateListingScreen() {
                     }}
                   />
                 </View>
+              </View>
+
+              <View
+                onLayout={rememberFieldOffset('quantity')}
+                ref={keyboardScroll.setAnchor('quantity')}
+                collapsable={false}>
+                <Text style={styles.label}>Quantity</Text>
+                <QuantityStepper
+                  value={form.quantity ? Number(form.quantity) : null}
+                  max={MAX_LISTING_QUANTITY}
+                  error={showErrors && issueFields.has('quantity')}
+                  accessibilityLabel="How many you have"
+                  onChange={(quantity) => {
+                    setForm({ quantity: quantity == null ? '' : String(quantity) });
+                    setShowErrors(false);
+                  }}
+                />
+                <Text style={[styles.hint, showErrors && issueFields.has('quantity') && styles.hintError]}>
+                  {showErrors && issueFields.has('quantity')
+                    ? 'Choose how many you have. Even if it’s just one, pick 1.'
+                    : 'How many identical items (same size and colour) you have to sell.'}
+                </Text>
               </View>
 
               <View ref={keyboardScroll.setAnchor('description')} collapsable={false}>

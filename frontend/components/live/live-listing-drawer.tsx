@@ -2,6 +2,7 @@ import { AppImage } from '@/components/ui/app-image';
 import { Button } from '@/components/ui/button';
 import { CloseIcon, ShieldCheckIcon } from '@/components/ui/icons';
 import { PhotoPager } from '@/components/ui/photo-pager';
+import { QuantityStepper } from '@/components/ui/quantity-stepper';
 import { Palette, Typography } from '@/constants/theme';
 import { getProductImageSource } from '@/data/images';
 import type { Listing, LiveStreamProduct } from '@/data/types';
@@ -44,8 +45,9 @@ type Props = {
   removed?: boolean;
   remainingCatalogCount?: number;
   onClose: () => void;
-  onClaim?: () => void;
-  onBuyNow?: () => void;
+  /** Called with how many units the viewer chose. */
+  onClaim?: (quantity: number) => void;
+  onBuyNow?: (quantity: number) => void;
   onCheckout?: () => void;
   onBrowseCatalog?: () => void;
   onSignIn?: () => void;
@@ -78,6 +80,8 @@ export function LiveListingDrawer({
   const now = useLiveClock();
   const [photoIndex, setPhotoIndex] = useState(0);
   const [descOpen, setDescOpen] = useState(false);
+  const [quantity, setQuantity] = useState(1);
+  const unitsLeft = Math.max(0, product?.available ?? 1);
   const maxHeight = Math.min(frame.height * 0.92, Dimensions.get('window').height * 0.92);
 
   useEffect(() => {
@@ -85,6 +89,7 @@ export function LiveListingDrawer({
     Keyboard.dismiss();
     setPhotoIndex(0);
     setDescOpen(false);
+    setQuantity(1);
   }, [visible, product?.id]);
 
   const photos = useMemo(() => {
@@ -288,12 +293,26 @@ export function LiveListingDrawer({
               </ScrollView>
 
               <View style={[styles.footer, { paddingBottom: footerPad }]}>
+                {variant === 'available' && signedIn && unitsLeft > 1 ? (
+                  <View style={styles.qtyRow}>
+                    <View>
+                      <Text style={styles.qtyLabel}>How many?</Text>
+                      <Text style={styles.qtyHint}>{unitsLeft} available</Text>
+                    </View>
+                    <QuantityStepper
+                      value={Math.min(quantity, unitsLeft)}
+                      max={unitsLeft}
+                      accessibilityLabel="How many to claim"
+                      onChange={(next) => setQuantity(Math.max(1, next ?? 1))}
+                    />
+                  </View>
+                ) : null}
                 <DrawerFooter
                   variant={variant}
                   signedIn={signedIn}
                   claiming={claiming}
-                  onClaim={onClaim}
-                  onBuyNow={onBuyNow}
+                  onClaim={onClaim ? () => onClaim(Math.min(quantity, Math.max(1, unitsLeft))) : undefined}
+                  onBuyNow={onBuyNow ? () => onBuyNow(Math.min(quantity, Math.max(1, unitsLeft))) : undefined}
                   onCheckout={onCheckout}
                   onSignIn={onSignIn}
                 />
@@ -366,6 +385,14 @@ function DrawerFooter({
 }
 
 const styles = StyleSheet.create({
+  qtyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  qtyLabel: { fontSize: 14, fontFamily: Typography.bodySemiBold, color: Palette.espresso },
+  qtyHint: { marginTop: 2, fontSize: 12, fontFamily: Typography.body, color: Palette.muted },
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',

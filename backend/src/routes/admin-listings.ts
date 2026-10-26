@@ -412,13 +412,16 @@ router.post('/:id/restore', requireStaffAuth, requireStaffAction('restore_listin
     return sendError(res, 409, 'Only hidden or removed listings can be restored', 'CONFLICT');
   }
 
-  const { data, error } = await service
+  const { data: restored, error } = await service
     .from('listings')
     .update({ status: 'available' })
     .eq('id', req.params.id)
     .select('*')
     .single();
   if (error) return handleSupabaseError(res, error);
+  // A restored listing that has nothing left goes back to Sold / Reserved, not Available.
+  await service.rpc('sync_listing_stock_status', { p_listing_id: restored.id });
+  const { data } = await service.from('listings').select('*').eq('id', restored.id).single();
 
   const seller = await getProfileById(service, String(data.seller_id));
   const sellerUsername = seller?.username ?? 'unknown';

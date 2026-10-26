@@ -13,7 +13,7 @@ import type { Offer } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 import { formatNaira } from '@/lib/format';
-import { effectiveOfferStatus, offerChipVariant, offerFooter } from '@/lib/offer-display';
+import { effectiveOfferStatus, offerChipVariant, offerFooter, offerAmountLabel } from '@/lib/offer-display';
 import { Redirect, useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -198,7 +198,7 @@ function OfferRow({
         </View>
         <Text style={styles.direction}>{direction}</Text>
         <Text style={styles.priceLine}>
-          <Text style={styles.offerAmount}>{formatNaira(offer.amount)}</Text>
+          <Text style={styles.offerAmount}>{offerAmountLabel(offer)}</Text>
           {listPrice != null ? <Text style={styles.listPrice}>{`  ${formatNaira(listPrice)}`}</Text> : null}
         </Text>
         {footer ? (

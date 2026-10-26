@@ -260,7 +260,6 @@ export default function PrepareLiveScreen() {
           return {
             listingId,
             livePrice: listing?.price ?? 0,
-            stock: 1,
             isPinned: index === 0,
           };
         }),

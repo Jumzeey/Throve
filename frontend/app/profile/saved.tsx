@@ -11,7 +11,7 @@ import { Palette, Radius, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { useCheckout } from '@/context/checkout-context';
 import { useInbox } from '@/context/inbox-context';
-import { useListings } from '@/context/listings-context';
+import { listingUnitsLeft, useListings } from '@/context/listings-context';
 import { getListingImageSource } from '@/data/images';
 import type { Listing } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
@@ -139,8 +139,9 @@ export default function SavedItemsScreen() {
       <OfferSheet
         visible={Boolean(offerFor)}
         listingPrice={offerFor?.price ?? 0}
+        maxQuantity={offerFor ? listingUnitsLeft(offerFor) : 1}
         onClose={() => setOfferFor(null)}
-        onSubmit={(amount) => {
+        onSubmit={(amount, quantity) => {
           if (!offerFor) return;
           void inbox
             .createOffer({
@@ -148,6 +149,7 @@ export default function SavedItemsScreen() {
               buyer: username,
               seller: offerFor.seller,
               amount,
+              quantity,
               initiator: 'buyer',
             })
             .then(async (created) => {

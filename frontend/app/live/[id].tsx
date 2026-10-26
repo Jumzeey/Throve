@@ -452,14 +452,14 @@ export default function LiveViewerScreen() {
     }
   }
 
-  async function claimProduct(product: LiveStreamProduct) {
+  async function claimProduct(product: LiveStreamProduct, quantity = 1) {
     if (claimingRef.current) return;
     claimingRef.current = true;
     setClaiming(true);
     setClaimError(null);
     try {
-      await live.claimProduct(activeSession.id, product.id, 1);
-      toast.success('Claimed', 'Complete checkout to buy.');
+      await live.claimProduct(activeSession.id, product.id, quantity);
+      toast.success(quantity > 1 ? `Claimed ${quantity}` : 'Claimed', 'Complete checkout to buy.');
     } catch (err) {
       setClaimError(err instanceof Error ? err.message : 'Claim failed');
     } finally {
@@ -468,13 +468,13 @@ export default function LiveViewerScreen() {
     }
   }
 
-  async function buyNowProduct(product: LiveStreamProduct) {
+  async function buyNowProduct(product: LiveStreamProduct, quantity = 1) {
     if (claimingRef.current) return;
     claimingRef.current = true;
     setClaiming(true);
     setClaimError(null);
     try {
-      const nextClaim = await live.claimProduct(activeSession.id, product.id, 1);
+      const nextClaim = await live.claimProduct(activeSession.id, product.id, quantity);
       await checkout.startCheckout({
         listingId: product.listingId,
         liveSessionId: activeSession.id,
@@ -779,11 +779,11 @@ export default function LiveViewerScreen() {
           setListingOpen(false);
           setClaimError(null);
         }}
-        onClaim={() => {
-          if (drawerProduct) void claimProduct(drawerProduct);
+        onClaim={(quantity) => {
+          if (drawerProduct) void claimProduct(drawerProduct, quantity);
         }}
-        onBuyNow={() => {
-          if (drawerProduct) void buyNowProduct(drawerProduct);
+        onBuyNow={(quantity) => {
+          if (drawerProduct) void buyNowProduct(drawerProduct, quantity);
         }}
         onCheckout={() => {
           if (drawerProduct) void goCheckout(drawerProduct);

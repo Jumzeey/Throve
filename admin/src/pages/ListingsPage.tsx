@@ -58,6 +58,8 @@ type ListingRow = {
   category: string;
   condition: string;
   price: number;
+  /** e.g. "3 of 5 left · 2 sold". */
+  stock: string;
   status: string;
   statusLabel: string;
   reports: number;
@@ -133,6 +135,15 @@ function mapApiHistory(events: AdminListingHistoryEvent[]): ListingRow['history'
   }));
 }
 
+function stockSummary(item: ApiListing) {
+  const total = item.quantity ?? 1;
+  const left = item.quantityAvailable ?? total;
+  const parts = [`${left} of ${total} left`];
+  if (item.quantitySold) parts.push(`${item.quantitySold} sold`);
+  if (item.quantityHeld) parts.push(`${item.quantityHeld} being bought`);
+  return parts.join(' · ');
+}
+
 function fromApi(item: ApiListing, history?: AdminListingHistoryEvent[]): ListingRow {
   return {
     id: item.id,
@@ -142,6 +153,7 @@ function fromApi(item: ApiListing, history?: AdminListingHistoryEvent[]): Listin
     category: item.category,
     condition: item.condition,
     price: item.price,
+    stock: stockSummary(item),
     status: item.status,
     statusLabel: statusLabel(item.status),
     reports: 0,
@@ -674,6 +686,10 @@ export function ListingsPage() {
                     <div>
                       <div className="text-[10px] text-muted-2 uppercase">Price</div>
                       <div className="font-semibold text-espresso">{formatNaira(selected.price)}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-muted-2 uppercase">Stock</div>
+                      <div className="text-body">{selected.stock}</div>
                     </div>
                     <div>
                       <div className="text-[10px] text-muted-2 uppercase">Condition</div>

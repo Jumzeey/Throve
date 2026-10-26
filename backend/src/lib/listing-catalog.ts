@@ -23,6 +23,9 @@ const SHOE_SIZES = [
 
 const ONE_SIZE = [{ value: 'One size', label: 'One size' }] as const;
 
+/** Highest quantity a seller can list for one listing (matches the DB check). */
+export const MAX_LISTING_QUANTITY = 999;
+
 export const LISTING_CATALOG = {
   departments: ['Women', 'Men', 'Kids'] as const,
   categories: {

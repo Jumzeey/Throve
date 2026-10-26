@@ -9,7 +9,8 @@ import {
   offerRejectedEmail,
   offerWithdrawnEmail,
 } from '../lib/email/templates/offers.js';
-import { getProfileById, getProfileByUsername } from '../lib/mappers.js';
+import { getProfileById, getProfileByUsername, listingAvailableQuantity } from '../lib/mappers.js';
+import { MAX_LISTING_QUANTITY } from '../lib/listing-catalog.js';
 import { notifyUser } from '../lib/notify.js';
 import { formatNaira } from '../lib/email/layout.js';
 import { createServiceClient } from '../lib/supabase.js';
@@ -42,6 +43,22 @@ async function listingPrice(
 
 function minOfferAmount(listingPrice: number) {
   return Math.ceil(listingPrice * 0.4);
+}
+
+/** Units of a listing a buyer can still get (quantity minus sold minus held). */
+async function listingUnitsLeft(listingId: string) {
+  const { data } = await createServiceClient()
+    .from('listings')
+    .select('quantity, quantity_sold, quantity_held')
+    .eq('id', listingId)
+    .maybeSingle();
+  return data ? listingAvailableQuantity(data) : 0;
+}
+
+/** "₦8,000" for one, "₦8,000 each × 3" for several. */
+function offerAmountLabel(amount: number, quantity: number) {
+  const each = formatNaira(Number(amount) || 0);
+  return quantity > 1 ? `${each} each × ${quantity}` : each;
 }
 
 function validateOfferAgainstListing(amount: number, listingPrice: number): string | null {
@@ -490,6 +507,8 @@ router.get('/offers', requireAuth, async (req, res) => {
         seller: seller?.username ?? 'unknown',
         amount: row.amount,
         previousAmount: row.previous_amount ?? null,
+        quantity: Number(row.quantity ?? 1),
+        used: Boolean(row.used_at),
         status,
         createdAt: new Date(row.created_at).getTime(),
         expiresAt: new Date(row.expires_at).getTime(),
@@ -516,6 +535,7 @@ router.post('/offers', requireAuth, async (req, res) => {
       buyer: z.string(),
       seller: z.string(),
       amount: z.number().positive(),
+      quantity: z.number().int().min(1).max(MAX_LISTING_QUANTITY).default(1),
       initiator: z.enum(['buyer', 'seller']),
     })
     .safeParse(req.body);
@@ -544,9 +564,19 @@ router.post('/offers', requireAuth, async (req, res) => {
   const amountError = validateOfferAgainstListing(parsed.data.amount, price);
   if (amountError) return sendError(res, 400, amountError);
 
+  const unitsLeft = await listingUnitsLeft(parsed.data.listingId);
+  if (unitsLeft < parsed.data.quantity) {
+    return sendError(
+      res,
+      409,
+      unitsLeft > 0 ? `Only ${unitsLeft} available` : 'This item is sold out',
+      'OUT_OF_STOCK',
+    );
+  }
+
   const { data: priorPending } = await supabase
     .from('offers')
-    .select('id, amount')
+    .select('id, amount, quantity')
     .eq('listing_id', parsed.data.listingId)
     .eq('buyer_id', buyerId)
     .eq('status', 'pending');
@@ -565,7 +595,7 @@ router.post('/offers', requireAuth, async (req, res) => {
         buyerId,
         sellerId,
         senderId: userId,
-        text: `Replaced previous offer of ${formatNaira(Number(prior.amount) || 0)}`,
+        text: `Replaced previous offer of ${offerAmountLabel(Number(prior.amount), Number(prior.quantity ?? 1))}`,
         skipMessageNotify: true,
       });
     }
@@ -579,6 +609,7 @@ router.post('/offers', requireAuth, async (req, res) => {
       buyer_id: buyerId,
       seller_id: sellerId,
       amount: parsed.data.amount,
+      quantity: parsed.data.quantity,
       initiator: parsed.data.initiator,
       expires_at: expiresAt,
     })
@@ -590,7 +621,7 @@ router.post('/offers', requireAuth, async (req, res) => {
   const title = await listingTitle(supabase, parsed.data.listingId);
   const recipientId = parsed.data.initiator === 'buyer' ? sellerId : buyerId;
   const fromUsername = parsed.data.initiator === 'buyer' ? parsed.data.buyer : parsed.data.seller;
-  const amountLabel = formatNaira(Number(data.amount) || 0);
+  const amountLabel = offerAmountLabel(Number(data.amount), Number(data.quantity ?? 1));
   const chatText =
     parsed.data.initiator === 'seller'
       ? `Discounted offer: ${amountLabel}`
@@ -629,6 +660,8 @@ router.post('/offers', requireAuth, async (req, res) => {
     seller: parsed.data.seller,
     amount: data.amount,
     previousAmount: data.previous_amount ?? null,
+    quantity: Number(data.quantity ?? 1),
+    used: Boolean(data.used_at),
     status: data.status,
     createdAt: new Date(data.created_at).getTime(),
     expiresAt: new Date(data.expires_at).getTime(),
@@ -642,6 +675,7 @@ router.patch('/offers/:id', requireAuth, async (req, res) => {
     .object({
       action: z.enum(['accept', 'reject', 'withdraw', 'counter']),
       amount: z.number().positive().optional(),
+      quantity: z.number().int().min(1).max(MAX_LISTING_QUANTITY).optional(),
     })
     .safeParse(req.body);
   if (!parsed.success) return sendError(res, 400, 'Invalid action');
@@ -661,6 +695,15 @@ router.patch('/offers/:id', requireAuth, async (req, res) => {
     if (offer.initiator === 'buyer' && isSeller) status = 'accepted';
     else if (offer.initiator === 'seller' && isBuyer) status = 'accepted';
     else return sendError(res, 403, 'Not allowed');
+    const unitsLeft = await listingUnitsLeft(String(offer.listing_id));
+    if (unitsLeft < Number(offer.quantity ?? 1)) {
+      return sendError(
+        res,
+        409,
+        unitsLeft > 0 ? `Only ${unitsLeft} left, so this offer can’t be accepted as it is` : 'This item is sold out',
+        'OUT_OF_STOCK',
+      );
+    }
     patch.status = status;
   } else if (parsed.data.action === 'reject') {
     if (offer.initiator === 'buyer' && isSeller) status = 'rejected';
@@ -679,6 +722,13 @@ router.patch('/offers/:id', requireAuth, async (req, res) => {
     if (price == null) return sendError(res, 404, 'Listing not found');
     const amountError = validateOfferAgainstListing(parsed.data.amount, price);
     if (amountError) return sendError(res, 400, amountError);
+    if (parsed.data.quantity !== undefined) {
+      const unitsLeft = await listingUnitsLeft(String(offer.listing_id));
+      if (unitsLeft < parsed.data.quantity) {
+        return sendError(res, 409, unitsLeft > 0 ? `Only ${unitsLeft} available` : 'This item is sold out', 'OUT_OF_STOCK');
+      }
+      patch.quantity = parsed.data.quantity;
+    }
     patch.previous_amount = offer.amount;
     patch.amount = parsed.data.amount;
     patch.initiator = 'seller';
@@ -694,7 +744,7 @@ router.patch('/offers/:id', requireAuth, async (req, res) => {
   const buyer = await getProfileById(supabase, data.buyer_id);
   const seller = await getProfileById(supabase, data.seller_id);
   const title = await listingTitle(supabase, data.listing_id);
-  const amountLabel = formatNaira(Number(data.amount) || 0);
+  const amountLabel = offerAmountLabel(Number(data.amount), Number(data.quantity ?? 1));
 
   let chatText: string | null = null;
   if (parsed.data.action === 'counter') {
@@ -801,6 +851,8 @@ router.patch('/offers/:id', requireAuth, async (req, res) => {
     seller: seller?.username ?? 'unknown',
     amount: data.amount,
     previousAmount: data.previous_amount ?? null,
+    quantity: Number(data.quantity ?? 1),
+    used: Boolean(data.used_at),
     status: data.status,
     createdAt: new Date(data.created_at).getTime(),
     expiresAt: new Date(data.expires_at).getTime(),

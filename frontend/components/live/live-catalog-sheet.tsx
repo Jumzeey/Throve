@@ -128,6 +128,9 @@ export function LiveCatalogSheet({
                     >
                       {formatNaira(product.livePrice)}
                     </Text>
+                    {variant === 'available' && (product.available ?? 0) > 1 ? (
+                      <Text style={styles.unitsLeft}>{product.available} available</Text>
+                    ) : null}
                   </View>
                   <StatusTag variant={variant} />
                 </Pressable>
@@ -154,6 +157,7 @@ function StatusTag({ variant }: { variant: PinnedProductVariant }) {
 }
 
 const styles = StyleSheet.create({
+  unitsLeft: { marginTop: 2, fontSize: 11.5, fontFamily: Typography.bodyMedium, color: Palette.muted },
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',

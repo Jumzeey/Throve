@@ -5,7 +5,7 @@ import { notifyUser } from './notify.js';
 export async function notifySavedListingWatchers(input: {
   listingId: string;
   listingTitle: string;
-  type: 'saved_listing_sold' | 'saved_listing_removed';
+  type: 'saved_listing_sold' | 'saved_listing_removed' | 'saved_listing_restocked';
   title: string;
   excludeUserIds?: string[];
 }): Promise<void> {

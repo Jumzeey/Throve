@@ -17,11 +17,28 @@ export const EMPTY_LISTING_FORM: ListingForm = {
   size: '',
   colour: '',
   price: '',
+  quantity: '',
   description: '',
   shippingMethod: '',
 };
 
-export const PREVIEW_ERROR = 'Add a photo, then fill in title, department, category, condition and price.';
+/** Most units one listing can carry (matches the backend). */
+export const MAX_LISTING_QUANTITY = 999;
+
+export function parseListingQuantity(value: string) {
+  const digits = value.replace(/[^\d]/g, '');
+  if (!digits) return null;
+  const quantity = Number(digits);
+  return Number.isInteger(quantity) && quantity >= 1 && quantity <= MAX_LISTING_QUANTITY ? quantity : null;
+}
+
+/** Units a buyer can take right now; older API responses without stock fields mean one unit. */
+export function listingUnitsLeft(listing: Pick<Listing, 'status' | 'quantityAvailable'>) {
+  if (listing.quantityAvailable != null) return listing.quantityAvailable;
+  return listing.status === 'available' ? 1 : 0;
+}
+
+export const PREVIEW_ERROR = 'Add a photo, then fill in title, department, category, condition, price and quantity.';
 
 type ListingsContextValue = {
   listings: Listing[];
@@ -72,6 +89,7 @@ export function isListingFormPublishable(form: ListingForm) {
   if (!isDepartment(form.department)) return false;
   if (!form.category.trim()) return false;
   if (!form.condition.trim()) return false;
+  if (parseListingQuantity(form.quantity) === null) return false;
   return parseListingPrice(form.price) !== null;
 }
 
@@ -151,6 +169,7 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
       size: listing.size === '—' ? '' : listing.size,
       colour: listing.colour ?? '',
       price: listing.price > 0 ? String(listing.price) : '',
+      quantity: listing.quantity && listing.quantity > 0 ? String(listing.quantity) : '',
       description: listing.description === 'No description provided.' ? '' : listing.description,
       shippingMethod: listing.shipping.toLowerCase().includes('express') ? 'Express' : 'Standard',
     });
@@ -197,6 +216,7 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
         title: form.title,
         brand: form.brand,
         price: parseListingPrice(form.price) ?? 0,
+        quantity: parseListingQuantity(form.quantity) ?? undefined,
         size: form.size,
         colour: form.colour,
         condition: form.condition,
@@ -270,6 +290,7 @@ export function ListingsProvider({ children }: { children: ReactNode }) {
         category: patch.category,
         description: patch.description,
         colour: patch.colour,
+        quantity: patch.quantity,
       }),
     });
     setListings((current) => current.map((item) => (item.id === id ? listing : item)));

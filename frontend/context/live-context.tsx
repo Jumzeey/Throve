@@ -146,7 +146,7 @@ type StartLiveInput = {
   category?: string;
   description?: string;
   featuredListingIds: string[];
-  products?: { listingId: string; livePrice: number; stock: number; isPinned?: boolean }[];
+  products?: { listingId: string; livePrice: number; stock?: number; isPinned?: boolean }[];
   scheduledAt?: string;
   thumbnailUrl?: string;
 };
@@ -755,7 +755,8 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({
           listingId: input.listingId,
           livePrice: input.livePrice,
-          stock: input.stock ?? 1,
+          // Omitted = everything the listing has left (the server caps it either way).
+          stock: input.stock,
           isPinned: input.isPinned ?? false,
         }),
       });
@@ -877,7 +878,6 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       listings.map((listingId, index) => ({
         listingId,
         livePrice: 0,
-        stock: 1,
         isPinned: index === 0,
       }));
 

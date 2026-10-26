@@ -47,6 +47,8 @@ export async function mapOrderJson(
     deliveryMethod: row.delivery_method,
     deliveryFee: row.delivery_fee,
     protectionFee: row.protection_fee ?? 0,
+    quantity: Number(row.quantity ?? 1),
+    unitPrice: Number(row.unit_price ?? itemPrice),
     itemPrice,
     listedPrice: row.listed_price ?? null,
     offerId: row.offer_id ?? null,

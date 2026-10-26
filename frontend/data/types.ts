@@ -32,6 +32,13 @@ export type Listing = {
   reviewSubmittedAt?: string;
   reviewReason?: string;
   reviewedAt?: string;
+  /** Units the seller listed (0 on a draft where it hasn't been chosen yet). */
+  quantity?: number;
+  quantitySold?: number;
+  /** Units being bought right now (checkouts in progress, live claims). */
+  quantityHeld?: number;
+  /** Units a buyer can take right now. */
+  quantityAvailable?: number;
 };
 
 export type ListingForm = {
@@ -48,6 +55,8 @@ export type ListingForm = {
   size: string;
   colour: string;
   price: string;
+  /** Digits only; empty until the seller chooses. */
+  quantity: string;
   description: string;
   shippingMethod: string;
 };
@@ -221,6 +230,9 @@ export type Order = {
   deliveryMethod: DeliveryMethod;
   deliveryFee: number;
   protectionFee?: number;
+  quantity?: number;
+  unitPrice?: number;
+  /** Line total (unit price × quantity). */
   itemPrice: number;
   listedPrice?: number | null;
   offerId?: string | null;
@@ -250,8 +262,15 @@ export type CheckoutDraft = {
   liveStreamProductId?: string | null;
   claimId?: string | null;
   offerId?: string | null;
+  /** Price per unit. */
   itemPrice?: number;
+  /** Listing price per unit when an offer or live price applies. */
   listedPrice?: number | null;
+  quantity?: number;
+  /** Offers and live claims fix the quantity; a normal checkout lets the buyer change it. */
+  quantityFixed?: boolean;
+  /** Most units the buyer can choose. */
+  quantityAvailable?: number;
   buyer: string;
   name: string;
   address: string;
@@ -271,8 +290,13 @@ export type Offer = {
   listingId: string;
   buyer: string;
   seller: string;
+  /** Price per unit. */
   amount: number;
   previousAmount?: number | null;
+  /** Units the offer covers (amount is per unit). */
+  quantity?: number;
+  /** An accepted offer that has already been checked out. */
+  used?: boolean;
   status: OfferStatus;
   createdAt: number;
   expiresAt: number;

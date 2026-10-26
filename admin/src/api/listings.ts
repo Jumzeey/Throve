@@ -20,6 +20,10 @@ export type AdminListingDto = {
   reviewSubmittedAt?: string;
   reviewReason?: string;
   reviewedAt?: string;
+  quantity?: number;
+  quantitySold?: number;
+  quantityHeld?: number;
+  quantityAvailable?: number;
 };
 
 export type AdminListingHistoryEvent = {

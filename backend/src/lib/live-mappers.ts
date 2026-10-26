@@ -1,4 +1,5 @@
 import type { DbRow } from './db-types.js';
+import { listingAvailableQuantity } from './mappers.js';
 
 export type LiveStreamProductDto = {
   id: string;
@@ -8,6 +9,7 @@ export type LiveStreamProductDto = {
   stock: number;
   reservedCount: number;
   soldCount: number;
+  /** What a viewer can claim right now: the live cap and the listing's own stock, whichever is lower. */
   available: number;
   isPinned: boolean;
   sortOrder: number;
@@ -42,7 +44,10 @@ export function mapLiveStreamProduct(row: DbRow, listing?: DbRow | null): LiveSt
     stock,
     reservedCount: reserved,
     soldCount: sold,
-    available: Math.max(0, stock - reserved - sold),
+    available: Math.min(
+      Math.max(0, stock - reserved - sold),
+      listing ? listingAvailableQuantity(listing) : Number.MAX_SAFE_INTEGER,
+    ),
     isPinned: Boolean(row.is_pinned),
     sortOrder: Number(row.sort_order ?? 0),
     title: listing?.title ? String(listing.title) : undefined,
