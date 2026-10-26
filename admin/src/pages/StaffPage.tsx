@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   fetchStaff,
-  lookupStaffCandidate,
+  cancelStaffInvite,
+  fetchStaffInvites,
+  inviteStaff,
+  resendStaffInvite,
+  type StaffInvite,
   removeStaff,
   restoreStaff,
   revokeStaff,
@@ -105,11 +109,12 @@ export function StaffPage() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [lookup, setLookup] = useState('');
-  const [lookupBusy, setLookupBusy] = useState(false);
-  const [lookupError, setLookupError] = useState<string | null>(null);
-  const [candidate, setCandidate] = useState<StaffMember | null>(null);
-  const [candidateRole, setCandidateRole] = useState<AdminRole | null>(null);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteName, setInviteName] = useState('');
+  const [inviteRole, setInviteRole] = useState<AdminRole | null>(null);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [invites, setInvites] = useState<StaffInvite[]>([]);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -132,23 +137,53 @@ export function StaffPage() {
     }
   }, []);
 
+  const loadInvites = useCallback(async () => {
+    try {
+      const data = await fetchStaffInvites();
+      setInvites(data.invites);
+    } catch {
+      // the staff list still works without it
+    }
+  }, []);
+
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadInvites();
+  }, [load, loadInvites]);
 
-  async function findCandidate() {
-    setLookupBusy(true);
-    setLookupError(null);
-    setCandidate(null);
-    setCandidateRole(null);
+  const inviteEmailOk = /^[^\s@]+@throve\.store$/i.test(inviteEmail.trim());
+
+  async function sendInvite() {
+    if (!inviteEmailOk || !inviteRole || !inviteName.trim()) return;
+    setInviteBusy(true);
+    setInviteError(null);
     try {
-      const { user } = await lookupStaffCandidate(lookup);
-      setCandidate(user);
-      setCandidateRole(user.role);
+      await inviteStaff({ email: inviteEmail.trim().toLowerCase(), name: inviteName.trim(), role: inviteRole });
+      show(`Invite sent to ${inviteEmail.trim().toLowerCase()}`);
+      setInviteEmail('');
+      setInviteName('');
+      setInviteRole(null);
+      await loadInvites();
     } catch (err) {
-      setLookupError(errorMessage(err, 'Lookup failed'));
+      setInviteError(errorMessage(err, 'Could not send the invite'));
     } finally {
-      setLookupBusy(false);
+      setInviteBusy(false);
+    }
+  }
+
+  async function inviteAction(kind: 'resend' | 'cancel', invite: StaffInvite) {
+    setActionError(null);
+    try {
+      if (kind === 'resend') {
+        await resendStaffInvite(invite.id);
+        show(`Invite re-sent to ${invite.email}`);
+      } else {
+        await cancelStaffInvite(invite.id);
+        show('Invite cancelled');
+      }
+      await loadInvites();
+    } catch (err) {
+      setActionError(errorMessage(err, 'Action failed'));
     }
   }
 
@@ -160,10 +195,6 @@ export function StaffPage() {
       else if (action.kind === 'restore') await restoreStaff(action.member.id, reason);
       else await removeStaff(action.member.id, reason);
       show(confirmCopy(action).confirmLabel.replace(/^./, (c) => c.toUpperCase()) + ' · done');
-      if (candidate?.id === action.member.id) {
-        setCandidate(null);
-        setLookup('');
-      }
       await load();
     } catch (err) {
       setActionError(errorMessage(err, 'Action failed'));
@@ -181,54 +212,78 @@ export function StaffPage() {
         </Alert>
       ) : null}
 
-      <Panel title="Add staff" subtitle="The person needs a Throve account first. Search by email or username.">
-        <div className="flex flex-col gap-3">
-          <form
-            className="flex flex-wrap items-center gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void findCandidate();
-            }}
-          >
+      <Panel
+        title="Invite staff"
+        subtitle="Only @throve.store addresses. They get an email link to confirm the address and set a password before they can sign in."
+      >
+        <form
+          className="flex flex-wrap items-start gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void sendInvite();
+          }}
+        >
+          <div className="flex flex-col gap-1">
             <Input
-              value={lookup}
-              onChange={(e) => setLookup(e.target.value)}
-              placeholder="name@example.com or @username"
-              className="h-8 w-[280px] bg-card text-[12.5px]"
+              value={inviteEmail}
+              onChange={(e) => {
+                setInviteEmail(e.target.value);
+                setInviteError(null);
+              }}
+              placeholder="name@throve.store"
+              className="h-8 w-[240px] bg-card text-[12.5px]"
             />
-            <Button type="submit" size="sm" disabled={lookupBusy || lookup.trim().length < 3}>
-              {lookupBusy ? 'Searching…' : 'Find account'}
-            </Button>
-          </form>
-          {lookupError ? <div className="text-[12px] text-risk">{lookupError}</div> : null}
-          {candidate ? (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-border-soft bg-panel-elevated px-3 py-2.5">
-              <div className="min-w-0">
-                <div className="text-[13px] font-semibold text-espresso">
-                  {candidate.name || `@${candidate.username}`}
+            {inviteEmail.trim() && !inviteEmailOk ? (
+              <span className="text-[11px] text-risk">Must be a @throve.store address</span>
+            ) : null}
+          </div>
+          <Input
+            value={inviteName}
+            onChange={(e) => setInviteName(e.target.value)}
+            placeholder="Full name"
+            className="h-8 w-[180px] bg-card text-[12.5px]"
+          />
+          <RoleSelect value={inviteRole} onChange={setInviteRole} />
+          <Button
+            type="submit"
+            size="sm"
+            disabled={inviteBusy || !inviteEmailOk || !inviteRole || !inviteName.trim()}
+          >
+            {inviteBusy ? 'Sending…' : 'Send invite'}
+          </Button>
+        </form>
+        {inviteError ? <div className="mt-2 text-[12px] text-risk">{inviteError}</div> : null}
+
+        {invites.length ? (
+          <div className="mt-4 flex flex-col divide-y divide-divider border-t border-divider">
+            {invites.map((invite) => (
+              <div key={invite.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-[12.5px] font-semibold text-espresso">
+                    {invite.name || invite.email}
+                    <StatusBadge tone={invite.state === 'expired' ? 'risk' : 'gold'}>
+                      {invite.state === 'expired' ? 'Expired' : 'Invite sent'}
+                    </StatusBadge>
+                  </div>
+                  <div className="text-[11.5px] text-muted">
+                    {invite.email} · {ROLE_LABELS[invite.role]} ·{' '}
+                    {invite.state === 'expired'
+                      ? 'link expired'
+                      : `link expires ${new Date(invite.expiresAt).toLocaleDateString()}`}
+                  </div>
                 </div>
-                <div className="text-[11.5px] text-muted">
-                  @{candidate.username} · {candidate.email}
-                  {candidate.role ? ` · currently ${ROLE_LABELS[candidate.role]}` : ''}
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => void inviteAction('resend', invite)}>
+                    Resend
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => void inviteAction('cancel', invite)}>
+                    Cancel invite
+                  </Button>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <RoleSelect
-                  value={candidateRole}
-                  onChange={setCandidateRole}
-                  disabled={candidate.id === session?.userId}
-                />
-                <Button
-                  size="sm"
-                  disabled={!candidateRole || candidate.id === session?.userId}
-                  onClick={() => candidateRole && setPending({ kind: 'role', member: candidate, role: candidateRole })}
-                >
-                  {candidate.role ? 'Change role' : 'Grant access'}
-                </Button>
-              </div>
-            </div>
-          ) : null}
-        </div>
+            ))}
+          </div>
+        ) : null}
       </Panel>
 
       <Panel title="Current staff">

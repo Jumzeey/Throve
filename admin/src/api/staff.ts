@@ -49,3 +49,49 @@ export function removeStaff(id: string, reason: string) {
     body: JSON.stringify({ reason }),
   });
 }
+
+export type StaffInvite = {
+  id: string;
+  email: string;
+  name: string;
+  role: AdminRole;
+  state: 'pending' | 'accepted' | 'revoked' | 'expired';
+  expiresAt: string;
+  createdAt: string;
+  acceptedAt: string | null;
+};
+
+export function fetchStaffInvites() {
+  return apiFetch<{ invites: StaffInvite[] }>('/admin/staff/invites');
+}
+
+export function inviteStaff(input: { email: string; name: string; role: AdminRole }) {
+  return apiFetch<{ invite: StaffInvite }>('/admin/staff/invites', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function resendStaffInvite(id: string) {
+  return apiFetch<{ invite: StaffInvite }>(`/admin/staff/invites/${encodeURIComponent(id)}/resend`, { method: 'POST' });
+}
+
+export function cancelStaffInvite(id: string) {
+  return apiFetch<{ ok: true }>(`/admin/staff/invites/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export type InvitePreview = {
+  email: string;
+  name: string;
+  role: AdminRole;
+  expiresAt: string;
+  existingAccount: boolean;
+};
+
+export function fetchInvitePreview(token: string) {
+  return apiFetch<InvitePreview>(`/auth/staff/invite?token=${encodeURIComponent(token)}`);
+}
+
+export function acceptStaffInvite(input: { token: string; password: string; name?: string }) {
+  return apiFetch<{ ok: true; email: string }>('/auth/staff/invite/accept', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}

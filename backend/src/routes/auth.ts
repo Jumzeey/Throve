@@ -8,6 +8,8 @@ import { notifyUser } from '../lib/notify.js';
 import { validatePassword } from '../lib/password.js';
 import { createServiceClient, createSupabaseClient } from '../lib/supabase.js';
 import { getProfileById, mapProfile } from '../lib/mappers.js';
+import { writeAdminAudit } from '../lib/admin-audit.js';
+import { escapeLikeExact, hashInviteToken, inviteState, isStaffEmail } from '../lib/staff-invites.js';
 import { type AuthedRequest, optionalAuth } from '../middleware/auth.js';
 
 const router = Router();
@@ -192,7 +194,7 @@ router.post('/login-options', async (req, res) => {
   const { data, error } = await admin
     .from('profiles')
     .select('has_password, preferred_login_method, deactivated')
-    .ilike('email', email)
+    .ilike('email', escapeLikeExact(email))
     .maybeSingle();
 
   if (error) return sendError(res, 500, error.message, 'DB_ERROR');
@@ -239,7 +241,7 @@ router.post('/password/send-otp', optionalAuth, async (req, res) => {
     const { data: profile } = await admin
       .from('profiles')
       .select('id, has_password, deactivated')
-      .ilike('email', email)
+      .ilike('email', escapeLikeExact(email))
       .maybeSingle();
 
     if (!profile || profile.deactivated) {
@@ -519,6 +521,152 @@ async function sendOtpEmail(
 }
 
 /** Staff console login — password auth on the server; requires profiles.admin_role. */
+async function loadOpenInvite(token: string) {
+  const { data } = await createServiceClient()
+    .from('staff_invites')
+    .select('*')
+    .eq('token_hash', hashInviteToken(token))
+    .maybeSingle();
+  return data;
+}
+
+/** What the accept-invite page shows before the person sets a password. */
+router.get('/staff/invite', async (req, res) => {
+  const token = String(req.query.token ?? '');
+  if (token.length < 20) return sendError(res, 400, 'Invite link is incomplete', 'INVITE_INVALID');
+  const invite = await loadOpenInvite(token);
+  if (!invite) return sendError(res, 404, 'This invite link is not valid', 'INVITE_INVALID');
+  const state = inviteState(invite);
+  if (state !== 'pending') {
+    const message =
+      state === 'accepted'
+        ? 'This invite was already accepted. Sign in instead.'
+        : state === 'expired'
+          ? 'This invite has expired. Ask a super admin to resend it.'
+          : 'This invite was cancelled.';
+    return sendError(res, 410, message, `INVITE_${state.toUpperCase()}`);
+  }
+  const { data: existing } = await createServiceClient()
+    .from('profiles')
+    .select('id')
+    .ilike('email', escapeLikeExact(String(invite.email)))
+    .maybeSingle();
+  return res.json({
+    email: invite.email,
+    name: invite.name,
+    role: invite.role,
+    expiresAt: invite.expires_at,
+    existingAccount: Boolean(existing),
+  });
+});
+
+/**
+ * Opening the emailed link proves the person owns the @throve.store address. Setting a
+ * password here creates (or claims) their account and only then grants the staff role.
+ */
+router.post('/staff/invite/accept', async (req, res) => {
+  const parsed = z
+    .object({
+      token: z.string().min(20),
+      password: z.string().min(1),
+      name: z.string().trim().max(80).optional(),
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, 'Invite link and password are required');
+
+  const passwordError = validatePassword(parsed.data.password);
+  if (passwordError) return sendError(res, 400, passwordError, 'WEAK_PASSWORD');
+
+  const invite = await loadOpenInvite(parsed.data.token);
+  if (!invite || inviteState(invite) !== 'pending') {
+    return sendError(res, 410, 'This invite is no longer valid. Ask a super admin to resend it.', 'INVITE_INVALID');
+  }
+  const email = String(invite.email).toLowerCase();
+  if (!isStaffEmail(email)) return sendError(res, 400, 'Invite email is not a Throve staff address', 'EMAIL_DOMAIN');
+
+  const admin = createServiceClient();
+  // Claim the invite first so the same link can't be used twice in parallel.
+  const { data: claimed } = await admin
+    .from('staff_invites')
+    .update({ accepted_at: new Date().toISOString() })
+    .eq('id', invite.id)
+    .is('accepted_at', null)
+    .is('revoked_at', null)
+    .select('id')
+    .maybeSingle();
+  if (!claimed) return sendError(res, 410, 'This invite is no longer valid.', 'INVITE_INVALID');
+
+  const name = parsed.data.name || String(invite.name ?? '');
+  try {
+    const { data: existing } = await admin
+      .from('profiles')
+      .select('id, account_status, deactivated, name')
+      .ilike('email', escapeLikeExact(email))
+      .maybeSingle();
+
+    let userId: string;
+    if (existing) {
+      if (existing.deactivated || ['suspended', 'banned'].includes(String(existing.account_status))) {
+        throw Object.assign(new Error('This account cannot be given staff access. Contact a super admin.'), {
+          code: 'NOT_ELIGIBLE',
+        });
+      }
+      const { error } = await admin.auth.admin.updateUserById(String(existing.id), {
+        password: parsed.data.password,
+        email_confirm: true,
+      });
+      if (error) throw error;
+      userId = String(existing.id);
+    } else {
+      const base = `staff.${email.split('@')[0].replace(/[^a-z0-9._]/g, '')}`.slice(0, 24) || 'staff';
+      let username = base;
+      for (let i = 2; i < 50; i += 1) {
+        const { data: taken } = await admin.from('profiles').select('id').eq('username', username).maybeSingle();
+        if (!taken) break;
+        username = `${base}${i}`;
+      }
+      const { data, error } = await admin.auth.admin.createUser({
+        email,
+        password: parsed.data.password,
+        email_confirm: true,
+        user_metadata: { name, username },
+      });
+      if (error || !data.user) throw error ?? new Error('Could not create the account');
+      userId = data.user.id;
+    }
+
+    const { error: roleError } = await admin
+      .from('profiles')
+      .update({
+        admin_role: invite.role,
+        admin_active: true,
+        has_password: true,
+        ...(name && !existing?.name ? { name } : {}),
+      })
+      .eq('id', userId);
+    if (roleError) throw roleError;
+    await admin.from('staff_invites').update({ accepted_user_id: userId }).eq('id', invite.id);
+
+    void writeAdminAudit(admin, {
+      actorId: userId,
+      actorRole: invite.role,
+      action: 'staff.invite_accept',
+      resourceType: 'staff',
+      resourceId: userId,
+      reason: 'Accepted emailed invite',
+      meta: { inviteId: invite.id, email },
+      sensitivity: 'Access',
+    });
+
+    return res.json({ ok: true, email });
+  } catch (err) {
+    // Re-open the invite so they can try again with the same link.
+    await admin.from('staff_invites').update({ accepted_at: null }).eq('id', invite.id);
+    const code = (err as { code?: string }).code === 'NOT_ELIGIBLE' ? 'NOT_ELIGIBLE' : 'INVITE_ACCEPT_FAILED';
+    return sendError(res, 400, err instanceof Error ? err.message : 'Could not accept the invite', code);
+  }
+});
+
 router.post('/staff/login', async (req, res) => {
   const parsed = z
     .object({
