@@ -138,6 +138,12 @@ workflows:
           ./gradlew bundleRelease \
             -PversionCode=$UPDATED_BUILD_NUMBER \
             -PversionName=1.0.$UPDATED_BUILD_NUMBER
+      - name: Write Google Play release notes
+        script: |
+          # Codemagic attaches release_notes.json in the project root to the Play release.
+          NOTES=$(git log -1 --pretty=%B | head -c 480)
+          node -e 'require("fs").writeFileSync("release_notes.json", JSON.stringify([{ language: "en-GB", text: process.argv[1] }]))' "$NOTES"
+          cat release_notes.json
       - name: Publish EAS Update (production channel)
         script: |
           # Runs only after a successful build, so installed apps get the same JS over the air.
@@ -159,8 +165,11 @@ workflows:
     publishing:
       google_play:
         credentials: $GOOGLE_PLAY_SERVICE_ACCOUNT_CREDENTIALS
+        # Closed testing first, then the same release is promoted to Open testing (beta).
         track: alpha
         submit_as_draft: false
+        release_promotion:
+          track: beta
 
   # Manual only (Start new build). Wire App Store Connect + ios_signing before enabling IPA publish.
   react-native-ios:
