@@ -4,6 +4,17 @@ import { writeAdminAudit } from '../lib/admin-audit.js';
 import { handleSupabaseError, sendError } from '../lib/errors.js';
 import { ROUTE_ROLES, type AdminRole } from '../lib/staff-rbac.js';
 import { createServiceClient } from '../lib/supabase.js';
+import type { DbRow } from '../lib/db-types.js';
+import {
+  INVITE_TTL_MS,
+  STAFF_EMAIL_DOMAIN,
+  adminAppUrl,
+  escapeLikeExact,
+  isStaffEmail,
+  mapInvite,
+  newInviteToken,
+  sendStaffInviteEmail,
+} from '../lib/staff-invites.js';
 import { requireStaffAuth, requireStaffRole, type StaffRequest } from '../middleware/staff.js';
 
 /**
@@ -128,6 +139,10 @@ router.post('/:id/role', requireStaffAuth, requireStaffRole(...routeRoles), asyn
   if (!canHoldAccess(target)) {
     return sendError(res, 400, 'Deactivated, suspended or banned accounts cannot be given staff access', 'NOT_ELIGIBLE');
   }
+  // New staff must come in through an emailed invite to a @throve.store address.
+  if (!target.admin_role) {
+    return sendError(res, 400, 'Invite new staff by email from Staff access instead', 'USE_INVITE');
+  }
   if (target.admin_role === parsed.data.role && target.admin_active !== false) {
     return sendError(res, 409, 'This person already has that role', 'ALREADY_APPLIED');
   }
@@ -212,6 +227,128 @@ router.delete('/:id', requireStaffAuth, requireStaffRole(...routeRoles), async (
   if (error) return handleSupabaseError(res, error);
 
   await audit(staff, 'staff.remove', target.id, parsed.data.reason, { role: target.admin_role });
+  return res.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// Invites: new staff must be @throve.store and confirm the address before access.
+// ---------------------------------------------------------------------------
+
+router.get('/invites', requireStaffAuth, requireStaffRole(...routeRoles), async (_req, res) => {
+  const { data, error } = await createServiceClient()
+    .from('staff_invites')
+    .select('*')
+    .is('accepted_at', null)
+    .is('revoked_at', null)
+    .order('created_at', { ascending: false });
+  if (error) return handleSupabaseError(res, error);
+  return res.json({ invites: (data ?? []).map(mapInvite) });
+});
+
+async function issueInvite(req: StaffRequest, invite: { email: string; name: string; role: AdminRole }, existingId?: string) {
+  const service = createServiceClient();
+  const { token, hash } = newInviteToken();
+  const expiresAt = new Date(Date.now() + INVITE_TTL_MS).toISOString();
+  const query = existingId
+    ? service.from('staff_invites').update({ token_hash: hash, expires_at: expiresAt }).eq('id', existingId)
+    : service.from('staff_invites').insert({
+        email: invite.email,
+        name: invite.name,
+        role: invite.role,
+        token_hash: hash,
+        invited_by: req.userId,
+        expires_at: expiresAt,
+      });
+  const { data, error } = await query.select('*').single();
+  if (error) throw error;
+
+  const inviter = await loadProfile(req.userId);
+  const link = `${adminAppUrl(req.header('origin'))}/accept-invite?token=${encodeURIComponent(token)}`;
+  await sendStaffInviteEmail({
+    email: invite.email,
+    name: invite.name,
+    role: invite.role,
+    inviterName: inviter?.name || inviter?.username || 'A Throve super admin',
+    link,
+  });
+  return data as DbRow;
+}
+
+router.post('/invites', requireStaffAuth, requireStaffRole(...routeRoles), async (req, res) => {
+  const staff = req as StaffRequest;
+  const parsed = z
+    .object({
+      email: z.string().trim().toLowerCase().email(),
+      name: z.string().trim().max(80).default(''),
+      role: roleSchema,
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, 'Email, name and role are required');
+  if (!isStaffEmail(parsed.data.email)) {
+    return sendError(res, 400, `Staff must use a @${STAFF_EMAIL_DOMAIN} email address`, 'EMAIL_DOMAIN');
+  }
+
+  const service = createServiceClient();
+  const { data: existingStaff } = await service
+    .from('profiles')
+    .select('id, admin_role')
+    .ilike('email', escapeLikeExact(parsed.data.email))
+    .not('admin_role', 'is', null)
+    .maybeSingle();
+  if (existingStaff) return sendError(res, 409, 'This person is already staff', 'ALREADY_STAFF');
+
+  const { data: open } = await service
+    .from('staff_invites')
+    .select('id')
+    .eq('email', parsed.data.email)
+    .is('accepted_at', null)
+    .is('revoked_at', null)
+    .maybeSingle();
+  if (open) return sendError(res, 409, 'An invite is already open for this email. Resend it instead.', 'INVITE_EXISTS');
+
+  try {
+    const row = await issueInvite(staff, parsed.data);
+    await audit(staff, 'staff.invite', String(row.id), 'Invited by email', {
+      email: parsed.data.email,
+      role: parsed.data.role,
+    });
+    return res.status(201).json({ invite: mapInvite(row) });
+  } catch (err) {
+    return sendError(res, 502, err instanceof Error ? err.message : 'Could not send the invite email', 'INVITE_FAILED');
+  }
+});
+
+/** New link and expiry (the old link stops working), re-sent to the same address. */
+router.post('/invites/:id/resend', requireStaffAuth, requireStaffRole(...routeRoles), async (req, res) => {
+  const staff = req as StaffRequest;
+  const { data: invite } = await createServiceClient()
+    .from('staff_invites')
+    .select('*')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  if (!invite || invite.accepted_at || invite.revoked_at) return sendError(res, 404, 'Invite not found', 'NOT_FOUND');
+  try {
+    const row = await issueInvite(staff, invite as { email: string; name: string; role: AdminRole }, String(invite.id));
+    await audit(staff, 'staff.invite_resend', String(row.id), 'Invite re-sent', { email: invite.email });
+    return res.json({ invite: mapInvite(row) });
+  } catch (err) {
+    return sendError(res, 502, err instanceof Error ? err.message : 'Could not send the invite email', 'INVITE_FAILED');
+  }
+});
+
+router.delete('/invites/:id', requireStaffAuth, requireStaffRole(...routeRoles), async (req, res) => {
+  const staff = req as StaffRequest;
+  const { data, error } = await createServiceClient()
+    .from('staff_invites')
+    .update({ revoked_at: new Date().toISOString() })
+    .eq('id', req.params.id)
+    .is('accepted_at', null)
+    .is('revoked_at', null)
+    .select('*')
+    .maybeSingle();
+  if (error) return handleSupabaseError(res, error);
+  if (!data) return sendError(res, 404, 'Invite not found', 'NOT_FOUND');
+  await audit(staff, 'staff.invite_revoke', String(data.id), 'Invite cancelled', { email: data.email });
   return res.json({ ok: true });
 });
 

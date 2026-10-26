@@ -51,6 +51,13 @@ export function LoginPage() {
   const [welcomeRole, setWelcomeRole] = useState<AdminRole | null>(null);
   const [holdNavigate, setHoldNavigate] = useState(false);
 
+  // Arriving from an accepted staff invite: fill in the confirmed address.
+  const invited = searchParams.get('invited') === '1';
+  useEffect(() => {
+    const invitedEmail = searchParams.get('email');
+    if (invitedEmail) setEmail(invitedEmail);
+  }, [searchParams]);
+
   useEffect(() => {
     const fromQuery = searchParams.get('reason');
     const stored = consumeAuthGateReason();
@@ -339,6 +346,14 @@ export function LoginPage() {
 
               {gate === 'form' ? (
                 <form className="space-y-5" onSubmit={onSubmit} noValidate>
+                  {invited && !error ? (
+                    <Alert className="rounded-[5px] border-clear-border bg-clear-bg">
+                      <AlertTitle className="text-[12px] text-clear">Email confirmed</AlertTitle>
+                      <AlertDescription className="text-[11.5px] text-clear">
+                        Your access is ready. Sign in with the password you just set.
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
                   {error ? (
                     <Alert className="rounded-[5px] border-risk-border bg-risk-bg">
                       <AlertTitle className="text-[12px] text-risk">Could not sign in</AlertTitle>
