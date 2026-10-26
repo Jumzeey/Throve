@@ -13,7 +13,8 @@ export type AdminRoute =
   | 'payouts'
   | 'reviews'
   | 'audit'
-  | 'staff';
+  | 'staff'
+  | 'banners';
 
 export const ROLE_LABELS: Record<AdminRole, string> = {
   super_admin: 'Super Admin',
@@ -36,6 +37,7 @@ export const ROUTE_PATHS: Record<AdminRoute, string> = {
   reviews: '/reviews',
   audit: '/audit',
   staff: '/staff',
+  banners: '/banners',
 };
 
 const ALL: AdminRole[] = ['super_admin', 'trust_safety', 'support', 'finance'];
@@ -55,6 +57,7 @@ export const ROUTE_ROLES: Record<AdminRoute, AdminRole[]> = {
   reviews: ['super_admin', 'trust_safety'],
   audit: ['super_admin', 'trust_safety', 'support', 'finance'],
   staff: ['super_admin'],
+  banners: ['super_admin'],
 };
 
 export function canAccess(role: AdminRole, route: AdminRoute) {
@@ -98,6 +101,7 @@ export function navSectionsFor(role: AdminRole): NavSection[] {
         ],
       },
       { label: 'Finance', routes: ['orders', 'payments', 'refunds', 'payouts'] },
+      { label: 'Marketing', routes: ['banners'] },
       { label: 'Governance', routes: ['staff', 'audit'] },
     ];
   }
@@ -141,7 +145,8 @@ export type ActionKey =
   | 'view_kyc_payout'
   | 'dismiss_report'
   | 'close_report'
-  | 'mark_report_action_taken';
+  | 'mark_report_action_taken'
+  | 'manage_banners';
 
 const ACTION_ROLES: Record<ActionKey, AdminRole[]> = {
   suspend_user: ['super_admin', 'trust_safety'],
@@ -165,6 +170,7 @@ const ACTION_ROLES: Record<ActionKey, AdminRole[]> = {
   dismiss_report: ['super_admin', 'trust_safety'],
   close_report: ['super_admin', 'trust_safety'],
   mark_report_action_taken: ['super_admin', 'trust_safety'],
+  manage_banners: ['super_admin'],
 };
 
 /** Support sees masked KYC/payout; T&S/Finance/Super see values. */

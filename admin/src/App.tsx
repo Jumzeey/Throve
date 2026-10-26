@@ -16,6 +16,7 @@ import { RefundsPage } from './pages/RefundsPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { ReviewsPage } from './pages/ReviewsPage';
 import { StaffPage } from './pages/StaffPage';
+import { BannersPage } from './pages/BannersPage';
 import { UsersPage } from './pages/UsersPage';
 
 export default function App() {
@@ -132,6 +133,14 @@ export default function App() {
               element={
                 <RequireRoute route="staff">
                   <StaffPage />
+                </RequireRoute>
+              }
+            />
+            <Route
+              path="/banners"
+              element={
+                <RequireRoute route="banners">
+                  <BannersPage />
                 </RequireRoute>
               }
             />
