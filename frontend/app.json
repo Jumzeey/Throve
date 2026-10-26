@@ -91,41 +91,6 @@
             "BROWSABLE",
             "DEFAULT"
           ]
-        },
-        {
-          "action": "VIEW",
-          "autoVerify": false,
-          "data": [
-            {
-              "scheme": "throveapp",
-              "host": "auth",
-              "pathPrefix": "/callback"
-            },
-            {
-              "scheme": "throveapp",
-              "host": "inbox"
-            },
-            {
-              "scheme": "throveapp",
-              "host": "checkout"
-            },
-            {
-              "scheme": "throveapp",
-              "host": "product"
-            },
-            {
-              "scheme": "throveapp",
-              "host": "live"
-            },
-            {
-              "scheme": "throveapp",
-              "host": "profile"
-            }
-          ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
         }
       ],
       "permissions": [
@@ -263,7 +228,10 @@
     "owner": "jumzeeydevs-team",
     "runtimeVersion": "1.0.0",
     "updates": {
-      "url": "https://u.expo.dev/b0504134-8367-4f6c-bd9a-d8960baf919e"
+      "url": "https://u.expo.dev/b0504134-8367-4f6c-bd9a-d8960baf919e",
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      }
     }
   }
 }
