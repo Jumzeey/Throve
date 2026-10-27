@@ -37,6 +37,8 @@ export type AdminListingHistoryEvent = {
 export type AdminListingDetail = {
   listing: AdminListingDto;
   history: AdminListingHistoryEvent[];
+  /** Latest edit suggested to the seller, if any (any status). */
+  editProposal?: ListingEditProposal | null;
 };
 
 export function fetchAdminListings(queue: string, q: string) {
@@ -90,4 +92,41 @@ export function escalateAdminListing(id: string, reason: string) {
     method: 'POST',
     body: JSON.stringify({ reason }),
   });
+}
+
+export type ListingEditField =
+  | 'title'
+  | 'description'
+  | 'brand'
+  | 'department'
+  | 'category'
+  | 'size'
+  | 'colour'
+  | 'condition'
+  | 'price';
+
+export type ListingEditProposal = {
+  id: string;
+  status: 'proposed' | 'accepted' | 'rejected' | 'superseded' | 'withdrawn';
+  note: string | null;
+  sellerNote: string | null;
+  createdAt: string;
+  respondedAt: string | null;
+  fields: { field: ListingEditField; label: string; from: unknown; to: unknown }[];
+};
+
+export type ListingEditChanges = Partial<Record<Exclude<ListingEditField, 'price'>, string>> & { price?: number };
+
+export function proposeListingEdit(id: string, changes: ListingEditChanges, note?: string) {
+  return apiFetch<AdminListingDetail & { editProposal: ListingEditProposal | null }>(
+    `/admin/listings/${id}/propose-edit`,
+    { method: 'POST', body: JSON.stringify({ changes, ...(note ? { note } : {}) }) },
+  );
+}
+
+export function withdrawListingEdit(id: string) {
+  return apiFetch<AdminListingDetail & { editProposal: ListingEditProposal | null }>(
+    `/admin/listings/${id}/withdraw-edit`,
+    { method: 'POST' },
+  );
 }

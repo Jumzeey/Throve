@@ -7,7 +7,9 @@ export type ListingStatus =
   | 'hidden'
   | 'removed'
   | 'pending_review'
-  | 'rejected';
+  | 'rejected'
+  /** Throve suggested edits; waiting for the seller to accept, decline or edit. */
+  | 'changes_proposed';
 export type LiveStatus = 'live' | 'upcoming' | 'ended';
 export type SortOption = 'Newest' | 'Lowest price' | 'Highest price';
 

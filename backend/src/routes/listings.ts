@@ -9,6 +9,12 @@ import { LISTING_CATALOG, MAX_LISTING_QUANTITY, categoriesForDepartment, shippin
 import { notifyUser } from '../lib/notify.js';
 import { type AuthedRequest, optionalAuth, requireAuth } from '../middleware/auth.js';
 import { createServiceClient } from '../lib/supabase.js';
+import {
+  PROPOSABLE_FIELDS,
+  loadLatestProposal,
+  mapProposal,
+  validateProposalForListing,
+} from '../lib/listing-edit-proposals.js';
 
 const router = Router();
 
@@ -37,7 +43,7 @@ function validateListingForSubmit(existing: DbRow) {
 async function recordReviewEvent(
   listingId: string,
   actorId: string | null,
-  action: 'submitted' | 'resubmitted' | 'approved' | 'rejected',
+  action: 'submitted' | 'resubmitted' | 'approved' | 'rejected' | 'edit_accepted' | 'edit_declined' | 'edit_superseded',
   reason?: string | null,
 ) {
   try {
@@ -471,15 +477,25 @@ router.post('/:id/publish', requireAuth, async (req, res) => {
 
   if (existingError) return handleSupabaseError(res, existingError);
   if (!existing) return sendError(res, 404, 'Listing not found');
-  if (!['draft', 'rejected'].includes(String(existing.status))) {
+  if (!['draft', 'rejected', 'changes_proposed'].includes(String(existing.status))) {
     return sendError(res, 400, 'Only draft or rejected listings can be submitted for review');
   }
 
   const validationError = validateListingForSubmit(existing);
   if (validationError) return sendError(res, 400, validationError);
 
+  // Editing it themselves replaces a suggested edit that's still waiting.
+  const supersedes = existing.status === 'changes_proposed';
+  if (supersedes) {
+    await createServiceClient()
+      .from('listing_edit_proposals')
+      .update({ status: 'superseded', responded_at: new Date().toISOString() })
+      .eq('listing_id', existing.id)
+      .eq('status', 'proposed');
+  }
+
   const now = new Date().toISOString();
-  const { data, error } = await supabase
+  const { data, error } = await (supersedes ? createServiceClient() : supabase)
     .from('listings')
     .update({
       status: 'pending_review',
@@ -497,7 +513,11 @@ router.post('/:id/publish', requireAuth, async (req, res) => {
   const profile = await getProfileById(supabase, userId);
   const sellerUsername = profile?.username ?? 'unknown';
 
-  void recordReviewEvent(data.id, userId, existing.status === 'rejected' ? 'resubmitted' : 'submitted');
+  void recordReviewEvent(
+    data.id,
+    userId,
+    supersedes ? 'edit_superseded' : existing.status === 'rejected' ? 'resubmitted' : 'submitted',
+  );
 
   void notifyUser({
     userId,
@@ -573,6 +593,102 @@ router.post('/:id/resubmit', requireAuth, async (req, res) => {
   });
 
   return res.json(mapListing(data, sellerUsername));
+});
+
+/** Latest suggested edit from Throve on the seller's own listing. */
+router.get('/:id/edit-proposal', requireAuth, async (req, res) => {
+  const { userId } = req as AuthedRequest;
+  const service = createServiceClient();
+  const { data: listing } = await service
+    .from('listings')
+    .select('id, seller_id')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  if (!listing || listing.seller_id !== userId) return sendError(res, 404, 'Listing not found');
+  return res.json({ proposal: mapProposal(await loadLatestProposal(service, String(listing.id))) });
+});
+
+async function loadOpenProposal(listingId: string, userId: string) {
+  const service = createServiceClient();
+  const { data: listing } = await service.from('listings').select('*').eq('id', listingId).maybeSingle();
+  if (!listing || listing.seller_id !== userId) return { error: 'Listing not found' as const };
+  const { data: proposal } = await service
+    .from('listing_edit_proposals')
+    .select('*')
+    .eq('listing_id', listingId)
+    .eq('status', 'proposed')
+    .maybeSingle();
+  if (!proposal || listing.status !== 'changes_proposed') {
+    return { error: 'There are no suggested changes waiting on this listing' as const };
+  }
+  return { listing, proposal, service };
+}
+
+/** Seller accepts: apply the suggested details, back to review for final approval. */
+router.post('/:id/edit-proposal/accept', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const loaded = await loadOpenProposal(String(req.params.id), userId);
+  if ('error' in loaded) return sendError(res, 404, loaded.error ?? 'Listing not found');
+  const { listing, proposal, service } = loaded;
+
+  const changes = (proposal.changes ?? {}) as Record<string, unknown>;
+  const invalid = validateProposalForListing(listing, changes);
+  if (invalid) return sendError(res, 400, invalid);
+  const patch: Record<string, unknown> = {};
+  for (const field of PROPOSABLE_FIELDS) if (field in changes) patch[field] = changes[field];
+
+  const now = new Date().toISOString();
+  const { data, error } = await service
+    .from('listings')
+    .update({
+      ...patch,
+      status: 'pending_review',
+      review_submitted_at: now,
+      review_reason: null,
+      reviewed_at: null,
+      reviewed_by: null,
+    })
+    .eq('id', listing.id)
+    .eq('status', 'changes_proposed')
+    .select('*')
+    .single();
+  if (error) return handleSupabaseError(res, error);
+  await service
+    .from('listing_edit_proposals')
+    .update({ status: 'accepted', responded_at: now })
+    .eq('id', proposal.id);
+  void recordReviewEvent(String(listing.id), userId, 'edit_accepted');
+
+  const profile = await getProfileById(supabase, userId);
+  return res.json(mapListing(data, profile?.username ?? 'unknown'));
+});
+
+/** Seller declines with a note: details stay as they were, back to review. */
+router.post('/:id/edit-proposal/decline', requireAuth, async (req, res) => {
+  const { supabase, userId } = req as AuthedRequest;
+  const parsed = z.object({ note: z.string().trim().min(3).max(500) }).safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, 'Add a short note for the Throve team');
+  const loaded = await loadOpenProposal(String(req.params.id), userId);
+  if ('error' in loaded) return sendError(res, 404, loaded.error ?? 'Listing not found');
+  const { listing, proposal, service } = loaded;
+
+  const now = new Date().toISOString();
+  const { data, error } = await service
+    .from('listings')
+    .update({ status: 'pending_review', review_submitted_at: now })
+    .eq('id', listing.id)
+    .eq('status', 'changes_proposed')
+    .select('*')
+    .single();
+  if (error) return handleSupabaseError(res, error);
+  await service
+    .from('listing_edit_proposals')
+    .update({ status: 'rejected', seller_note: parsed.data.note, responded_at: now })
+    .eq('id', proposal.id);
+  void recordReviewEvent(String(listing.id), userId, 'edit_declined', parsed.data.note);
+
+  const profile = await getProfileById(supabase, userId);
+  return res.json(mapListing(data, profile?.username ?? 'unknown'));
 });
 
 router.post('/:id/save', requireAuth, async (req, res) => {

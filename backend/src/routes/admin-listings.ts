@@ -8,6 +8,13 @@ import { getProfileById, getSellerMap, mapListing } from '../lib/mappers.js';
 import { notifyUser } from '../lib/notify.js';
 import { createServiceClient } from '../lib/supabase.js';
 import {
+  diffAgainstListing,
+  loadLatestProposal,
+  mapProposal,
+  proposalChangesSchema,
+  validateProposalForListing,
+} from '../lib/listing-edit-proposals.js';
+import {
   requireStaffAction,
   requireStaffAuth,
   requireStaffRole,
@@ -24,7 +31,9 @@ type ReviewEventAction =
   | 'hidden'
   | 'restored'
   | 'note'
-  | 'escalated';
+  | 'escalated'
+  | 'edit_proposed'
+  | 'edit_withdrawn';
 
 const reasonBody = z.object({ reason: z.string().trim().min(3) });
 const optionalReasonBody = z.object({
@@ -78,6 +87,11 @@ function mapHistoryEvent(row: {
     restored: { title: 'Visibility restored', tone: 'ok' },
     note: { title: 'Internal note added' },
     escalated: { title: 'Escalated', tone: 'warn' },
+    edit_proposed: { title: 'Edit suggested to seller', tone: 'warn' },
+    edit_withdrawn: { title: 'Suggested edit withdrawn' },
+    edit_accepted: { title: 'Seller accepted the suggested edit', tone: 'ok' },
+    edit_declined: { title: 'Seller declined the suggested edit', tone: 'warn' },
+    edit_superseded: { title: 'Seller edited and resubmitted' },
   };
   const meta = titles[row.action] ?? { title: row.action };
   const detailParts = [actor];
@@ -132,6 +146,7 @@ router.get('/', requireStaffAuth, async (req, res) => {
 
   if (queue === 'pending') query = query.eq('status', 'pending_review');
   else if (queue === 'rejected') query = query.eq('status', 'rejected');
+  else if (queue === 'changes_proposed') query = query.eq('status', 'changes_proposed');
   else if (queue === 'available') query = query.eq('status', 'available');
   else if (queue === 'reserved') query = query.eq('status', 'reserved');
   else if (queue === 'sold') query = query.eq('status', 'sold');
@@ -191,9 +206,140 @@ router.get('/:id', requireStaffAuth, async (req, res) => {
     console.warn('[admin/listings] history load failed', err instanceof Error ? err.message : err);
   }
 
+  const proposal = await loadLatestProposal(service, String(data.id)).catch(() => null);
   return res.json({
     listing: mapListing(data as never, sellerUsername),
     history,
+    editProposal: mapProposal(proposal),
+  });
+});
+
+const proposeBody = z.object({
+  changes: proposalChangesSchema,
+  note: z.string().trim().max(500).optional(),
+});
+
+/**
+ * Super admin suggests changed details. The seller sees them in the app and can accept,
+ * decline with a note, or edit the listing themselves; final approval stays with staff.
+ */
+router.post('/:id/propose-edit', requireStaffAuth, requireStaffRole('super_admin'), async (req, res) => {
+  const { userId, adminRole } = req as StaffRequest;
+  const parsed = proposeBody.safeParse(req.body);
+  if (!parsed.success) return sendError(res, 400, parsed.error.errors[0]?.message ?? 'Invalid changes', 'VALIDATION');
+
+  const service = createServiceClient();
+  const { data: listing } = await service.from('listings').select('*').eq('id', req.params.id).maybeSingle();
+  if (!listing) return sendError(res, 404, 'Listing not found', 'NOT_FOUND');
+  if (!['pending_review', 'rejected'].includes(String(listing.status))) {
+    return sendError(
+      res,
+      409,
+      listing.status === 'changes_proposed'
+        ? 'A suggested edit is already waiting for the seller. Withdraw it first.'
+        : 'Edits can only be suggested for listings in review',
+      'CONFLICT',
+    );
+  }
+
+  const { changes, previous } = diffAgainstListing(listing, parsed.data.changes);
+  if (!Object.keys(changes).length) return sendError(res, 400, 'Change at least one detail', 'NO_CHANGES');
+  const invalid = validateProposalForListing(listing, changes);
+  if (invalid) return sendError(res, 400, invalid, 'VALIDATION');
+
+  const { data: proposal, error } = await service
+    .from('listing_edit_proposals')
+    .insert({
+      listing_id: listing.id,
+      proposed_by: userId,
+      changes,
+      previous,
+      note: parsed.data.note || null,
+    })
+    .select('*')
+    .single();
+  if (error) return handleSupabaseError(res, error);
+
+  const { data: updated, error: statusError } = await service
+    .from('listings')
+    .update({ status: 'changes_proposed', reviewed_at: new Date().toISOString(), reviewed_by: userId })
+    .eq('id', listing.id)
+    .select('*')
+    .single();
+  if (statusError) {
+    await service.from('listing_edit_proposals').delete().eq('id', proposal.id);
+    return handleSupabaseError(res, statusError);
+  }
+
+  const fieldNames = mapProposal(proposal)?.fields.map((f) => f.label.toLowerCase()).join(', ') ?? 'details';
+  void recordReviewEvent(String(listing.id), userId, 'edit_proposed', parsed.data.note || `Suggested: ${fieldNames}`);
+  void writeAdminAudit(service, {
+    actorId: userId,
+    actorRole: adminRole,
+    action: 'listing.propose_edit',
+    resourceType: 'listing',
+    resourceId: String(listing.id),
+    reason: parsed.data.note || null,
+    sensitivity: 'Standard',
+    meta: { changes, previous },
+  });
+  void notifyUser({
+    userId: String(listing.seller_id),
+    category: 'account',
+    type: 'listing_edit_proposed',
+    title: 'Suggested changes to your listing',
+    body: `Throve suggested changes to “${listing.title}”. Review them to continue.`,
+    deepLink: `sell/${listing.id}`,
+    data: { listingId: String(listing.id), proposalId: String(proposal.id) },
+  });
+
+  const seller = await getProfileById(service, String(updated.seller_id));
+  const history = await loadListingHistory(String(updated.id)).catch(() => []);
+  return res.json({
+    listing: mapListing(updated as never, seller?.username ?? 'unknown'),
+    history,
+    editProposal: mapProposal(proposal),
+  });
+});
+
+router.post('/:id/withdraw-edit', requireStaffAuth, requireStaffRole('super_admin'), async (req, res) => {
+  const { userId, adminRole } = req as StaffRequest;
+  const service = createServiceClient();
+  const { data: proposal } = await service
+    .from('listing_edit_proposals')
+    .update({ status: 'withdrawn', responded_at: new Date().toISOString() })
+    .eq('listing_id', req.params.id)
+    .eq('status', 'proposed')
+    .select('*')
+    .maybeSingle();
+  if (!proposal) return sendError(res, 404, 'No suggested edit is waiting on this listing', 'NOT_FOUND');
+
+  const { data: updated, error } = await service
+    .from('listings')
+    .update({ status: 'pending_review' })
+    .eq('id', req.params.id)
+    .eq('status', 'changes_proposed')
+    .select('*')
+    .maybeSingle();
+  if (error) return handleSupabaseError(res, error);
+
+  void recordReviewEvent(String(req.params.id), userId, 'edit_withdrawn', null);
+  void writeAdminAudit(service, {
+    actorId: userId,
+    actorRole: adminRole,
+    action: 'listing.withdraw_edit',
+    resourceType: 'listing',
+    resourceId: String(req.params.id),
+    sensitivity: 'Standard',
+  });
+
+  const { data: row } = await service.from('listings').select('*').eq('id', req.params.id).single();
+  const seller = await getProfileById(service, String(row.seller_id));
+  const history = await loadListingHistory(String(req.params.id)).catch(() => []);
+  return res.json({
+    listing: mapListing((updated ?? row) as never, seller?.username ?? 'unknown'),
+    history,
+    editProposal: mapProposal(proposal),
   });
 });
 

@@ -14,6 +14,7 @@ import { useCheckout } from '@/context/checkout-context';
 import { useInbox } from '@/context/inbox-context';
 import { MAX_LISTING_QUANTITY, listingUnitsLeft, useListings } from '@/context/listings-context';
 import { QuantityStepper } from '@/components/ui/quantity-stepper';
+import { SuggestedEditCard } from '@/components/sell/suggested-edit-card';
 import { getListingImageSource } from '@/data/images';
 import type { Listing } from '@/data/types';
 import { useNetworkStatus } from '@/hooks/use-network-status';
@@ -39,7 +40,7 @@ export default function SellerListingScreen() {
   const { sheetBottom } = useScreenInsets();
   const { id, notice } = useLocalSearchParams<{ id: string; notice?: string }>();
   const { session, publicProfiles, ensurePublicProfile } = useAuth();
-  const { getListing, loadFormFromListing, setStatus, removeListing, canDelete, resubmit, updateListing } =
+  const { getListing, loadFormFromListing, setStatus, removeListing, canDelete, resubmit, updateListing, refresh } =
     useListings();
   const inbox = useInbox();
   const checkout = useCheckout();
@@ -188,6 +189,10 @@ export default function SellerListingScreen() {
             <StatusChip kind="listing" variant={item.status as ListingChipVariant} />
           </View>
         </View>
+
+        {item.status === 'changes_proposed' ? (
+          <SuggestedEditCard listingId={item.id} onEditMyself={edit} onResolved={() => refresh()} />
+        ) : null}
 
         {['available', 'reserved', 'sold', 'hidden'].includes(item.status) ? (
           <View style={styles.stockCard}>

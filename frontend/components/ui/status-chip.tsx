@@ -9,7 +9,8 @@ export type ListingChipVariant =
   | 'hidden'
   | 'removed'
   | 'pending_review'
-  | 'rejected';
+  | 'rejected'
+  | 'changes_proposed';
 export type OfferChipVariant = 'sent' | 'received' | 'pending' | 'accepted' | 'rejected' | 'countered' | 'withdrawn' | 'expired';
 export type LiveChipVariant = 'available' | 'reserved' | 'your_claim' | 'sold' | 'pinned';
 export type OrderChipVariant = 'paid' | 'dispatched' | 'in_transit' | 'delivered' | 'completed' | 'cancelled';
@@ -25,6 +26,7 @@ const LISTING: Record<ListingChipVariant, ChipConfig> = {
   removed: { label: 'NO LONGER AVAILABLE', color: Palette.muted, border: '#D4C7BE' },
   pending_review: { label: 'UNDER REVIEW', color: Palette.warningText, border: '#E9CFA6', bg: Palette.warningBg },
   rejected: { label: 'NEEDS CHANGES', color: Palette.error, border: Palette.errorBorder },
+  changes_proposed: { label: 'CHANGES SUGGESTED', color: Palette.plum, border: '#C9A9BD', bg: '#F8ECEF' },
 };
 
 const OFFER: Record<OfferChipVariant, ChipConfig> = {
