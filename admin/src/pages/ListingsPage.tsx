@@ -11,6 +11,7 @@ import { StatusBadge, type StatusTone } from '@/components/admin/status-badge';
 import { CopyableId } from '@/components/admin/copyable-id';
 import { ListWindowFooter } from '@/components/admin/list-window-footer';
 import { Timeline } from '@/components/admin/timeline';
+import { SuggestEditDialog } from '@/components/admin/suggest-edit-dialog';
 import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -26,6 +27,10 @@ import {
   restoreAdminListing,
   type AdminListingDto,
   type AdminListingHistoryEvent,
+  proposeListingEdit,
+  withdrawListingEdit,
+  type ListingEditChanges,
+  type ListingEditProposal,
 } from '@/api/listings';
 import { useBleedSelection } from '@/hooks/use-bleed-selection';
 import { useListWindow } from '@/hooks/use-list-window';
@@ -39,6 +44,7 @@ import type { AdminListing } from '@/types/domain';
 type ConfirmKind = 'remove' | 'restore' | 'note' | 'escalate' | 'approve' | 'reject' | null;
 type QueueFilter =
   | 'pending'
+  | 'changes_proposed'
   | 'rejected'
   | 'reported'
   | 'all'
@@ -68,6 +74,7 @@ type ListingRow = {
   description: string;
   brand: string;
   colour: string;
+  size: string;
   updatedAt: string;
   reviewReason?: string;
   reviewSubmittedAt?: string;
@@ -90,6 +97,7 @@ type ListingOverride = {
 function statusLabel(status: string) {
   const map: Record<string, string> = {
     pending_review: 'Pending review',
+    changes_proposed: 'Changes suggested',
     rejected: 'Rejected',
     available: 'Available',
     reserved: 'Reserved',
@@ -109,7 +117,7 @@ function statusLabel(status: string) {
 function statusTone(s: string): StatusTone {
   const key = s.toLowerCase().replace(/\s+/g, '_');
   if (key === 'available') return 'clear';
-  if (key === 'reserved' || key === 'pending_review') return 'hold';
+  if (key === 'reserved' || key === 'pending_review' || key === 'changes_proposed') return 'hold';
   if (key === 'sold') return 'gold';
   if (key === 'removed' || key === 'rejected') return 'risk';
   if (key === 'hidden') return 'neutral';
@@ -162,6 +170,7 @@ function fromApi(item: ApiListing, history?: AdminListingHistoryEvent[]): Listin
     description: item.description,
     brand: item.brand,
     colour: item.colour ?? '—',
+    size: item.size ?? '',
     updatedAt: item.reviewSubmittedAt?.slice(0, 16)?.replace('T', ' ') ?? item.createdAt,
     reviewReason: item.reviewReason,
     reviewSubmittedAt: item.reviewSubmittedAt,
@@ -197,6 +206,9 @@ export function ListingsPage() {
   const [pendingCount, setPendingCount] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
+  const [proposalById, setProposalById] = useState<Record<string, ListingEditProposal | null>>({});
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const isSuperAdmin = session?.role === 'super_admin';
 
   const canApprove = session ? canAct(session.role, 'approve_listing') : false;
   const canReject = session ? canAct(session.role, 'reject_listing') : false;
@@ -253,6 +265,7 @@ export function ListingsPage() {
       try {
         const detail = await fetchAdminListing(id);
         applyDetail(detail);
+        setProposalById((current) => ({ ...current, [id]: detail.editProposal ?? null }));
       } catch {
         // Keep list row; history stays synthetic until retry
       }
@@ -385,6 +398,21 @@ export function ListingsPage() {
     await runLiveAction(() => restoreAdminListing(selected.id, reason), `Restored ${selected.id}`, null);
   }
 
+  async function suggestEditSelected(changes: ListingEditChanges, note: string) {
+    if (!selected || !liveMode) return;
+    await runLiveAction(
+      () => proposeListingEdit(selected.id, changes, note || undefined),
+      'Suggested edit sent to the seller',
+      `${selected.id} · waiting for the seller`,
+    );
+    setSuggestOpen(false);
+  }
+
+  async function withdrawEditSelected() {
+    if (!selected || !liveMode) return;
+    await runLiveAction(() => withdrawListingEdit(selected.id), 'Suggested edit withdrawn', null);
+  }
+
   async function noteSelected(reason: string) {
     if (!selected || !liveMode) return;
     await runLiveAction(() => noteAdminListing(selected.id, reason), 'Internal note saved');
@@ -420,6 +448,7 @@ export function ListingsPage() {
                 onChange={(id) => setFilter(id as QueueFilter)}
                 options={[
                   { id: 'pending', label: 'Pending review', count: pendingCount },
+                  { id: 'changes_proposed', label: 'Changes suggested' },
                   { id: 'rejected', label: 'Rejected' },
                   { id: 'reported', label: 'Reported', count: flaggedCount || undefined },
                   { id: 'all', label: 'All listings' },
@@ -642,6 +671,10 @@ export function ListingsPage() {
                   </Alert>
                 ) : null}
 
+                {proposalById[selected.id] && proposalById[selected.id]!.status !== 'superseded' ? (
+                  <ProposalCard proposal={proposalById[selected.id]!} />
+                ) : null}
+
                 {selected.status === 'rejected' && selected.reviewReason ? (
                   <Alert className="rounded-[5px] border-risk-border bg-risk-bg">
                     <AlertTitle className="text-[12px] text-risk">Previously rejected</AlertTitle>
@@ -776,6 +809,30 @@ export function ListingsPage() {
                   Moderation actions · {session ? ROLE_LABELS[session.role] : 'Staff'}
                 </div>
 
+                {isSuperAdmin && (isPending || selected.status === 'rejected') ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="mb-2.5 w-full border-plum text-plum hover:bg-plum-soft"
+                    disabled={actionBusy}
+                    onClick={() => setSuggestOpen(true)}
+                  >
+                    Suggest an edit to the seller
+                  </Button>
+                ) : null}
+
+                {isSuperAdmin && selected.status === 'changes_proposed' ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="mb-2.5 w-full"
+                    disabled={actionBusy}
+                    onClick={() => void withdrawEditSelected()}
+                  >
+                    Withdraw suggested edit
+                  </Button>
+                ) : null}
+
                 {isPending && (canApprove || canReject) ? (
                   <div className="mb-2.5 flex flex-wrap gap-2">
                     {canApprove ? (
@@ -852,6 +909,28 @@ export function ListingsPage() {
             </>
           )
         }
+      />
+
+      <SuggestEditDialog
+        open={suggestOpen}
+        busy={actionBusy}
+        source={
+          selected
+            ? {
+                title: selected.title,
+                description: selected.description,
+                brand: selected.brand,
+                department: selected.department,
+                category: selected.category,
+                size: selected.size === '—' ? '' : selected.size,
+                colour: selected.colour === '—' ? '' : selected.colour,
+                condition: selected.condition,
+                price: selected.price,
+              }
+            : null
+        }
+        onOpenChange={setSuggestOpen}
+        onSubmit={(changes, note) => void suggestEditSelected(changes, note)}
       />
 
       {confirm === 'approve' && selected ? (
@@ -956,5 +1035,48 @@ export function ListingsPage() {
         />
       ) : null}
     </>
+  );
+}
+
+function formatProposalValue(field: string, value: unknown) {
+  if (value == null || value === '') return '—';
+  if (field === 'price') return formatNaira(Number(value));
+  return String(value);
+}
+
+/** Latest suggested edit and the seller's response, shown on the listing inspector. */
+function ProposalCard({ proposal }: { proposal: ListingEditProposal }) {
+  const heading: Record<ListingEditProposal['status'], { title: string; className: string }> = {
+    proposed: { title: 'Suggested edit · waiting for the seller', className: 'border-hold-border bg-hold-bg' },
+    accepted: { title: 'Seller accepted the suggested edit', className: 'border-clear-border bg-clear-bg' },
+    rejected: { title: 'Seller declined the suggested edit', className: 'border-risk-border bg-risk-bg' },
+    withdrawn: { title: 'Suggested edit withdrawn', className: 'border-border-soft bg-[#fbf7f2]' },
+    superseded: { title: 'Seller edited and resubmitted', className: 'border-border-soft bg-[#fbf7f2]' },
+  };
+  const meta = heading[proposal.status];
+  return (
+    <div className={`rounded-[5px] border px-3.5 py-3 ${meta.className}`}>
+      <div className="text-[12px] font-semibold text-espresso">{meta.title}</div>
+      {proposal.sellerNote ? (
+        <p className="mt-1.5 text-[12px] leading-relaxed text-body">
+          <span className="font-semibold">Seller’s note:</span> {proposal.sellerNote}
+        </p>
+      ) : null}
+      {proposal.note ? (
+        <p className="mt-1.5 text-[11.5px] text-muted">Your note: {proposal.note}</p>
+      ) : null}
+      <div className="mt-2 flex flex-col gap-1.5">
+        {proposal.fields.map((f) => (
+          <div key={f.field} className="text-[11.5px] leading-snug">
+            <span className="text-muted-2 uppercase tracking-[0.08em] text-[10px]">{f.label}</span>
+            <div>
+              <span className="text-muted line-through">{formatProposalValue(f.field, f.from)}</span>
+              {'  →  '}
+              <span className="font-semibold text-espresso">{formatProposalValue(f.field, f.to)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

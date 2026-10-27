@@ -33,6 +33,8 @@ function isTab(value?: string): value is Tab {
 }
 
 function matchesTab(listing: Listing, tab: Tab) {
+  // Suggested edits need the seller's action, so they sit with "Needs changes".
+  if (tab === 'rejected') return listing.status === 'rejected' || listing.status === 'changes_proposed';
   return listing.status === tab;
 }
 
@@ -67,7 +69,8 @@ export default function SellScreen() {
       hidden: 0,
     };
     for (const listing of mine) {
-      if (listing.status in next) next[listing.status as Tab] += 1;
+      if (listing.status === 'changes_proposed') next.rejected += 1;
+      else if (listing.status in next) next[listing.status as Tab] += 1;
     }
     return next;
   }, [mine]);
