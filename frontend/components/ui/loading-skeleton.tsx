@@ -1,5 +1,56 @@
 import { Palette, Radius } from '@/constants/theme';
-import { StyleSheet, View, type ViewStyle } from 'react-native';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { Animated, Easing, StyleSheet, View, type ViewStyle } from 'react-native';
+
+/** Gentle fade in and out so placeholders read as "loading", not as empty boxes. */
+export function SkeletonPulse({ children, style }: { children: ReactNode; style?: ViewStyle }) {
+  const opacity = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.45, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [opacity]);
+  return <Animated.View style={[style, { opacity }]}>{children}</Animated.View>;
+}
+
+/** Horizontal row of card placeholders (live, following, sellers rows on Home). */
+export function CardRowSkeleton({
+  count = 3,
+  width,
+  height,
+  lines = 2,
+  round = false,
+}: {
+  count?: number;
+  width: number;
+  height: number;
+  lines?: number;
+  round?: boolean;
+}) {
+  return (
+    <SkeletonPulse style={styles.cardRow}>
+      {Array.from({ length: count }).map((_, i) => (
+        <View key={i} style={{ width }}>
+          <View
+            style={[
+              styles.cardImage,
+              { height },
+              round && { width: height, borderRadius: height / 2, alignSelf: 'center' },
+            ]}
+          />
+          {Array.from({ length: lines }).map((__, j) => (
+            <View key={j} style={[styles.line, { width: j === 0 ? '80%' : '50%', marginTop: j === 0 ? 10 : 6 }]} />
+          ))}
+        </View>
+      ))}
+    </SkeletonPulse>
+  );
+}
 
 type Props = { style?: ViewStyle; rows?: number };
 
@@ -20,9 +71,9 @@ export function LoadingSkeleton({ style, rows = 3 }: Props) {
   );
 }
 
-export function ListingGridSkeleton({ count = 4 }: { count?: number }) {
+export function ListingGridSkeleton({ count = 4, inset = true }: { count?: number; inset?: boolean }) {
   return (
-    <View style={styles.grid}>
+    <SkeletonPulse style={[styles.grid, !inset && { paddingHorizontal: 0 }] as unknown as ViewStyle}>
       {Array.from({ length: count }).map((_, i) => (
         <View key={i} style={styles.gridItem}>
           <View style={styles.gridImage} />
@@ -30,7 +81,7 @@ export function ListingGridSkeleton({ count = 4 }: { count?: number }) {
           <View style={[styles.line, { width: '50%', marginTop: 6 }]} />
         </View>
       ))}
-    </View>
+    </SkeletonPulse>
   );
 }
 
@@ -54,6 +105,8 @@ export function SellerProfileSkeleton() {
 
 const styles = StyleSheet.create({
   wrap: { gap: 14 },
+  cardRow: { flexDirection: 'row', gap: 12, paddingHorizontal: 20 },
+  cardImage: { borderRadius: Radius.sm, backgroundColor: Palette.skeleton },
   row: { flexDirection: 'row', gap: 13 },
   thumb: {
     width: 58,

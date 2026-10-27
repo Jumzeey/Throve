@@ -1,11 +1,11 @@
 import { OfflineBanner } from '@/components/ui/alert-banner';
 import { AppImage } from '@/components/ui/app-image';
-import { EmptyState } from '@/components/ui/empty-state';
 import { HomeBannerCarousel } from '@/components/home/home-banner-carousel';
 import { BellIcon, BookmarkIcon, ImagePlaceholderIcon, SearchIcon } from '@/components/ui/icons';
 import { LiquidRefreshScrollView, usePullRefresh } from '@/components/ui/liquid-pull-refresh';
 import { ListingCard } from '@/components/ui/listing-card';
 import { ListingGrid } from '@/components/ui/listing-grid';
+import { CardRowSkeleton, ListingGridSkeleton } from '@/components/ui/loading-skeleton';
 import { ProfileAvatar } from '@/components/ui/profile-avatar';
 import { ThroveLogo } from '@/components/ui/throve-logo';
 import { Palette, Radius, Typography } from '@/constants/theme';
@@ -22,7 +22,7 @@ import { FOLLOWING_PREVIEW_PER_SELLER, latestPerSeller } from '@/lib/following-f
 import { useNetworkStatus } from '@/hooks/use-network-status';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useScreenInsets } from '@/hooks/use-screen-insets';
 
 const DEPARTMENT_IMAGES = {
@@ -179,7 +179,13 @@ export default function HomeScreen() {
   const { top, tabScrollBottom } = useScreenInsets();
   const router = useRouter();
   const { session, publicProfiles, ensurePublicProfile } = useAuth();
-  const { listings: catalog, followingListings, toggleSave, refresh: refreshListings } = useListings();
+  const {
+    listings: catalog,
+    followingListings,
+    toggleSave,
+    refresh: refreshListings,
+    loading: listingsLoading,
+  } = useListings();
   const { unreadCount } = useNotifications();
   const { isConnected } = useNetworkStatus();
   const listings = useMemo(() => filterListings(catalog).slice(0, 4), [catalog]);
@@ -187,7 +193,10 @@ export default function HomeScreen() {
     () => latestPerSeller(followingListings, FOLLOWING_PREVIEW_PER_SELLER),
     [followingListings],
   );
-  const { liveNow, upcoming, refresh: refreshLive, isLiveSaved, toggleSaveLive } = useLive();
+  const { liveNow, upcoming, refresh: refreshLive, isLiveSaved, toggleSaveLive, loading: liveLoading } = useLive();
+  // Placeholders only on the first load; a refresh keeps showing what's already there.
+  const listingsPending = listingsLoading && catalog.length === 0;
+  const livePending = liveLoading && liveNow.length === 0 && upcoming.length === 0;
 
   const sellers = useMemo(() => Array.from(new Set(catalog.map((l) => l.seller))).slice(0, 3), [catalog]);
 
@@ -254,6 +263,13 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {livePending ? (
+          <View style={styles.section}>
+            <SectionHeading title="Live now" liveDot />
+            <CardRowSkeleton count={2} width={208} height={250} lines={0} />
+          </View>
+        ) : null}
+
         {liveNow.length > 0 ? (
           <View style={styles.section}>
             <SectionHeading title="Live now" liveDot onSeeAll={() => router.push('/(tabs)/live')} />
@@ -310,13 +326,15 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
-        {session ? (
+        {session && (listingsPending || followingFeed.length > 0) ? (
           <View style={styles.section}>
             <SectionHeading
               title="From sellers you follow"
-              onSeeAll={() => router.push('/following')}
+              onSeeAll={listingsPending ? undefined : () => router.push('/following')}
             />
-            {followingFeed.length > 0 ? (
+            {listingsPending ? (
+              <CardRowSkeleton count={3} width={132} height={170} />
+            ) : (
               <ScrollView
                 horizontal
                 nestedScrollEnabled
@@ -339,22 +357,19 @@ export default function HomeScreen() {
                   </View>
                 ))}
               </ScrollView>
-            ) : (
-              <View style={styles.listingsBody}>
-                <EmptyState
-                  title="Your feed is empty"
-                  message="Follow sellers you love — their new listings will show up here."
-                />
-              </View>
             )}
           </View>
         ) : null}
 
+        {listingsPending || listings.length > 0 ? (
         <View style={styles.section}>
-          <SectionHeading title="New listings" onSeeAll={() => router.push('/category-browse')} />
-          {listings.length === 0 ? (
+          <SectionHeading
+            title="New listings"
+            onSeeAll={listingsPending ? undefined : () => router.push('/category-browse')}
+          />
+          {listingsPending ? (
             <View style={styles.listingsBody}>
-              <EmptyState title="Nothing here yet" message="Check back soon for new curated finds." />
+              <ListingGridSkeleton count={4} inset={false} />
             </View>
           ) : (
             <View style={styles.listingsBody}>
@@ -376,6 +391,14 @@ export default function HomeScreen() {
             </View>
           )}
         </View>
+        ) : null}
+
+        {listingsPending ? (
+          <View style={styles.section}>
+            <SectionHeading title="Sellers to discover" />
+            <CardRowSkeleton count={3} width={128} height={64} round />
+          </View>
+        ) : null}
 
         {sellers.length > 0 ? (
           <View style={styles.section}>
