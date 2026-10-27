@@ -11,6 +11,7 @@ import { StatusBadge, type StatusTone } from '@/components/admin/status-badge';
 import { CopyableId } from '@/components/admin/copyable-id';
 import { ListWindowFooter } from '@/components/admin/list-window-footer';
 import { Timeline } from '@/components/admin/timeline';
+import { PhotoLightbox } from '@/components/admin/photo-lightbox';
 import { BleedSplit } from '@/components/layout/bleed-split';
 import { usePageChrome } from '@/components/layout/shell-chrome';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -197,6 +198,7 @@ export function ListingsPage() {
   const [pendingCount, setPendingCount] = useState(0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
+  const [photoIndex, setPhotoIndex] = useState<number | null>(null);
 
   const canApprove = session ? canAct(session.role, 'approve_listing') : false;
   const canReject = session ? canAct(session.role, 'reject_listing') : false;
@@ -324,6 +326,9 @@ export function ListingsPage() {
   }, [liveMode, selectedId, loadSelectedDetail]);
 
   const listWindow = useListWindow(rows);
+
+  // A different listing starts with the photo viewer closed.
+  useEffect(() => setPhotoIndex(null), [selectedId]);
 
   const selected = listings.find((l) => l.id === selectedId) ?? null;
   const selectedFlash = selected ? overrides[selected.id]?.flash : null;
@@ -659,16 +664,23 @@ export function ListingsPage() {
                   </div>
                   <div className="grid grid-cols-4 gap-2">
                     {(selected.photoUrls.length
-                      ? selected.photoUrls.slice(0, 4)
+                      ? selected.photoUrls
                       : Array.from({ length: Math.min(4, Math.max(1, selected.photoCount)) }).map(() => '')
                     ).map((url, i) =>
                       url ? (
-                        <img
+                        <button
                           key={`${selected.id}-p-${i}`}
-                          src={url}
-                          alt=""
-                          className="aspect-square rounded-[4px] border border-[#e2d7cc] object-cover"
-                        />
+                          type="button"
+                          onClick={() => setPhotoIndex(i)}
+                          aria-label={`View photo ${i + 1}`}
+                          className="group relative overflow-hidden rounded-[4px] border border-[#e2d7cc] focus-visible:ring-2 focus-visible:ring-plum focus-visible:outline-none"
+                        >
+                          <img
+                            src={url}
+                            alt=""
+                            className="aspect-square w-full cursor-zoom-in object-cover transition-transform duration-200 group-hover:scale-[1.04]"
+                          />
+                        </button>
                       ) : (
                         <div
                           key={`${selected.id}-ph-${i}`}
@@ -852,6 +864,14 @@ export function ListingsPage() {
             </>
           )
         }
+      />
+
+      <PhotoLightbox
+        photos={selected?.photoUrls ?? []}
+        index={photoIndex}
+        title={selected?.title}
+        onIndexChange={setPhotoIndex}
+        onClose={() => setPhotoIndex(null)}
       />
 
       {confirm === 'approve' && selected ? (
